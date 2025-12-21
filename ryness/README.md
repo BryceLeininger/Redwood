@@ -36,6 +36,12 @@ Add a short GPT summary:
 python -m ryness.query "How did Alameda compare to Contra Costa this week?" --db ryness.db --analysis
 ```
 
+## Batch ingest a folder
+
+```bash
+python -m ryness.batch_ingest "C:\path\to\RynessReportsPDFs" --db ryness.db
+```
+
 ## Tables
 
 - `reports`
