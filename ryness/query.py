@@ -41,13 +41,13 @@ def strip_sql(text):
     text = text.strip()
     if text.startswith("```"):
         text = re.sub(r"^```[a-zA-Z]*", "", text).strip()
-        text = re.sub(r"```$", "", text).strip()
+        text = re.sub(r"```\s*$", "", text).strip()
     return text.strip()
 
 
 def extract_select(text):
     cleaned = strip_sql(text)
-    match = re.search(r"(?is)\\bselect\\b.*", cleaned)
+    match = re.search(r"(?is)\bselect\b.*", cleaned)
     if not match:
         return cleaned
     sql = match.group(0).strip()
@@ -58,7 +58,7 @@ def extract_select(text):
 
 def ensure_select(sql):
     sql = extract_select(sql)
-    if not re.match(r"(?is)^select\\b", sql):
+    if not re.match(r"(?is)^select\b", sql.strip()):
         raise ValueError("Model did not return a SELECT statement.")
     if ";" in sql.strip().rstrip(";"):
         raise ValueError("Model returned multiple statements.")
@@ -68,7 +68,7 @@ def ensure_select(sql):
 def maybe_add_limit(sql, limit):
     if limit is None:
         return sql
-    if re.search(r"\\blimit\\b", sql, flags=re.I):
+    if re.search(r"\blimit\b", sql, flags=re.I):
         return sql
     return f"{sql} LIMIT {limit}"
 
@@ -137,7 +137,11 @@ def analyze_results(model, question, rows):
     client = OpenAI(api_key=api_key)
     preview = rows[:50]
     system = "You summarize SQL results for real estate reporting. Keep it concise."
-    user = f"Question: {question}\\nRows: {preview}"
+    user = (
+        f"Question: {question}\\n"
+        "Here are the query results as a tab-separated table (first 50 rows max):\\n"
+        f"{render_rows(preview)}"
+    )
     resp = client.chat.completions.create(
         model=model,
         messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
