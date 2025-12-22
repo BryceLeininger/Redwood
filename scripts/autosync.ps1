@@ -14,9 +14,18 @@ function Exec([string]$cmd) {
 }
 
 function ExecGit([string[]]$GitArgs) {
-  $out = & git @GitArgs 2>&1
-  $code = $LASTEXITCODE
-  return @{ Output = $out; ExitCode = $code }
+  $oldEap = $ErrorActionPreference
+  try {
+    # Some native commands write progress/info to stderr; don't treat that as a terminating error.
+    $ErrorActionPreference = "Continue"
+    $out = & git @GitArgs 2>&1
+    $code = $LASTEXITCODE
+    return @{ Output = $out; ExitCode = $code }
+  } catch {
+    return @{ Output = $_.Exception.Message; ExitCode = 1 }
+  } finally {
+    $ErrorActionPreference = $oldEap
+  }
 }
 
 # Ensure we're in a git repo
