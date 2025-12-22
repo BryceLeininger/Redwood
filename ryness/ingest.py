@@ -225,6 +225,29 @@ def group_words_by_line(words, y_tol=2):
     return lines
 
 
+def parse_city_codes_from_text(text):
+    rows = []
+    for line in (text or "").splitlines():
+        if "City Codes:" not in line:
+            continue
+        tail = line.split("City Codes:", 1)[1].strip()
+        if not tail:
+            continue
+        for part in tail.split(","):
+            part = part.strip()
+            if not part:
+                continue
+            if "=" not in part:
+                continue
+            code, name = part.split("=", 1)
+            code = code.strip()
+            name = name.strip()
+            if not code or not name:
+                continue
+            rows.append({"city_code": code, "city_name": name})
+    return rows
+
+
 PROJECT_COLS = [
     ("development_name", 20),
     ("developer", 150),
@@ -263,8 +286,13 @@ def assign_project_columns(words):
 def parse_project_tables(pdf):
     rows = []
     totals_rows = []
+    city_code_rows = []
     for page in pdf.pages:
         text = page.extract_text() or ""
+
+        if "City Codes:" in text:
+            city_code_rows.extend(parse_city_codes_from_text(text))
+
         if "Development Name Developer City Code Notes Type" not in text:
             continue
         county_group = None
@@ -330,7 +358,12 @@ def parse_project_tables(pdf):
                     "avg_sales_ytd": to_float(row["avg_sales_ytd"]),
                 }
             )
-    return rows, totals_rows
+    dedup = {}
+    for r in city_code_rows:
+        key = r["city_code"]
+        if key and key not in dedup:
+            dedup[key] = r
+    return rows, totals_rows, list(dedup.values())
 
 
 def parse_mls_surveys(pdf):
@@ -467,7 +500,7 @@ def ingest(pdf_path, db_path):
                 ),
             )
 
-        project_rows, totals_rows = parse_project_tables(pdf)
+        project_rows, totals_rows, city_code_rows = parse_project_tables(pdf)
         for row in project_rows:
             cur.execute(
                 """
@@ -513,6 +546,19 @@ def ingest(pdf_path, db_path):
                     row.get("avg_sales"),
                     row.get("traffic_to_sales"),
                     row.get("net_sales"),
+                ),
+            )
+
+        for row in city_code_rows:
+            cur.execute(
+                """
+                INSERT OR IGNORE INTO city_codes (report_id, city_code, city_name)
+                VALUES (?, ?, ?)
+                """,
+                (
+                    report_id,
+                    row.get("city_code"),
+                    row.get("city_name"),
                 ),
             )
 

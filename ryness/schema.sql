@@ -93,3 +93,36 @@ CREATE TABLE IF NOT EXISTS mls_survey (
   closed INTEGER,
   avg_price INTEGER
 );
+
+CREATE TABLE IF NOT EXISTS city_codes (
+  report_id INTEGER NOT NULL REFERENCES reports(id),
+  city_code TEXT NOT NULL,
+  city_name TEXT NOT NULL,
+  PRIMARY KEY (report_id, city_code)
+);
+
+CREATE VIEW IF NOT EXISTS project_stats_with_city AS
+SELECT
+  ps.report_id,
+  ps.county_group,
+  ps.projects_participating,
+  ps.development_name,
+  ps.developer,
+  ps.city_code,
+  cc.city_name,
+  ps.notes,
+  ps.product_type,
+  ps.units,
+  ps.new_release,
+  ps.released_remaining,
+  ps.traffic,
+  ps.wk_sales,
+  ps.wk_cancels,
+  ps.sold_to_date,
+  ps.sold_ytd,
+  ps.avg_sales_week,
+  ps.avg_sales_ytd
+FROM project_stats ps
+LEFT JOIN city_codes cc
+  ON cc.report_id = ps.report_id
+ AND cc.city_code = ps.city_code;

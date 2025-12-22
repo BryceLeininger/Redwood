@@ -84,7 +84,9 @@ def call_openai(model, schema, question):
     system = (
         "You are a careful SQL generator for SQLite. "
         "Return only a single SELECT statement and nothing else. "
-        "No comments, no code fences, no markdown."
+        "No comments, no code fences, no markdown. "
+        "If a question references a city name (e.g., Oakland), prefer joining via city_codes or using the view project_stats_with_city (city_name) rather than guessing city_code values. "
+        "For 'most recent week', prefer the latest reports.id or reports.created_at."
     )
     user = f"Schema:\\n{schema}\\n\\nQuestion:\\n{question}"
     resp = client.chat.completions.create(
