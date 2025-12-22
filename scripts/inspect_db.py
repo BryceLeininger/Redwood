@@ -13,6 +13,18 @@ def main() -> None:
     rid = cur.execute("select max(id) from reports").fetchone()[0]
     print("latest_report_id", rid)
 
+    oak_any = cur.execute(
+        "select max(report_id) from city_codes where city_name like 'Oakland%'"
+    ).fetchone()[0]
+    print("most_recent_report_with_oakland", oak_any)
+
+    if oak_any is not None:
+        oak_any_rows = cur.execute(
+            "select city_code, city_name from city_codes where report_id=? and city_name like 'Oakland%'",
+            (oak_any,),
+        ).fetchall()
+        print("oakland_rows_in_city_codes_for_that_report", oak_any_rows)
+
     oak = cur.execute(
         "select city_code, city_name from city_codes where report_id=? and city_name like 'Oakland%'",
         (rid,),
