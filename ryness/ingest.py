@@ -226,26 +226,38 @@ def group_words_by_line(words, y_tol=2):
 
 
 def parse_city_codes_from_text(text):
-    rows = []
+    tails = []
     for line in (text or "").splitlines():
         if "City Codes:" not in line:
             continue
         tail = line.split("City Codes:", 1)[1].strip()
-        if not tail:
+        if tail:
+            tails.append(tail)
+
+    if not tails:
+        return []
+
+    blob = re.sub(r"\s+", " ", " ".join(tails)).strip()
+    rows = []
+    for m in re.finditer(r"\b([A-Za-z]{1,4})\s*=\s*([^,]+)", blob):
+        code = m.group(1).strip().upper()
+        name = m.group(2).strip()
+        if not code or not name:
             continue
-        for part in tail.split(","):
-            part = part.strip()
-            if not part:
-                continue
-            if "=" not in part:
-                continue
-            code, name = part.split("=", 1)
-            code = code.strip()
-            name = name.strip()
-            if not code or not name:
-                continue
-            rows.append({"city_code": code, "city_name": name})
+        rows.append({"city_code": code, "city_name": name})
     return rows
+
+
+def normalize_city_code(value):
+    if value is None:
+        return ""
+    text = str(value).strip()
+    if not text:
+        return ""
+    m = re.match(r"^[A-Za-z]{1,4}", text)
+    if m:
+        return m.group(0).upper()
+    return text.upper()
 
 
 PROJECT_COLS = [
@@ -343,7 +355,7 @@ def parse_project_tables(pdf):
                     "projects_participating": projects_participating,
                     "development_name": row["development_name"],
                     "developer": row["developer"],
-                    "city_code": row["city_code"],
+                    "city_code": normalize_city_code(row["city_code"]),
                     "notes": row["notes"],
                     "product_type": row["product_type"],
                     "units": to_int(row["units"]),
