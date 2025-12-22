@@ -18,11 +18,19 @@ python -m ryness.ingest "092825 NorCal Ryness Report.pdf" --db ryness.db
 
 ## Natural language query (OpenAI)
 
-Set your API key:
+Set your API key (pick one):
 
 ```bash
 setx OPENAI_API_KEY "your-key"
 ```
+
+Or save it once to a file (no env vars needed):
+
+```bash
+notepad ryness\.openai_key
+```
+
+Paste the key into that file, save, and you’re done.
 
 Ask a question:
 

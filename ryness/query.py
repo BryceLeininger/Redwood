@@ -6,6 +6,24 @@ import sqlite3
 from openai import OpenAI
 
 
+def load_api_key():
+    env_key = os.environ.get("OPENAI_API_KEY")
+    if env_key:
+        return env_key
+
+    candidates = [
+        pathlib.Path("ryness/.openai_key"),
+        pathlib.Path(".openai_key"),
+        pathlib.Path.home() / ".ryness_openai_key",
+    ]
+    for path in candidates:
+        if path.exists():
+            key = path.read_text(encoding="utf-8").strip()
+            if key:
+                return key
+    return None
+
+
 def load_schema(conn):
     rows = conn.execute(
         "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
@@ -44,9 +62,12 @@ def maybe_add_limit(sql, limit):
 
 
 def call_openai(model, schema, question):
-    client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
-    if not client.api_key:
-        raise EnvironmentError("OPENAI_API_KEY is not set.")
+    api_key = load_api_key()
+    if not api_key:
+        raise EnvironmentError(
+            "OpenAI API key not found. Set OPENAI_API_KEY or create ryness/.openai_key."
+        )
+    client = OpenAI(api_key=api_key)
 
     system = (
         "You are a careful SQL generator for SQLite. "
@@ -73,7 +94,12 @@ def render_rows(rows):
 
 
 def analyze_results(model, question, rows):
-    client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+    api_key = load_api_key()
+    if not api_key:
+        raise EnvironmentError(
+            "OpenAI API key not found. Set OPENAI_API_KEY or create ryness/.openai_key."
+        )
+    client = OpenAI(api_key=api_key)
     preview = rows[:50]
     system = "You summarize SQL results for real estate reporting. Keep it concise."
     user = f"Question: {question}\\nRows: {preview}"
