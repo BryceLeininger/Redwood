@@ -60,7 +60,7 @@ while ($true) {
 
     # Commit (will fail if nothing is staged)
     $ts = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-    $msg = "$CommitMessagePrefix: $ts"
+    $msg = "${CommitMessagePrefix}: $ts"
     $commit = ExecGit @("commit","-m",$msg)
     if ($commit.ExitCode -ne 0) {
       $txt = ($commit.Output | Out-String)
