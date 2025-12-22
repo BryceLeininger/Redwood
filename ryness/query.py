@@ -185,7 +185,13 @@ def main():
             raise
     sql = maybe_add_limit(sql, args.limit)
 
-    rows = conn.execute(sql).fetchall()
+    try:
+        rows = conn.execute(sql).fetchall()
+    except sqlite3.Error:
+        print("SQL:")
+        print(sql)
+        print("")
+        raise
     print("SQL:")
     print(sql)
     print("")
