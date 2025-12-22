@@ -197,8 +197,8 @@ def parse_yearly_comparison(page):
         avg_weekly_traffic = to_float(nums[2])
         avg_weekly_sales = to_float(nums[3])
         avg_weekly_cancels = to_float(nums[4])
-        avg_project_sales = to_float(row[6])
-        year_end_avg_proj_sales = to_float(row[7])
+        avg_project_sales = to_float(row[6]) if len(row) > 6 else None
+        year_end_avg_proj_sales = to_float(row[7]) if len(row) > 7 else None
         if year is None:
             continue
         rows.append(
