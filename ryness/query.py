@@ -153,15 +153,29 @@ def main():
     parser.add_argument("--model", default="gpt-4o-mini", help="OpenAI model name.")
     parser.add_argument("--limit", type=int, default=200, help="Row limit when SQL has none.")
     parser.add_argument("--analysis", action="store_true", help="Ask GPT to summarize results.")
+    parser.add_argument("--debug", action="store_true", help="Print raw model output on failures.")
     args = parser.parse_args()
 
     conn = sqlite3.connect(args.db)
     conn.row_factory = sqlite3.Row
     schema = load_schema(conn)
     try:
-        sql = ensure_select(call_openai(args.model, schema, args.question))
+        raw = call_openai(args.model, schema, args.question)
+        sql = ensure_select(raw)
     except ValueError:
-        sql = ensure_select(call_openai_strict(args.model, schema, args.question))
+        if args.debug:
+            print("RAW MODEL OUTPUT (chat):")
+            print(raw)
+            print("")
+        raw_strict = call_openai_strict(args.model, schema, args.question)
+        try:
+            sql = ensure_select(raw_strict)
+        except ValueError:
+            if args.debug:
+                print("RAW MODEL OUTPUT (strict):")
+                print(raw_strict)
+                print("")
+            raise
     sql = maybe_add_limit(sql, args.limit)
 
     rows = conn.execute(sql).fetchall()
