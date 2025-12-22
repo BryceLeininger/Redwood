@@ -1,0 +1,31 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Smoke Test: Top 5 weekly sales",
+			"type": "shell",
+			"command": "python",
+			"args": [
+				"-m",
+				"ryness.query",
+				"Top 5 projects by weekly sales",
+				"--db",
+				"ryness.db"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "Smoke Test: Oakland most recent week",
+			"type": "shell",
+			"command": "python",
+			"args": [
+				"-m",
+				"ryness.query",
+				"show me the communities in Oakland in the most recent week",
+				"--db",
+				"ryness.db"
+			],
+			"isBackground": false
+		}
+	]
+}

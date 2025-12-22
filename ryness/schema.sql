@@ -101,7 +101,9 @@ CREATE TABLE IF NOT EXISTS city_codes (
   PRIMARY KEY (report_id, city_code)
 );
 
-CREATE VIEW IF NOT EXISTS project_stats_with_city AS
+DROP VIEW IF EXISTS project_stats_with_city;
+
+CREATE VIEW project_stats_with_city AS
 SELECT
   ps.report_id,
   ps.county_group,
@@ -125,4 +127,4 @@ SELECT
 FROM project_stats ps
 LEFT JOIN city_codes cc
   ON cc.report_id = ps.report_id
- AND cc.city_code = ps.city_code;
+ AND upper(cc.city_code) = upper(ps.city_code);
