@@ -27,13 +27,16 @@ def load_api_key():
 
 def load_schema(conn):
     rows = conn.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+        "SELECT name, type FROM sqlite_master "
+        "WHERE type IN ('table','view') AND name NOT LIKE 'sqlite_%' "
+        "ORDER BY type, name"
     ).fetchall()
     lines = []
-    for (name,) in rows:
+    for (name, obj_type) in rows:
         cols = conn.execute(f"PRAGMA table_info({name})").fetchall()
         col_defs = ", ".join(f"{col[1]} {col[2]}" for col in cols)
-        lines.append(f"{name}({col_defs})")
+        prefix = "VIEW" if obj_type == "view" else "TABLE"
+        lines.append(f"{prefix} {name}({col_defs})")
     return "\n".join(lines)
 
 
@@ -88,7 +91,8 @@ def call_openai(model, schema, question):
         "If a question references a city name (e.g., Oakland), prefer using the view project_stats_with_city (city_name) rather than guessing city_code values. "
         "Important: project_stats_with_city is a VIEW/table. Use it in FROM/JOIN (e.g., 'FROM project_stats_with_city'), never like a function call. "
         "If you join city_codes directly, always join on BOTH report_id and city_code. "
-        "For 'most recent week', prefer the latest reports.id or reports.created_at."
+        "City codes may appear with varying case (e.g., 'Ok' vs 'OK'); treat city_code comparisons as case-insensitive. "
+        "For 'most recent week': if the question is city-specific, prefer the most recent report that contains that city (via project_stats_with_city.city_name or city_codes.city_name); otherwise use the latest reports.id/created_at."
     )
     user = f"Schema:\\n{schema}\\n\\nQuestion:\\n{question}"
     resp = client.chat.completions.create(
