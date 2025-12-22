@@ -42,11 +42,22 @@ def strip_sql(text):
     if text.startswith("```"):
         text = re.sub(r"^```[a-zA-Z]*", "", text).strip()
         text = re.sub(r"```$", "", text).strip()
-    return text
+    return text.strip()
+
+
+def extract_select(text):
+    cleaned = strip_sql(text)
+    match = re.search(r"(?is)\\bselect\\b.*", cleaned)
+    if not match:
+        return cleaned
+    sql = match.group(0).strip()
+    if ";" in sql:
+        sql = sql.split(";", 1)[0].strip()
+    return sql
 
 
 def ensure_select(sql):
-    sql = strip_sql(sql)
+    sql = extract_select(sql)
     if not re.match(r"(?is)^select\\b", sql):
         raise ValueError("Model did not return a SELECT statement.")
     if ";" in sql.strip().rstrip(";"):
