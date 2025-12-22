@@ -95,6 +95,29 @@ def call_openai(model, schema, question):
     return resp.choices[0].message.content or ""
 
 
+def call_openai_strict(model, schema, question):
+    api_key = load_api_key()
+    if not api_key:
+        raise EnvironmentError(
+            "OpenAI API key not found. Set OPENAI_API_KEY or create ryness/.openai_key."
+        )
+    client = OpenAI(api_key=api_key)
+    prompt = (
+        "You are a SQL generator for SQLite. "
+        "Return only a single SELECT statement. No explanations."
+    )
+    user = f"Schema:\\n{schema}\\n\\nQuestion:\\n{question}"
+    resp = client.responses.create(
+        model=model,
+        input=[
+            {"role": "system", "content": prompt},
+            {"role": "user", "content": user},
+        ],
+        temperature=0,
+    )
+    return resp.output_text or ""
+
+
 def render_rows(rows):
     if not rows:
         return "(no rows)"
@@ -135,7 +158,10 @@ def main():
     conn = sqlite3.connect(args.db)
     conn.row_factory = sqlite3.Row
     schema = load_schema(conn)
-    sql = ensure_select(call_openai(args.model, schema, args.question))
+    try:
+        sql = ensure_select(call_openai(args.model, schema, args.question))
+    except ValueError:
+        sql = ensure_select(call_openai_strict(args.model, schema, args.question))
     sql = maybe_add_limit(sql, args.limit)
 
     rows = conn.execute(sql).fetchall()
