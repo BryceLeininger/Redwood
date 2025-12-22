@@ -238,10 +238,20 @@ def parse_city_codes_from_text(text):
         return []
 
     blob = re.sub(r"\s+", " ", " ".join(tails)).strip()
+    if not blob:
+        return []
+
+    # City code legends are often formatted like:
+    #   "Ok = Oakland, DB = Dublin"  (commas optional)
+    # so we capture each CODE = NAME, where NAME runs until the next CODE = ...
+    pair_pattern = re.compile(
+        r"\b([A-Za-z]{1,4})\s*=\s*(.+?)(?=(?:\b[A-Za-z]{1,4}\s*=)|$)"
+    )
+
     rows = []
-    for m in re.finditer(r"\b([A-Za-z]{1,4})\s*=\s*([^,]+)", blob):
+    for m in pair_pattern.finditer(blob):
         code = m.group(1).strip().upper()
-        name = m.group(2).strip()
+        name = m.group(2).strip().strip(" ,;\t")
         if not code or not name:
             continue
         rows.append({"city_code": code, "city_name": name})

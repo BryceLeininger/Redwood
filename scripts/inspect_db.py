@@ -19,6 +19,11 @@ def main() -> None:
     print("most_recent_report_with_oakland", oak_any)
 
     if oak_any is not None:
+        meta = cur.execute(
+            "select filename, report_week_ending, report_week_num from reports where id=?",
+            (oak_any,),
+        ).fetchone()
+        print("oakland_report_meta", meta)
         oak_any_rows = cur.execute(
             "select city_code, city_name from city_codes where report_id=? and city_name like 'Oakland%'",
             (oak_any,),
