@@ -95,12 +95,24 @@ while ($true) {
     }
 
     if (-not $NoPush) {
-      $push = ExecGit @("push")
-      if ($push.ExitCode -ne 0) {
-        Write-Host "[autosync] git push failed. You may need to sign in / set upstream." -ForegroundColor Red
-        Write-Host $push.Output
-        Start-Sleep -Seconds $IntervalSeconds
-        continue
+      $maxPushAttempts = 3
+      for ($attempt = 1; $attempt -le $maxPushAttempts; $attempt++) {
+        $push = ExecGit @("push")
+        if ($push.ExitCode -eq 0) {
+          break
+        }
+
+        $pushText = ($push.Output | Out-String)
+        Write-Host "[autosync] git push failed (attempt $attempt/$maxPushAttempts)." -ForegroundColor Red
+        Write-Host $pushText
+
+        if ($pushText -match "cannot lock ref") {
+          Start-Sleep -Seconds (5 * $attempt)
+          continue
+        }
+
+        Write-Host "[autosync] You may need to sign in / set upstream, or resolve divergence." -ForegroundColor Red
+        break
       }
     }
 
