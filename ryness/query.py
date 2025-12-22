@@ -85,7 +85,8 @@ def call_openai(model, schema, question):
         "You are a careful SQL generator for SQLite. "
         "Return only a single SELECT statement and nothing else. "
         "No comments, no code fences, no markdown. "
-        "If a question references a city name (e.g., Oakland), prefer joining via city_codes or using the view project_stats_with_city (city_name) rather than guessing city_code values. "
+        "If a question references a city name (e.g., Oakland), prefer using the view project_stats_with_city (city_name) rather than guessing city_code values. "
+        "If you join city_codes directly, always join on BOTH report_id and city_code. "
         "For 'most recent week', prefer the latest reports.id or reports.created_at."
     )
     user = f"Schema:\\n{schema}\\n\\nQuestion:\\n{question}"
