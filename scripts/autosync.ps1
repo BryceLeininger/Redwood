@@ -13,8 +13,8 @@ function Exec([string]$cmd) {
   return @{ Output = $out; ExitCode = $code }
 }
 
-function ExecGit([string[]]$args) {
-  $out = & git @args 2>&1
+function ExecGit([string[]]$GitArgs) {
+  $out = & git @GitArgs 2>&1
   $code = $LASTEXITCODE
   return @{ Output = $out; ExitCode = $code }
 }
