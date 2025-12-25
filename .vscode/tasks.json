@@ -26,6 +26,21 @@
 				"ryness.db"
 			],
 			"isBackground": false
+		},
+		{
+			"label": "Rebuild DB (scripts/rebuild_db.py)",
+			"type": "shell",
+			"command": "python",
+			"args": [
+				".\\scripts\\rebuild_db.py",
+				"--db",
+				".\\ryness.db",
+				"--timeout",
+				"180"
+			],
+			"isBackground": true,
+			"problemMatcher": [],
+			"group": "build"
 		}
 	]
 }
