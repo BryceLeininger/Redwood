@@ -4,13 +4,14 @@ from __future__ import annotations
 import sys
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Optional
+from typing import List, Optional
 
 import pandas as pd
 
 from config import ConfigError, load_config
 from tools.fred_tool import fetch_observations
 from tools.logger import get_logger
+from tools.series_resolver import SeriesCandidate, resolve
 from tools.storage_tool import save_raw_csv, update_master_dataset
 
 _DATE_FORMAT = "%Y-%m-%d"
@@ -19,21 +20,73 @@ _DATE_FORMAT = "%Y-%m-%d"
 @dataclass(frozen=True)
 class UserRequest:
     series_id: str
+    series_title: Optional[str]
     start_date: Optional[str]
     end_date: Optional[str]
     append_to_master: bool
 
 
-def _prompt_user_inputs() -> UserRequest:
-    series_id = input("Enter the FRED series ID: ").strip()
-    if not series_id:
-        raise ValueError("Series ID cannot be empty.")
+def _prompt_date(prompt: str, default: Optional[str]) -> Optional[str]:
+    if default:
+        message = f"{prompt} [{default}]: "
+    else:
+        message = f"{prompt} (YYYY-MM-DD, optional): "
+    value = input(message).strip()
+    if not value:
+        return default
+    return _parse_date_or_none(value)
 
-    start_date_raw = input("Enter the start date (YYYY-MM-DD, optional): ").strip()
-    end_date_raw = input("Enter the end date (YYYY-MM-DD, optional): ").strip()
 
-    start_date = _parse_date_or_none(start_date_raw)
-    end_date = _parse_date_or_none(end_date_raw)
+def _select_series_candidate(candidates: List[SeriesCandidate]) -> SeriesCandidate:
+    if not candidates:
+        raise ValueError("No series candidates were returned.")
+    if len(candidates) == 1:
+        return candidates[0]
+
+    print("\nMultiple series found:")
+    for idx, candidate in enumerate(candidates, start=1):
+        frequency = f" [{candidate.frequency}]" if candidate.frequency else ""
+        units = f" ({candidate.units})" if candidate.units else ""
+        print(f"{idx}) {candidate.series_id} — {candidate.title}{frequency}{units}")
+
+    selection_raw = input(f"Choose 1-{len(candidates)}: ").strip()
+    if not selection_raw:
+        raise ValueError("Selection is required.")
+    try:
+        selection = int(selection_raw)
+    except ValueError as error:
+        raise ValueError("Selection must be a number.") from error
+    if not (1 <= selection <= len(candidates)):
+        raise ValueError("Selection out of range.")
+
+    return candidates[selection - 1]
+
+
+def _gather_user_request(api_key: str, logger) -> UserRequest:
+    query_text = input("What do you want from FRED? ").strip()
+    if not query_text:
+        raise ValueError("Query cannot be empty.")
+
+    resolution = resolve(query_text, api_key)
+    candidate = _select_series_candidate(resolution.candidates)
+
+    print(f"\nSelected series: {candidate.series_id} — {candidate.title}")
+    logger.info("Resolved query '%s' to '%s' (%s)", resolution.cleaned_query or query_text, candidate.series_id, candidate.title)
+
+    start_date = resolution.start_date
+    end_date = resolution.end_date
+
+    if start_date:
+        print(f"Detected start date: {start_date}")
+        start_date = _prompt_date("Enter start date (press Enter to keep detected value)", start_date)
+    else:
+        start_date = _prompt_date("Enter the start date", None)
+
+    if end_date:
+        print(f"Detected end date: {end_date}")
+        end_date = _prompt_date("Enter end date (press Enter to keep detected value)", end_date)
+    else:
+        end_date = _prompt_date("Enter the end date", None)
 
     if start_date and end_date and start_date > end_date:
         raise ValueError("Start date must be earlier than or equal to end date.")
@@ -42,7 +95,8 @@ def _prompt_user_inputs() -> UserRequest:
     append_to_master = append_choice == "y"
 
     return UserRequest(
-        series_id=series_id,
+        series_id=candidate.series_id,
+        series_title=candidate.title or None,
         start_date=start_date,
         end_date=end_date,
         append_to_master=append_to_master,
@@ -97,11 +151,12 @@ def main() -> None:
 
     while True:
         try:
-            request = _prompt_user_inputs()
+            request = _gather_user_request(config.api_key, logger)
 
             logger.info(
-                "Fetching series '%s' with start=%s end=%s",
+                "Fetching series '%s' (%s) with start=%s end=%s",
                 request.series_id,
+                request.series_title or "<no title>",
                 request.start_date or "<not set>",
                 request.end_date or "<not set>",
             )
