@@ -9,7 +9,7 @@ from typing import Optional
 import pandas as pd
 
 from config import ConfigError, load_config
-from tools.fred_tool import FredAPIError, fetch_observations
+from tools.fred_tool import fetch_observations
 from tools.logger import get_logger
 from tools.storage_tool import save_raw_csv, update_master_dataset
 
@@ -95,44 +95,50 @@ def main() -> None:
         logger.error("Configuration error: %s", error)
         raise SystemExit(1) from error
 
-    try:
-        request = _prompt_user_inputs()
-    except ValueError as error:
-        logger.error("Input validation failed: %s", error)
-        raise SystemExit(1) from error
+    while True:
+        try:
+            request = _prompt_user_inputs()
 
-    logger.info(
-        "Fetching series '%s' with start=%s end=%s",
-        request.series_id,
-        request.start_date or "<not set>",
-        request.end_date or "<not set>",
-    )
+            logger.info(
+                "Fetching series '%s' with start=%s end=%s",
+                request.series_id,
+                request.start_date or "<not set>",
+                request.end_date or "<not set>",
+            )
 
-    try:
-        dataframe = fetch_observations(
-            series_id=request.series_id,
-            api_key=config.api_key,
-            start_date=request.start_date,
-            end_date=request.end_date,
-        )
-    except FredAPIError as error:
-        logger.error("FRED API request failed: %s", error)
-        raise SystemExit(1) from error
+            dataframe = fetch_observations(
+                series_id=request.series_id,
+                api_key=config.api_key,
+                start_date=request.start_date,
+                end_date=request.end_date,
+            )
+            logger.info("Fetched %d observations", len(dataframe))
 
-    logger.info("Fetched %d observations", len(dataframe))
+            raw_path = save_raw_csv(dataframe, request.series_id, config.raw_output_dir)
+            logger.info("Saved raw CSV to %s", raw_path)
 
-    raw_path = save_raw_csv(dataframe, request.series_id, config.raw_output_dir)
-    logger.info("Saved raw CSV to %s", raw_path)
+            master_path: Optional[str] = None
+            if request.append_to_master:
+                master_file, total_rows = update_master_dataset(
+                    dataframe,
+                    config.master_output_path,
+                )
+                master_path = str(master_file)
+                logger.info("Updated master dataset (%d total rows)", total_rows)
+            else:
+                logger.info("Master dataset update skipped by user")
 
-    master_path: Optional[str] = None
-    if request.append_to_master:
-        master_file, total_rows = update_master_dataset(dataframe, config.master_output_path)
-        master_path = str(master_file)
-        logger.info("Updated master dataset (%d total rows)", total_rows)
-    else:
-        logger.info("Master dataset update skipped by user")
+            _summarize_results(dataframe, str(raw_path), master_path)
+            logger.info("Run completed successfully.")
+            break
 
-    _summarize_results(dataframe, str(raw_path), master_path)
+        except ValueError as error:
+            logger.error(f"Input validation failed: {error}")
+            print("\n⚠️  Invalid input. Please try again.\n")
+
+        except Exception:
+            logger.exception("Unexpected error")
+            print("\n❌ Unexpected error. Restarting agent.\n")
 
 
 if __name__ == "__main__":
