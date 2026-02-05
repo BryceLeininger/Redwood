@@ -87,6 +87,40 @@ Run:
 python -m agent_factory.bootstrap_requested_agents
 ```
 
+## Outlook Integration Without Admin Access
+
+If you do not have Azure admin access, use local Outlook Desktop automation:
+- No tenant ID required
+- No app client ID required
+- Uses your existing signed-in Outlook profile on Windows
+
+Requirements:
+- Windows
+- Outlook Desktop installed and signed in
+- `pywin32` installed (included in `requirements.txt` for Windows)
+
+Commands:
+
+```bash
+python -m agent_factory.cli outlook-local-inbox --top 20 --unread-only
+```
+
+```bash
+python -m agent_factory.cli outlook-local-draft-reply --message-id "<entry-id>" --body "Thanks, I will review and follow up."
+```
+
+```bash
+python -m agent_factory.cli outlook-local-draft-reply --message-id "<entry-id>" --agent-dir generated_agents/outlookemailmanager_YYYYMMDD_HHMMSS
+```
+
+```bash
+python -m agent_factory.cli outlook-local-create-event --subject "Deal Call" --start "2026-02-06T14:00:00" --end "2026-02-06T15:00:00" --attendees analyst@company.com
+```
+
+```bash
+python -m agent_factory.cli outlook-local-triage --agent-dir generated_agents/outlookemailmanager_YYYYMMDD_HHMMSS --top 15 --unread-only --auto-draft --max-drafts 5
+```
+
 ## Outlook + Microsoft Graph Integration
 
 `OutlookEmailManager` is now wired to Microsoft Graph for:

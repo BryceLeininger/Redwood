@@ -9,6 +9,7 @@ from typing import Any, List, Sequence
 
 from .factory_agent import AgentFactory
 from .integrations.microsoft_graph import GraphAuthConfig, MicrosoftGraphClient
+from .integrations.outlook_local import OutlookLocalClient
 from .outlook_workflow import suggest_reply_body, triage_messages
 from .schemas import AgentBlueprint
 
@@ -135,6 +136,69 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Maximum number of auto-created draft replies when --auto-draft is set.",
     )
 
+    local_inbox_parser = subparsers.add_parser(
+        "outlook-local-inbox",
+        help="Read inbox messages from local Outlook Desktop (no Graph app registration required).",
+    )
+    local_inbox_parser.add_argument("--top", type=int, default=10, help="Number of messages to return (1-100).")
+    local_inbox_parser.add_argument("--unread-only", action="store_true", help="Only return unread messages.")
+
+    local_draft_parser = subparsers.add_parser(
+        "outlook-local-draft-reply",
+        help="Create a local Outlook draft reply using message EntryID.",
+    )
+    local_draft_parser.add_argument("--message-id", required=True, help="Outlook local message EntryID.")
+    local_draft_parser.add_argument(
+        "--body",
+        help="Draft body text. If omitted, provide --agent-dir to auto-generate using OutlookEmailManager.",
+    )
+    local_draft_parser.add_argument(
+        "--agent-dir",
+        help="Generated agent directory for OutlookEmailManager (used when --body is omitted).",
+    )
+
+    local_event_parser = subparsers.add_parser(
+        "outlook-local-create-event",
+        help="Create an Outlook calendar event in local Outlook Desktop.",
+    )
+    local_event_parser.add_argument("--subject", required=True, help="Event subject.")
+    local_event_parser.add_argument(
+        "--start",
+        required=True,
+        help="Event start local datetime, format YYYY-MM-DDTHH:MM:SS.",
+    )
+    local_event_parser.add_argument(
+        "--end",
+        required=True,
+        help="Event end local datetime, format YYYY-MM-DDTHH:MM:SS.",
+    )
+    local_event_parser.add_argument(
+        "--attendees",
+        nargs="*",
+        default=[],
+        help="One or more attendee emails, supports comma-separated entries.",
+    )
+    local_event_parser.add_argument("--body", default="", help="Event body text.")
+
+    local_triage_parser = subparsers.add_parser(
+        "outlook-local-triage",
+        help="Read local Outlook inbox and classify messages with OutlookEmailManager.",
+    )
+    local_triage_parser.add_argument("--agent-dir", required=True, help="OutlookEmailManager generated agent path.")
+    local_triage_parser.add_argument("--top", type=int, default=10, help="Number of messages to triage.")
+    local_triage_parser.add_argument("--unread-only", action="store_true", help="Only triage unread messages.")
+    local_triage_parser.add_argument(
+        "--auto-draft",
+        action="store_true",
+        help="Create local draft replies for triaged messages predicted as draft_reply.",
+    )
+    local_triage_parser.add_argument(
+        "--max-drafts",
+        type=int,
+        default=3,
+        help="Maximum number of auto-created draft replies when --auto-draft is set.",
+    )
+
     return parser
 
 
@@ -191,6 +255,10 @@ def _handle_list(args: argparse.Namespace) -> None:
 def _build_graph_client() -> MicrosoftGraphClient:
     config = GraphAuthConfig.from_env()
     return MicrosoftGraphClient(config)
+
+
+def _build_local_outlook_client() -> OutlookLocalClient:
+    return OutlookLocalClient()
 
 
 def _extract_sender(message: dict) -> dict:
@@ -303,6 +371,96 @@ def _handle_outlook_triage(args: argparse.Namespace) -> None:
     )
 
 
+def _handle_outlook_local_inbox(args: argparse.Namespace) -> None:
+    client = _build_local_outlook_client()
+    messages = client.get_inbox_messages(top=args.top, unread_only=args.unread_only)
+
+    payload = []
+    for message in messages:
+        payload.append(
+            {
+                "id": message.get("id"),
+                "subject": message.get("subject"),
+                "from": _extract_sender(message),
+                "receivedDateTime": message.get("receivedDateTime"),
+                "isRead": message.get("isRead"),
+                "bodyPreview": message.get("bodyPreview"),
+            }
+        )
+    print(json.dumps(payload, indent=2))
+
+
+def _handle_outlook_local_draft_reply(args: argparse.Namespace) -> None:
+    client = _build_local_outlook_client()
+    body = (args.body or "").strip()
+    generated_from_prediction = None
+
+    if not body:
+        if not args.agent_dir:
+            raise ValueError("Either --body or --agent-dir is required for outlook-local-draft-reply.")
+        specialist = AgentFactory().load_specialist_agent(Path(args.agent_dir))
+        message = client.get_message(args.message_id)
+        generated_from_prediction, body = suggest_reply_body(specialist, message)
+
+    draft = client.create_reply_draft(args.message_id, body)
+    output = {
+        "draft": draft,
+        "body_preview": body,
+    }
+    if generated_from_prediction:
+        output["generated_from_prediction"] = generated_from_prediction
+    print(json.dumps(output, indent=2))
+
+
+def _handle_outlook_local_create_event(args: argparse.Namespace) -> None:
+    client = _build_local_outlook_client()
+    attendees = _split_attendees(args.attendees)
+    event = client.create_calendar_event(
+        subject=args.subject,
+        start_datetime=args.start,
+        end_datetime=args.end,
+        attendees=attendees,
+        body_text=args.body,
+    )
+    print(json.dumps(event, indent=2))
+
+
+def _handle_outlook_local_triage(args: argparse.Namespace) -> None:
+    specialist = AgentFactory().load_specialist_agent(Path(args.agent_dir))
+    client = _build_local_outlook_client()
+    messages = client.get_inbox_messages(top=args.top, unread_only=args.unread_only)
+    triaged = triage_messages(specialist, messages)
+
+    drafts: List[dict[str, Any]] = []
+    if args.auto_draft:
+        max_drafts = max(0, args.max_drafts)
+        for message, triage_result in zip(messages, triaged):
+            if len(drafts) >= max_drafts:
+                break
+            if triage_result.get("prediction") != "draft_reply":
+                continue
+
+            generated_from_prediction, body = suggest_reply_body(specialist, message)
+            draft = client.create_reply_draft(message["id"], body)
+            drafts.append(
+                {
+                    "source_message_id": message.get("id"),
+                    "generated_from_prediction": generated_from_prediction,
+                    "draft_id": draft.get("draft_id"),
+                }
+            )
+
+    print(
+        json.dumps(
+            {
+                "triaged_messages": triaged,
+                "drafts_created": drafts,
+            },
+            indent=2,
+        )
+    )
+
+
 def main(argv: Sequence[str] | None = None) -> None:
     parser = _build_parser()
     args = parser.parse_args(argv)
@@ -326,6 +484,14 @@ def main(argv: Sequence[str] | None = None) -> None:
             _handle_outlook_create_event(args)
         elif args.command == "outlook-triage":
             _handle_outlook_triage(args)
+        elif args.command == "outlook-local-inbox":
+            _handle_outlook_local_inbox(args)
+        elif args.command == "outlook-local-draft-reply":
+            _handle_outlook_local_draft_reply(args)
+        elif args.command == "outlook-local-create-event":
+            _handle_outlook_local_create_event(args)
+        elif args.command == "outlook-local-triage":
+            _handle_outlook_local_triage(args)
         else:
             parser.error(f"Unknown command: {args.command}")
     except (ValueError, RuntimeError) as error:
