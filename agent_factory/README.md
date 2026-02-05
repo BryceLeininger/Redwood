@@ -193,6 +193,52 @@ Supported panel commands:
 - `send draft 1`
 - `event "Deal Call" 2026-02-10T14:00:00 2026-02-10T15:00:00 attendees=analyst@company.com`
 
+## Desktop App (No Outlook Add-in Needed)
+
+If your company blocks Outlook add-in sideloading, use the standalone desktop app.
+
+### Launch directly
+
+```bash
+run_outlook_agent_desktop.bat
+```
+
+This launch mode uses `pythonw`, so no terminal window stays visible.
+
+### Add a Desktop shortcut (double-click to start)
+
+```bash
+install_outlook_agent_desktop_shortcut.bat
+```
+
+This creates:
+- `Outlook Agent Desktop.lnk` on your Windows Desktop
+
+### In-app usage
+
+Use commands or natural language like:
+- `help`
+- `inbox 10`
+- `triage 10 unread`
+- `read 1`
+- `draft 1`
+- `mark read 1`
+- `move 1 to Inbox/Archive`
+- `review all my emails to learn about my job`
+- `check unread emails`
+- `draft a reply to the first message`
+
+### Learning over time
+
+The desktop app now persists learned mappings and history at:
+- `generated_agents/outlook_agent_learning.json`
+
+Teach it custom phrases:
+- `learn "morning sweep" => triage 20 unread`
+- `when i say quick inbox do inbox 8`
+- `forget "morning sweep"`
+- `memory`
+
 ## Outlook + Microsoft Graph Integration
 
 `OutlookEmailManager` is now wired to Microsoft Graph for:
