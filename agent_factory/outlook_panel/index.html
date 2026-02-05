@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Outlook Agent</title>
+    <link rel="stylesheet" href="/panel/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="shell-header">
+        <h1>Outlook Agent</h1>
+        <p>One panel. Type what you want done.</p>
+      </header>
+
+      <section id="chat" class="chat" aria-live="polite"></section>
+
+      <form id="composer" class="composer" autocomplete="off">
+        <input
+          id="messageInput"
+          type="text"
+          placeholder="Type a command, e.g. triage 10 unread"
+          required
+        />
+        <button type="submit">Send</button>
+      </form>
+    </main>
+
+    <script src="/panel/app.js" defer></script>
+  </body>
+</html>

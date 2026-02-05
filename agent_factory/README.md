@@ -149,6 +149,50 @@ python -m agent_factory.cli outlook-local-draft-reply --index 1 --body "Thanks, 
 python -m agent_factory.cli outlook-local-create-event --subject "Deal Call" --start "2026-02-06T14:00:00" --end "2026-02-06T15:00:00" --attendees analyst@company.com
 ```
 
+## One-Button Outlook Agent Panel
+
+This project now includes an Outlook add-in with one ribbon button: `Launch Agent`.
+
+Clicking that single button opens a chat panel where you orchestrate tasks by typing commands.
+
+### 1. Start the panel server
+
+```bash
+run_outlook_agent_panel.bat
+```
+
+This runs `agent_factory.outlook_panel_server` at `https://localhost:8765` and serves the panel UI.
+
+### 2. Sideload the add-in in Outlook
+
+Use the manifest file:
+
+`outlook_addin/manifest.xml`
+
+Typical path in Outlook:
+- `Get Add-ins` -> `My add-ins` -> `Add a custom add-in` -> `Add from file`
+- Select `outlook_addin/manifest.xml`
+
+### 3. Use the panel
+
+Open any message in Outlook and click `Launch Agent`.
+
+Supported panel commands:
+- `help`
+- `status`
+- `inbox 10`
+- `unread 10`
+- `triage 10 unread`
+- `read 2`
+- `draft 2`
+- `draft 2 send`
+- `mark read 2`
+- `move 2 to Inbox/Archive`
+- `folders inbox`
+- `drafts 20`
+- `send draft 1`
+- `event "Deal Call" 2026-02-10T14:00:00 2026-02-10T15:00:00 attendees=analyst@company.com`
+
 ## Outlook + Microsoft Graph Integration
 
 `OutlookEmailManager` is now wired to Microsoft Graph for:

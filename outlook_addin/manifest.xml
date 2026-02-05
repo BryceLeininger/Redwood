@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<OfficeApp
+  xmlns="http://schemas.microsoft.com/office/appforoffice/1.1"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xmlns:bt="http://schemas.microsoft.com/office/officeappbasictypes/1.0"
+  xmlns:mailappor="http://schemas.microsoft.com/office/mailappversionoverrides/1.1"
+  xsi:type="MailApp">
+  <Id>92f2fbfb-a2d2-4e09-b8de-6709cadf33ca</Id>
+  <Version>1.0.0.0</Version>
+  <ProviderName>Agent Factory</ProviderName>
+  <DefaultLocale>en-US</DefaultLocale>
+  <DisplayName DefaultValue="Outlook Agent" />
+  <Description DefaultValue="One-button Outlook panel for orchestrating your agent tasks." />
+  <IconUrl DefaultValue="https://localhost:8765/panel/assets/icon-64.png" />
+  <HighResolutionIconUrl DefaultValue="https://localhost:8765/panel/assets/icon-80.png" />
+  <SupportUrl DefaultValue="https://localhost:8765/" />
+  <AppDomains>
+    <AppDomain>https://localhost:8765</AppDomain>
+  </AppDomains>
+  <Hosts>
+    <Host Name="Mailbox" />
+  </Hosts>
+  <Requirements>
+    <Sets>
+      <Set Name="Mailbox" MinVersion="1.5" />
+    </Sets>
+  </Requirements>
+  <FormSettings>
+    <Form xsi:type="ItemRead">
+      <DesktopSettings>
+        <SourceLocation DefaultValue="https://localhost:8765/" />
+        <RequestedHeight>500</RequestedHeight>
+      </DesktopSettings>
+    </Form>
+  </FormSettings>
+  <Permissions>ReadWriteMailbox</Permissions>
+  <Rule xsi:type="RuleCollection" Mode="Or">
+    <Rule xsi:type="ItemIs" ItemType="Message" FormType="Read" />
+  </Rule>
+  <DisableEntityHighlighting>false</DisableEntityHighlighting>
+
+  <VersionOverrides xmlns="http://schemas.microsoft.com/office/mailappversionoverrides" xsi:type="VersionOverridesV1_0">
+    <VersionOverrides xmlns="http://schemas.microsoft.com/office/mailappversionoverrides/1.1" xsi:type="VersionOverridesV1_1">
+      <Requirements>
+        <bt:Sets DefaultMinVersion="1.5">
+          <bt:Set Name="Mailbox" />
+        </bt:Sets>
+      </Requirements>
+      <Hosts>
+        <Host xsi:type="MailHost">
+          <DesktopFormFactor>
+            <FunctionFile resid="Commands.Url" />
+            <ExtensionPoint xsi:type="MessageReadCommandSurface">
+              <OfficeTab id="TabDefault">
+                <Group id="AgentGroup">
+                  <Label resid="AgentGroup.Label" />
+                  <Control xsi:type="Button" id="LaunchAgentButton">
+                    <Label resid="LaunchButton.Label" />
+                    <Supertip>
+                      <Title resid="LaunchButton.Label" />
+                      <Description resid="LaunchButton.Tooltip" />
+                    </Supertip>
+                    <Icon>
+                      <bt:Image size="16" resid="Icon.16x16" />
+                      <bt:Image size="32" resid="Icon.32x32" />
+                      <bt:Image size="80" resid="Icon.80x80" />
+                    </Icon>
+                    <Action xsi:type="ShowTaskpane">
+                      <SourceLocation resid="Taskpane.Url" />
+                    </Action>
+                  </Control>
+                </Group>
+              </OfficeTab>
+            </ExtensionPoint>
+          </DesktopFormFactor>
+        </Host>
+      </Hosts>
+      <Resources>
+        <bt:Images>
+          <bt:Image id="Icon.16x16" DefaultValue="https://localhost:8765/panel/assets/icon-16.png" />
+          <bt:Image id="Icon.32x32" DefaultValue="https://localhost:8765/panel/assets/icon-32.png" />
+          <bt:Image id="Icon.80x80" DefaultValue="https://localhost:8765/panel/assets/icon-80.png" />
+        </bt:Images>
+        <bt:Urls>
+          <bt:Url id="Commands.Url" DefaultValue="https://localhost:8765/panel/commands.html" />
+          <bt:Url id="Taskpane.Url" DefaultValue="https://localhost:8765/" />
+        </bt:Urls>
+        <bt:ShortStrings>
+          <bt:String id="AgentGroup.Label" DefaultValue="Agent" />
+          <bt:String id="LaunchButton.Label" DefaultValue="Launch Agent" />
+        </bt:ShortStrings>
+        <bt:LongStrings>
+          <bt:String id="LaunchButton.Tooltip" DefaultValue="Open the Outlook Agent panel to orchestrate tasks." />
+        </bt:LongStrings>
+      </Resources>
+    </VersionOverrides>
+  </VersionOverrides>
+</OfficeApp>

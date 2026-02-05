@@ -11,6 +11,11 @@ except ImportError:  # pragma: no cover - runtime environment dependent
 else:
     win32com = win32com.client
 
+try:
+    import pythoncom  # type: ignore[import-untyped]
+except ImportError:  # pragma: no cover - runtime environment dependent
+    pythoncom = None
+
 OL_FOLDER_INBOX = 6
 OL_FOLDER_DRAFTS = 16
 OL_APPOINTMENT_ITEM = 1
@@ -85,26 +90,32 @@ class OutlookLocalClient:
         if win32com is None:
             raise RuntimeError("pywin32 is not installed. Install dependencies from agent_factory/requirements.txt.")
         try:
-            self._application = win32com.Dispatch("Outlook.Application")
-            self._namespace = self._application.GetNamespace("MAPI")
+            self._connect()
         except Exception as error:
             raise RuntimeError(
                 "Unable to start Outlook COM automation. Ensure Outlook Desktop is installed and signed in."
             ) from error
 
-    def _get_mail_item(self, message_id: str) -> Any:
+    def _connect(self) -> Tuple[Any, Any]:
+        if pythoncom is not None:
+            pythoncom.CoInitialize()
+        application = win32com.Dispatch("Outlook.Application")
+        namespace = application.GetNamespace("MAPI")
+        return application, namespace
+
+    def _get_mail_item(self, namespace: Any, message_id: str) -> Any:
         message_id = message_id.strip()
         if not message_id:
             raise ValueError("message_id cannot be empty.")
         try:
-            item = self._namespace.GetItemFromID(message_id)
+            item = namespace.GetItemFromID(message_id)
         except Exception as error:
             raise RuntimeError(f"Unable to find Outlook item with id: {message_id}") from error
         if int(getattr(item, "Class", 0)) != OL_MAIL_ITEM_CLASS:
             raise RuntimeError("Item was found but is not an Outlook mail item.")
         return item
 
-    def _collect_folders(self) -> List[Tuple[str, Any]]:
+    def _collect_folders(self, namespace: Any) -> List[Tuple[str, Any]]:
         results: List[Tuple[str, Any]] = []
 
         def walk(folder: Any, path: str) -> None:
@@ -118,18 +129,18 @@ class OutlookLocalClient:
             except Exception:
                 return
 
-        stores = self._namespace.Folders
+        stores = namespace.Folders
         for idx in range(1, stores.Count + 1):
             store = stores.Item(idx)
             walk(store, str(store.Name))
         return results
 
-    def _resolve_folder(self, folder_path: str) -> Tuple[str, Any]:
+    def _resolve_folder(self, namespace: Any, folder_path: str) -> Tuple[str, Any]:
         folder_path = folder_path.strip()
         if not folder_path:
             raise ValueError("folder_path cannot be empty.")
 
-        all_folders = self._collect_folders()
+        all_folders = self._collect_folders(namespace)
         exact_matches = [(path, folder) for path, folder in all_folders if path.lower() == folder_path.lower()]
         if len(exact_matches) == 1:
             return exact_matches[0]
@@ -152,8 +163,9 @@ class OutlookLocalClient:
         return partial_matches[0]
 
     def get_inbox_messages(self, *, top: int = 10, unread_only: bool = False) -> List[Dict[str, Any]]:
+        _, namespace = self._connect()
         top = max(1, min(top, 100))
-        inbox = self._namespace.GetDefaultFolder(OL_FOLDER_INBOX)
+        inbox = namespace.GetDefaultFolder(OL_FOLDER_INBOX)
         items = inbox.Items
         items.Sort("[ReceivedTime]", True)
 
@@ -172,7 +184,8 @@ class OutlookLocalClient:
         return results
 
     def get_message(self, message_id: str, *, include_body: bool = False) -> Dict[str, Any]:
-        item = self._get_mail_item(message_id)
+        _, namespace = self._connect()
+        item = self._get_mail_item(namespace, message_id)
         payload = _mail_to_graph_like_dict(item)
         if include_body:
             payload["body"] = str(getattr(item, "Body", "") or "")
@@ -181,7 +194,8 @@ class OutlookLocalClient:
         return payload
 
     def create_reply_draft(self, message_id: str, body_text: str, *, send_now: bool = False) -> Dict[str, Any]:
-        item = self._get_mail_item(message_id)
+        _, namespace = self._connect()
+        item = self._get_mail_item(namespace, message_id)
         body_text = body_text.strip()
         if not body_text:
             raise ValueError("body_text cannot be empty.")
@@ -205,7 +219,8 @@ class OutlookLocalClient:
         }
 
     def set_message_read_state(self, message_id: str, *, read: bool) -> Dict[str, Any]:
-        item = self._get_mail_item(message_id)
+        _, namespace = self._connect()
+        item = self._get_mail_item(namespace, message_id)
         try:
             item.UnRead = not read
             item.Save()
@@ -218,8 +233,9 @@ class OutlookLocalClient:
         }
 
     def move_message(self, message_id: str, destination_folder_path: str) -> Dict[str, Any]:
-        item = self._get_mail_item(message_id)
-        resolved_path, destination = self._resolve_folder(destination_folder_path)
+        _, namespace = self._connect()
+        item = self._get_mail_item(namespace, message_id)
+        resolved_path, destination = self._resolve_folder(namespace, destination_folder_path)
         try:
             moved = item.Move(destination)
         except Exception as error:
@@ -231,8 +247,9 @@ class OutlookLocalClient:
         }
 
     def list_folders(self, *, query: Optional[str] = None, top: int = 200) -> List[str]:
+        _, namespace = self._connect()
         top = max(1, top)
-        folders = [path for path, _ in self._collect_folders()]
+        folders = [path for path, _ in self._collect_folders(namespace)]
         folders.sort()
         if query:
             needle = query.strip().lower()
@@ -240,8 +257,9 @@ class OutlookLocalClient:
         return folders[:top]
 
     def list_draft_messages(self, *, top: int = 20) -> List[Dict[str, Any]]:
+        _, namespace = self._connect()
         top = max(1, min(top, 100))
-        drafts = self._namespace.GetDefaultFolder(OL_FOLDER_DRAFTS)
+        drafts = namespace.GetDefaultFolder(OL_FOLDER_DRAFTS)
         items = drafts.Items
         items.Sort("[LastModificationTime]", True)
 
@@ -260,7 +278,8 @@ class OutlookLocalClient:
         return results
 
     def send_draft(self, message_id: str) -> Dict[str, Any]:
-        item = self._get_mail_item(message_id)
+        _, namespace = self._connect()
+        item = self._get_mail_item(namespace, message_id)
         try:
             item.Send()
         except Exception as error:
@@ -280,6 +299,7 @@ class OutlookLocalClient:
         attendees: Optional[List[str]] = None,
         body_text: str = "",
     ) -> Dict[str, Any]:
+        application, _ = self._connect()
         subject = subject.strip()
         if not subject:
             raise ValueError("subject cannot be empty.")
@@ -291,7 +311,7 @@ class OutlookLocalClient:
 
         attendees = attendees or []
         try:
-            event = self._application.CreateItem(OL_APPOINTMENT_ITEM)
+            event = application.CreateItem(OL_APPOINTMENT_ITEM)
             event.Subject = subject
             event.Start = start
             event.End = end
