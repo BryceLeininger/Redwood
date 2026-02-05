@@ -117,6 +117,8 @@ $env:MS_TENANT_ID = "<your-tenant-id>"
 $env:MS_CLIENT_ID = "<your-app-client-id>"
 ```
 
+See `agent_factory/.env.outlook.example` for a template.
+
 Optional:
 
 ```powershell

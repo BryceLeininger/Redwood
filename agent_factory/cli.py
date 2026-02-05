@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 from typing import Any, List, Sequence
 
@@ -306,26 +307,30 @@ def main(argv: Sequence[str] | None = None) -> None:
     parser = _build_parser()
     args = parser.parse_args(argv)
 
-    if args.command == "create-agent":
-        _handle_create(args)
-    elif args.command == "predict":
-        _handle_predict(args)
-    elif args.command == "ask":
-        _handle_ask(args)
-    elif args.command == "describe":
-        _handle_describe(args)
-    elif args.command == "list":
-        _handle_list(args)
-    elif args.command == "outlook-inbox":
-        _handle_outlook_inbox(args)
-    elif args.command == "outlook-draft-reply":
-        _handle_outlook_draft_reply(args)
-    elif args.command == "outlook-create-event":
-        _handle_outlook_create_event(args)
-    elif args.command == "outlook-triage":
-        _handle_outlook_triage(args)
-    else:
-        parser.error(f"Unknown command: {args.command}")
+    try:
+        if args.command == "create-agent":
+            _handle_create(args)
+        elif args.command == "predict":
+            _handle_predict(args)
+        elif args.command == "ask":
+            _handle_ask(args)
+        elif args.command == "describe":
+            _handle_describe(args)
+        elif args.command == "list":
+            _handle_list(args)
+        elif args.command == "outlook-inbox":
+            _handle_outlook_inbox(args)
+        elif args.command == "outlook-draft-reply":
+            _handle_outlook_draft_reply(args)
+        elif args.command == "outlook-create-event":
+            _handle_outlook_create_event(args)
+        elif args.command == "outlook-triage":
+            _handle_outlook_triage(args)
+        else:
+            parser.error(f"Unknown command: {args.command}")
+    except (ValueError, RuntimeError) as error:
+        print(f"Error: {error}", file=sys.stderr)
+        raise SystemExit(1) from error
 
 
 if __name__ == "__main__":
