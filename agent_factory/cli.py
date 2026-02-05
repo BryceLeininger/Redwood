@@ -4,14 +4,17 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
 from pathlib import Path
-from typing import Any, List, Sequence
+from typing import Any, Dict, List, Sequence
 
 from .factory_agent import AgentFactory
 from .integrations.microsoft_graph import GraphAuthConfig, MicrosoftGraphClient
 from .integrations.outlook_local import OutlookLocalClient
 from .outlook_workflow import suggest_reply_body, triage_messages
 from .schemas import AgentBlueprint
+
+LOCAL_OUTLOOK_CACHE_PATH = Path("generated_agents") / "outlook_local_cache.json"
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -145,9 +148,15 @@ def _build_parser() -> argparse.ArgumentParser:
 
     local_draft_parser = subparsers.add_parser(
         "outlook-local-draft-reply",
-        help="Create a local Outlook draft reply using message EntryID.",
+        help="Create a local Outlook reply draft using message id or cached index.",
     )
-    local_draft_parser.add_argument("--message-id", required=True, help="Outlook local message EntryID.")
+    local_draft_selector = local_draft_parser.add_mutually_exclusive_group(required=True)
+    local_draft_selector.add_argument("--message-id", help="Outlook local message EntryID.")
+    local_draft_selector.add_argument(
+        "--index",
+        type=int,
+        help="Message index from the latest outlook-local-inbox/outlook-local-drafts output.",
+    )
     local_draft_parser.add_argument(
         "--body",
         help="Draft body text. If omitted, provide --agent-dir to auto-generate using OutlookEmailManager.",
@@ -155,6 +164,11 @@ def _build_parser() -> argparse.ArgumentParser:
     local_draft_parser.add_argument(
         "--agent-dir",
         help="Generated agent directory for OutlookEmailManager (used when --body is omitted).",
+    )
+    local_draft_parser.add_argument(
+        "--send-now",
+        action="store_true",
+        help="Send immediately instead of saving as draft.",
     )
 
     local_event_parser = subparsers.add_parser(
@@ -197,6 +211,78 @@ def _build_parser() -> argparse.ArgumentParser:
         type=int,
         default=3,
         help="Maximum number of auto-created draft replies when --auto-draft is set.",
+    )
+    local_triage_parser.add_argument(
+        "--send-now",
+        action="store_true",
+        help="When used with --auto-draft, send replies immediately instead of saving drafts.",
+    )
+
+    local_read_parser = subparsers.add_parser(
+        "outlook-local-read",
+        help="Read full message details/body from local Outlook by id or cached index.",
+    )
+    local_read_selector = local_read_parser.add_mutually_exclusive_group(required=True)
+    local_read_selector.add_argument("--message-id", help="Outlook local message EntryID.")
+    local_read_selector.add_argument(
+        "--index",
+        type=int,
+        help="Message index from the latest outlook-local-inbox/outlook-local-drafts output.",
+    )
+
+    local_mark_parser = subparsers.add_parser(
+        "outlook-local-mark",
+        help="Mark a local Outlook message as read or unread.",
+    )
+    local_mark_selector = local_mark_parser.add_mutually_exclusive_group(required=True)
+    local_mark_selector.add_argument("--message-id", help="Outlook local message EntryID.")
+    local_mark_selector.add_argument(
+        "--index",
+        type=int,
+        help="Message index from the latest outlook-local-inbox/outlook-local-drafts output.",
+    )
+    local_mark_parser.add_argument("--unread", action="store_true", help="Mark as unread (default marks as read).")
+
+    local_move_parser = subparsers.add_parser(
+        "outlook-local-move",
+        help="Move a local Outlook message to another folder.",
+    )
+    local_move_selector = local_move_parser.add_mutually_exclusive_group(required=True)
+    local_move_selector.add_argument("--message-id", help="Outlook local message EntryID.")
+    local_move_selector.add_argument(
+        "--index",
+        type=int,
+        help="Message index from the latest outlook-local-inbox/outlook-local-drafts output.",
+    )
+    local_move_parser.add_argument(
+        "--folder",
+        required=True,
+        help="Destination folder path. Use outlook-local-folders to list available paths.",
+    )
+
+    local_folders_parser = subparsers.add_parser(
+        "outlook-local-folders",
+        help="List local Outlook folders available for move operations.",
+    )
+    local_folders_parser.add_argument("--query", help="Optional substring filter for folder path.")
+    local_folders_parser.add_argument("--top", type=int, default=200, help="Maximum folders to return.")
+
+    local_drafts_parser = subparsers.add_parser(
+        "outlook-local-drafts",
+        help="List local Outlook draft messages and cache indexes for follow-up commands.",
+    )
+    local_drafts_parser.add_argument("--top", type=int, default=20, help="Number of draft messages to return.")
+
+    local_send_parser = subparsers.add_parser(
+        "outlook-local-send-draft",
+        help="Send an existing local Outlook draft by id or cached index.",
+    )
+    local_send_selector = local_send_parser.add_mutually_exclusive_group(required=True)
+    local_send_selector.add_argument("--message-id", help="Outlook local draft EntryID.")
+    local_send_selector.add_argument(
+        "--index",
+        type=int,
+        help="Draft index from the latest outlook-local-drafts output.",
     )
 
     return parser
@@ -258,7 +344,79 @@ def _build_graph_client() -> MicrosoftGraphClient:
 
 
 def _build_local_outlook_client() -> OutlookLocalClient:
-    return OutlookLocalClient()
+    last_error: RuntimeError | None = None
+    for _ in range(2):
+        try:
+            return OutlookLocalClient()
+        except RuntimeError as error:
+            last_error = error
+            time.sleep(0.8)
+    if last_error is None:
+        raise RuntimeError("Unable to initialize local Outlook client.")
+    raise last_error
+
+
+def _format_local_message_listing(messages: List[dict]) -> List[dict]:
+    listing: List[dict] = []
+    for index, message in enumerate(messages, start=1):
+        listing.append(
+            {
+                "index": index,
+                "id": message.get("id"),
+                "subject": message.get("subject"),
+                "from": _extract_sender(message),
+                "receivedDateTime": message.get("receivedDateTime"),
+                "isRead": message.get("isRead"),
+                "bodyPreview": message.get("bodyPreview"),
+            }
+        )
+    return listing
+
+
+def _save_local_message_cache(messages: List[dict], source: str) -> None:
+    LOCAL_OUTLOOK_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "source": source,
+        "count": len(messages),
+        "messages": _format_local_message_listing(messages),
+    }
+    LOCAL_OUTLOOK_CACHE_PATH.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+
+def _load_local_message_cache() -> Dict[str, Any]:
+    if not LOCAL_OUTLOOK_CACHE_PATH.exists():
+        raise ValueError(
+            "No local Outlook cache found. Run outlook-local-inbox or outlook-local-drafts first to create indexes."
+        )
+    try:
+        return json.loads(LOCAL_OUTLOOK_CACHE_PATH.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as error:
+        raise ValueError(
+            f"Local Outlook cache is invalid at {LOCAL_OUTLOOK_CACHE_PATH}. Run outlook-local-inbox again."
+        ) from error
+
+
+def _resolve_local_message_id(message_id: str | None, index: int | None) -> str:
+    if message_id:
+        return message_id.strip()
+    if index is None:
+        raise ValueError("Either --message-id or --index is required.")
+
+    if index <= 0:
+        raise ValueError("--index must be 1 or greater.")
+
+    cache = _load_local_message_cache()
+    messages = cache.get("messages", [])
+    for item in messages:
+        if int(item.get("index", 0)) == index:
+            resolved = str(item.get("id", "")).strip()
+            if not resolved:
+                break
+            return resolved
+    raise ValueError(
+        f"Index {index} not found in local cache ({LOCAL_OUTLOOK_CACHE_PATH}). "
+        "Run outlook-local-inbox or outlook-local-drafts to refresh."
+    )
 
 
 def _extract_sender(message: dict) -> dict:
@@ -374,24 +532,22 @@ def _handle_outlook_triage(args: argparse.Namespace) -> None:
 def _handle_outlook_local_inbox(args: argparse.Namespace) -> None:
     client = _build_local_outlook_client()
     messages = client.get_inbox_messages(top=args.top, unread_only=args.unread_only)
-
-    payload = []
-    for message in messages:
-        payload.append(
+    payload = _format_local_message_listing(messages)
+    _save_local_message_cache(messages, source="outlook-local-inbox")
+    print(
+        json.dumps(
             {
-                "id": message.get("id"),
-                "subject": message.get("subject"),
-                "from": _extract_sender(message),
-                "receivedDateTime": message.get("receivedDateTime"),
-                "isRead": message.get("isRead"),
-                "bodyPreview": message.get("bodyPreview"),
-            }
+                "messages": payload,
+                "cache_path": str(LOCAL_OUTLOOK_CACHE_PATH),
+            },
+            indent=2,
         )
-    print(json.dumps(payload, indent=2))
+    )
 
 
 def _handle_outlook_local_draft_reply(args: argparse.Namespace) -> None:
     client = _build_local_outlook_client()
+    message_id = _resolve_local_message_id(args.message_id, args.index)
     body = (args.body or "").strip()
     generated_from_prediction = None
 
@@ -399,11 +555,12 @@ def _handle_outlook_local_draft_reply(args: argparse.Namespace) -> None:
         if not args.agent_dir:
             raise ValueError("Either --body or --agent-dir is required for outlook-local-draft-reply.")
         specialist = AgentFactory().load_specialist_agent(Path(args.agent_dir))
-        message = client.get_message(args.message_id)
+        message = client.get_message(message_id)
         generated_from_prediction, body = suggest_reply_body(specialist, message)
 
-    draft = client.create_reply_draft(args.message_id, body)
+    draft = client.create_reply_draft(message_id, body, send_now=args.send_now)
     output = {
+        "source_message_id": message_id,
         "draft": draft,
         "body_preview": body,
     }
@@ -425,36 +582,101 @@ def _handle_outlook_local_create_event(args: argparse.Namespace) -> None:
     print(json.dumps(event, indent=2))
 
 
+def _handle_outlook_local_read(args: argparse.Namespace) -> None:
+    client = _build_local_outlook_client()
+    message_id = _resolve_local_message_id(args.message_id, args.index)
+    message = client.get_message(message_id, include_body=True)
+    print(json.dumps(message, indent=2))
+
+
+def _handle_outlook_local_mark(args: argparse.Namespace) -> None:
+    client = _build_local_outlook_client()
+    message_id = _resolve_local_message_id(args.message_id, args.index)
+    result = client.set_message_read_state(message_id, read=not args.unread)
+    print(json.dumps(result, indent=2))
+
+
+def _handle_outlook_local_move(args: argparse.Namespace) -> None:
+    client = _build_local_outlook_client()
+    message_id = _resolve_local_message_id(args.message_id, args.index)
+    result = client.move_message(message_id, args.folder)
+    print(json.dumps(result, indent=2))
+
+
+def _handle_outlook_local_folders(args: argparse.Namespace) -> None:
+    client = _build_local_outlook_client()
+    folders = client.list_folders(query=args.query, top=args.top)
+    print(
+        json.dumps(
+            [{"index": index, "path": folder} for index, folder in enumerate(folders, start=1)],
+            indent=2,
+        )
+    )
+
+
+def _handle_outlook_local_drafts(args: argparse.Namespace) -> None:
+    client = _build_local_outlook_client()
+    messages = client.list_draft_messages(top=args.top)
+    _save_local_message_cache(messages, source="outlook-local-drafts")
+    payload = _format_local_message_listing(messages)
+    print(
+        json.dumps(
+            {
+                "messages": payload,
+                "cache_path": str(LOCAL_OUTLOOK_CACHE_PATH),
+            },
+            indent=2,
+        )
+    )
+
+
+def _handle_outlook_local_send_draft(args: argparse.Namespace) -> None:
+    client = _build_local_outlook_client()
+    message_id = _resolve_local_message_id(args.message_id, args.index)
+    result = client.send_draft(message_id)
+    print(json.dumps(result, indent=2))
+
+
 def _handle_outlook_local_triage(args: argparse.Namespace) -> None:
     specialist = AgentFactory().load_specialist_agent(Path(args.agent_dir))
     client = _build_local_outlook_client()
     messages = client.get_inbox_messages(top=args.top, unread_only=args.unread_only)
     triaged = triage_messages(specialist, messages)
+    _save_local_message_cache(messages, source="outlook-local-triage")
 
     drafts: List[dict[str, Any]] = []
+    triaged_with_indexes: List[dict[str, Any]] = []
+    for index, triage_result in enumerate(triaged, start=1):
+        enriched = dict(triage_result)
+        enriched["index"] = index
+        triaged_with_indexes.append(enriched)
+
     if args.auto_draft:
         max_drafts = max(0, args.max_drafts)
-        for message, triage_result in zip(messages, triaged):
+        for index, (message, triage_result) in enumerate(zip(messages, triaged), start=1):
             if len(drafts) >= max_drafts:
                 break
             if triage_result.get("prediction") != "draft_reply":
                 continue
 
             generated_from_prediction, body = suggest_reply_body(specialist, message)
-            draft = client.create_reply_draft(message["id"], body)
+            draft = client.create_reply_draft(message["id"], body, send_now=args.send_now)
             drafts.append(
                 {
+                    "index": index,
                     "source_message_id": message.get("id"),
                     "generated_from_prediction": generated_from_prediction,
                     "draft_id": draft.get("draft_id"),
+                    "sent": draft.get("sent"),
                 }
             )
 
     print(
         json.dumps(
             {
-                "triaged_messages": triaged,
+                "triaged_messages": triaged_with_indexes,
                 "drafts_created": drafts,
+                "cache_path": str(LOCAL_OUTLOOK_CACHE_PATH),
             },
             indent=2,
         )
@@ -490,6 +712,18 @@ def main(argv: Sequence[str] | None = None) -> None:
             _handle_outlook_local_draft_reply(args)
         elif args.command == "outlook-local-create-event":
             _handle_outlook_local_create_event(args)
+        elif args.command == "outlook-local-read":
+            _handle_outlook_local_read(args)
+        elif args.command == "outlook-local-mark":
+            _handle_outlook_local_mark(args)
+        elif args.command == "outlook-local-move":
+            _handle_outlook_local_move(args)
+        elif args.command == "outlook-local-folders":
+            _handle_outlook_local_folders(args)
+        elif args.command == "outlook-local-drafts":
+            _handle_outlook_local_drafts(args)
+        elif args.command == "outlook-local-send-draft":
+            _handle_outlook_local_send_draft(args)
         elif args.command == "outlook-local-triage":
             _handle_outlook_local_triage(args)
         else:

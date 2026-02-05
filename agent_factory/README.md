@@ -99,26 +99,54 @@ Requirements:
 - Outlook Desktop installed and signed in
 - `pywin32` installed (included in `requirements.txt` for Windows)
 
-Commands:
+Quick workflow (no long IDs needed):
 
 ```bash
 python -m agent_factory.cli outlook-local-inbox --top 20 --unread-only
 ```
 
+This command caches message indexes in `generated_agents/outlook_local_cache.json` so follow-up commands can use `--index`.
+
 ```bash
-python -m agent_factory.cli outlook-local-draft-reply --message-id "<entry-id>" --body "Thanks, I will review and follow up."
+python -m agent_factory.cli outlook-local-read --index 1
 ```
 
 ```bash
-python -m agent_factory.cli outlook-local-draft-reply --message-id "<entry-id>" --agent-dir generated_agents/outlookemailmanager_YYYYMMDD_HHMMSS
+python -m agent_factory.cli outlook-local-draft-reply --index 1 --agent-dir generated_agents/outlookemailmanager_YYYYMMDD_HHMMSS
 ```
 
 ```bash
-python -m agent_factory.cli outlook-local-create-event --subject "Deal Call" --start "2026-02-06T14:00:00" --end "2026-02-06T15:00:00" --attendees analyst@company.com
+python -m agent_factory.cli outlook-local-mark --index 1
+```
+
+```bash
+python -m agent_factory.cli outlook-local-move --index 1 --folder "Inbox/Archive"
 ```
 
 ```bash
 python -m agent_factory.cli outlook-local-triage --agent-dir generated_agents/outlookemailmanager_YYYYMMDD_HHMMSS --top 15 --unread-only --auto-draft --max-drafts 5
+```
+
+Additional local commands:
+
+```bash
+python -m agent_factory.cli outlook-local-folders --query "inbox"
+```
+
+```bash
+python -m agent_factory.cli outlook-local-drafts --top 20
+```
+
+```bash
+python -m agent_factory.cli outlook-local-send-draft --index 1
+```
+
+```bash
+python -m agent_factory.cli outlook-local-draft-reply --index 1 --body "Thanks, I will review and follow up." --send-now
+```
+
+```bash
+python -m agent_factory.cli outlook-local-create-event --subject "Deal Call" --start "2026-02-06T14:00:00" --end "2026-02-06T15:00:00" --attendees analyst@company.com
 ```
 
 ## Outlook + Microsoft Graph Integration
