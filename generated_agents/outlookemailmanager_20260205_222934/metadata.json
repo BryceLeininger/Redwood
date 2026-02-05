@@ -1,0 +1,29 @@
+{
+  "created_at_utc": "2026-02-05T22:29:34.754869+00:00",
+  "artifact_paths": {
+    "model": "generated_agents\\outlookemailmanager_20260205_222934\\model.joblib",
+    "knowledge_index": "generated_agents\\outlookemailmanager_20260205_222934\\knowledge.joblib"
+  },
+  "training_dataset": "C:\\Users\\Bryce.Leininger\\Desktop\\Redwood\\agent_factory\\examples\\outlook_email_manager\\training.csv",
+  "knowledge_files": [
+    "C:\\Users\\Bryce.Leininger\\Desktop\\Redwood\\agent_factory\\examples\\outlook_email_manager\\knowledge\\outlook_email_ops.md",
+    "C:\\Users\\Bryce.Leininger\\Desktop\\Redwood\\agent_factory\\examples\\outlook_email_manager\\knowledge\\response_templates.md"
+  ],
+  "blueprint": {
+    "name": "OutlookEmailManager",
+    "description": "Manages Outlook email workflows: triage, routing, drafting, and follow-ups.",
+    "topic": "Outlook Email Operations",
+    "task_type": "classification",
+    "input_column": "input",
+    "target_column": "target"
+  },
+  "training": {
+    "total_rows": 20,
+    "train_rows": 20,
+    "evaluation_rows": 20,
+    "used_holdout_split": false,
+    "metric_name": "accuracy",
+    "metric_value": 1.0,
+    "task_type": "classification"
+  }
+}

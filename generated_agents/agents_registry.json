@@ -7,5 +7,32 @@
     "created_at_utc": "2026-02-05T22:23:16.355170+00:00",
     "metric_name": "accuracy",
     "metric_value": 1.0
+  },
+  {
+    "name": "OutlookEmailManager",
+    "topic": "Outlook Email Operations",
+    "task_type": "classification",
+    "agent_dir": "C:\\Users\\Bryce.Leininger\\Desktop\\Redwood\\generated_agents\\outlookemailmanager_20260205_222934",
+    "created_at_utc": "2026-02-05T22:29:34.754869+00:00",
+    "metric_name": "accuracy",
+    "metric_value": 1.0
+  },
+  {
+    "name": "LandDealUnderwriter",
+    "topic": "Land Acquisition Underwriting",
+    "task_type": "regression",
+    "agent_dir": "C:\\Users\\Bryce.Leininger\\Desktop\\Redwood\\generated_agents\\landdealunderwriter_20260205_222934",
+    "created_at_utc": "2026-02-05T22:29:34.785978+00:00",
+    "metric_name": "rmse",
+    "metric_value": 1841128.443760789
+  },
+  {
+    "name": "HousingMarketResearcher",
+    "topic": "Housing Market Research",
+    "task_type": "classification",
+    "agent_dir": "C:\\Users\\Bryce.Leininger\\Desktop\\Redwood\\generated_agents\\housingmarketresearcher_20260205_222934",
+    "created_at_utc": "2026-02-05T22:29:34.815722+00:00",
+    "metric_name": "accuracy",
+    "metric_value": 0.5
   }
 ]

@@ -73,3 +73,16 @@ You can rename these with `--input-column` and `--target-column`.
 - Small datasets (<10 rows) are trained and evaluated on the same data.
 - Larger datasets use a holdout split for evaluation metrics.
 - Topic answers are retrieval-based excerpts from indexed knowledge docs.
+
+## Bootstrap the Three Requested Agents
+
+This project includes a helper script that creates:
+- `OutlookEmailManager`
+- `LandDealUnderwriter`
+- `HousingMarketResearcher`
+
+Run:
+
+```bash
+python -m agent_factory.bootstrap_requested_agents
+```
