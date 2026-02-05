@@ -1,0 +1,11 @@
+[
+  {
+    "name": "SupportRouter",
+    "topic": "Customer Support",
+    "task_type": "classification",
+    "agent_dir": "C:\\Users\\Bryce.Leininger\\Desktop\\Redwood\\generated_agents\\supportrouter_20260205_222316",
+    "created_at_utc": "2026-02-05T22:23:16.355170+00:00",
+    "metric_name": "accuracy",
+    "metric_value": 1.0
+  }
+]

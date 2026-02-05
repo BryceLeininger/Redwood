@@ -1,0 +1,29 @@
+{
+  "created_at_utc": "2026-02-05T22:23:16.355170+00:00",
+  "artifact_paths": {
+    "model": "generated_agents\\supportrouter_20260205_222316\\model.joblib",
+    "knowledge_index": "generated_agents\\supportrouter_20260205_222316\\knowledge.joblib"
+  },
+  "training_dataset": "C:\\Users\\Bryce.Leininger\\Desktop\\Redwood\\agent_factory\\examples\\support_training.csv",
+  "knowledge_files": [
+    "C:\\Users\\Bryce.Leininger\\Desktop\\Redwood\\agent_factory\\examples\\knowledge\\billing.md",
+    "C:\\Users\\Bryce.Leininger\\Desktop\\Redwood\\agent_factory\\examples\\knowledge\\support.md"
+  ],
+  "blueprint": {
+    "name": "SupportRouter",
+    "description": "Routes support requests to queues.",
+    "topic": "Customer Support",
+    "task_type": "classification",
+    "input_column": "input",
+    "target_column": "target"
+  },
+  "training": {
+    "total_rows": 12,
+    "train_rows": 12,
+    "evaluation_rows": 12,
+    "used_holdout_split": false,
+    "metric_name": "accuracy",
+    "metric_value": 1.0,
+    "task_type": "classification"
+  }
+}
