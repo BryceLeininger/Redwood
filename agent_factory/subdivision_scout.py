@@ -472,7 +472,12 @@ class SubdivisionScout:
                 items.append(result)
 
             for query in target.queries_for_stage(stage, query_templates):
-                for result in self._search_rss(query, max_results=max_results_per_query):
+                try:
+                    search_results = self._search_rss(query, max_results=max_results_per_query)
+                except (requests.RequestException, ET.ParseError):
+                    continue
+
+                for result in search_results:
                     dedupe_key = (stage, result["url"].lower())
                     if dedupe_key in seen:
                         continue
@@ -613,24 +618,7 @@ def load_watch_targets(jurisdictions: Sequence[str], watchlist_file: str | None 
 
         if path.suffix.lower() == ".json":
             payload = json.loads(path.read_text(encoding="utf-8"))
-            if isinstance(payload, list):
-                for item in payload:
-                    targets.append(_parse_watch_target(item))
-            elif isinstance(payload, dict):
-                target_items = payload.get("targets")
-                if target_items is not None:
-                    if not isinstance(target_items, list):
-                        raise ValueError("Watchlist JSON field 'targets' must be a list.")
-                    for item in target_items:
-                        targets.append(_parse_watch_target(item))
-                else:
-                    items = payload.get("jurisdictions", [])
-                    if not isinstance(items, list):
-                        raise ValueError("Watchlist JSON object must contain a 'jurisdictions' list or 'targets' list.")
-                    for item in items:
-                        targets.append(_parse_watch_target(item))
-            else:
-                raise ValueError("Watchlist JSON must be an array of jurisdiction strings or an object.")
+            targets.extend(_targets_from_payload(payload))
         else:
             for line in path.read_text(encoding="utf-8").splitlines():
                 line = line.strip()
@@ -654,6 +642,54 @@ def load_watch_targets(jurisdictions: Sequence[str], watchlist_file: str | None 
         seen.add(key)
         deduped.append(item)
     return deduped
+
+
+def load_watch_targets_from_text(raw_text: str) -> List[WatchTarget]:
+    raw_text = raw_text.strip()
+    if not raw_text:
+        return []
+
+    if raw_text.startswith("{") or raw_text.startswith("["):
+        payload = json.loads(raw_text)
+        return _targets_from_payload(payload)
+
+    return [
+        WatchTarget(
+            jurisdiction=line.strip(),
+            approved_queries=[],
+            upcoming_queries=[],
+            approved_urls=[],
+            upcoming_urls=[],
+        )
+        for line in raw_text.splitlines()
+        if line.strip()
+    ]
+
+
+def _targets_from_payload(payload: Any) -> List[WatchTarget]:
+    targets: List[WatchTarget] = []
+    if isinstance(payload, list):
+        for item in payload:
+            targets.append(_parse_watch_target(item))
+        return targets
+
+    if isinstance(payload, dict):
+        target_items = payload.get("targets")
+        if target_items is not None:
+            if not isinstance(target_items, list):
+                raise ValueError("Watchlist JSON field 'targets' must be a list.")
+            for item in target_items:
+                targets.append(_parse_watch_target(item))
+            return targets
+
+        items = payload.get("jurisdictions", [])
+        if not isinstance(items, list):
+            raise ValueError("Watchlist JSON object must contain a 'jurisdictions' list or 'targets' list.")
+        for item in items:
+            targets.append(_parse_watch_target(item))
+        return targets
+
+    raise ValueError("Watchlist JSON must be an array of jurisdiction strings or an object.")
 
 
 def _parse_watch_target(value: Any) -> WatchTarget:

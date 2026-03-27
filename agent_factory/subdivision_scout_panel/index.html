@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Residential Subdivision Scout</title>
+    <link rel="stylesheet" href="/scout/styles.css" />
+  </head>
+  <body>
+    <div class="page-shell">
+      <header class="hero">
+        <div class="hero-copy">
+          <p class="eyebrow">Residential Subdivision Scout</p>
+          <h1>Find subdivision candidates before everyone else does.</h1>
+          <p class="hero-text">
+            Screen a parcel, rank a feed, and monitor tentative maps from one local dashboard.
+          </p>
+        </div>
+
+        <div class="hero-side">
+          <div class="hero-card">
+            <p class="hero-card-label">Active Agent</p>
+            <select id="agentSelect" class="agent-select" aria-label="Select scout agent"></select>
+            <p id="agentMeta" class="agent-meta">Loading agent registry…</p>
+          </div>
+
+          <div class="hero-actions">
+            <button id="loadSamplesBtn" class="button secondary" type="button">Load Samples</button>
+            <button id="refreshAgentsBtn" class="button ghost" type="button">Refresh Agents</button>
+          </div>
+        </div>
+      </header>
+
+      <main class="workspace">
+        <section class="control-column">
+          <article class="panel">
+            <div class="panel-heading">
+              <div>
+                <p class="panel-kicker">Single Parcel</p>
+                <h2>Score One Parcel</h2>
+              </div>
+              <button id="sampleSingleBtn" class="mini-button" type="button">Use Sample</button>
+            </div>
+
+            <div class="field-row compact">
+              <label>
+                <span>Parcel ID</span>
+                <input id="parcelIdInput" type="text" value="parcel-1" />
+              </label>
+              <label>
+                <span>Market</span>
+                <input id="marketInput" type="text" value="unknown" />
+              </label>
+            </div>
+
+            <label class="field-block">
+              <span>Parcel Notes</span>
+              <textarea
+                id="singleParcelInput"
+                rows="6"
+                placeholder="Paste broker notes, zoning context, utilities, lot count assumptions, and diligence notes."
+              ></textarea>
+            </label>
+
+            <div class="button-row">
+              <button id="screenTextBtn" class="button primary" type="button">Score Parcel</button>
+            </div>
+          </article>
+
+          <article class="panel">
+            <div class="panel-heading">
+              <div>
+                <p class="panel-kicker">Feed Ranking</p>
+                <h2>Rank Parcel CSV</h2>
+              </div>
+              <div class="panel-tools">
+                <label class="file-chip">
+                  <input id="csvFileInput" type="file" accept=".csv,text/csv" />
+                  Import CSV
+                </label>
+                <button id="sampleCsvBtn" class="mini-button" type="button">Use Sample</button>
+              </div>
+            </div>
+
+            <div class="field-row compact">
+              <label>
+                <span>Top Results</span>
+                <input id="topInput" type="number" min="1" value="12" />
+              </label>
+              <label>
+                <span>Min Score</span>
+                <input id="minScoreInput" type="number" min="0" max="100" step="0.1" value="0" />
+              </label>
+            </div>
+
+            <label class="field-block">
+              <span>Parcel CSV</span>
+              <textarea
+                id="csvInput"
+                rows="9"
+                placeholder="Paste parcel CSV with a header row. Include description, zoning, utilities, notes, acres, planned_lots, and market where possible."
+              ></textarea>
+            </label>
+
+            <div class="button-row">
+              <button id="screenCsvBtn" class="button primary" type="button">Rank Feed</button>
+            </div>
+          </article>
+
+          <article class="panel">
+            <div class="panel-heading">
+              <div>
+                <p class="panel-kicker">Planning Intel</p>
+                <h2>Watch Tentative Maps</h2>
+              </div>
+              <div class="panel-tools">
+                <label class="file-chip">
+                  <input id="watchFileInput" type="file" accept=".json,.txt,application/json,text/plain" />
+                  Import Watchlist
+                </label>
+                <button id="sampleWatchBtn" class="mini-button" type="button">Use Sample</button>
+              </div>
+            </div>
+
+            <div class="field-row compact">
+              <label>
+                <span>Lookback Days</span>
+                <input id="lookbackInput" type="number" min="1" value="120" />
+              </label>
+              <label>
+                <span>Max Hits / Query</span>
+                <input id="maxResultsInput" type="number" min="1" value="5" />
+              </label>
+            </div>
+
+            <label class="field-block">
+              <span>Watchlist</span>
+              <textarea
+                id="watchlistInput"
+                rows="9"
+                placeholder="Paste a JSON watchlist or a line-separated list of jurisdictions."
+              ></textarea>
+            </label>
+
+            <div class="button-row">
+              <button id="watchBtn" class="button primary" type="button">Run Planning Watch</button>
+            </div>
+          </article>
+
+          <article class="panel accent-panel">
+            <div class="panel-heading">
+              <div>
+                <p class="panel-kicker">Combined Run</p>
+                <h2>Full Sweep</h2>
+              </div>
+            </div>
+
+            <p class="accent-copy">
+              Uses the CSV if present. If the CSV is empty, it falls back to the single parcel input.
+            </p>
+
+            <div class="button-row">
+              <button id="fullSweepBtn" class="button accent" type="button">Run Full Sweep</button>
+            </div>
+          </article>
+        </section>
+
+        <section class="results-column">
+          <div class="results-topline">
+            <div>
+              <p class="panel-kicker">Run Output</p>
+              <h2>Results</h2>
+            </div>
+            <div id="statusPill" class="status-pill idle">Ready</div>
+          </div>
+
+          <section id="summaryCards" class="summary-grid"></section>
+
+          <section id="resultBody" class="result-stack">
+            <article class="empty-state">
+              <p class="empty-title">Nothing has run yet.</p>
+              <p>
+                Load the sample data or paste a live parcel feed and watchlist to start screening opportunities.
+              </p>
+            </article>
+          </section>
+        </section>
+      </main>
+    </div>
+
+    <script src="/scout/app.js" defer></script>
+  </body>
+</html>
