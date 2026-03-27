@@ -682,14 +682,18 @@ def _query_variants_for_prompt(spec: OpportunitySearchSpec, area: str, stage: st
     stage_fragments = {
         "approved_recently": [
             ["subdivision", '"tentative map"', "approved"],
+            ['"tentative subdivision map"', '"single family"', "approved"],
             ['"vesting tentative tract map"', "approved"],
+            ['"final map"', '"residential lots"'],
             ['"tentative tract map"', "approved"],
-            ["subdivision", '"staff report"', "approved"],
+            ["subdivision", '"staff report"', '"single family"'],
         ],
         "approaching_approval": [
             ["subdivision", '"tentative map"', "agenda"],
+            ['"tentative subdivision map"', '"recommended approval"', '"single family"'],
             ['"tentative tract map"', '"planning commission"'],
             ['"plans projects under review"', "subdivision"],
+            ['"staff report"', '"residential lots"'],
             ["subdivision", '"recommended approval"', '"tentative map"'],
         ],
     }
@@ -1061,6 +1065,8 @@ def _result_matches_prompt_search(
         return False
     if spec.housing_type == "single_family_detached" and not any(term in haystack for term in SINGLE_FAMILY_TERMS):
         return False
+    if spec.housing_type != "single_family_detached" and not any(term in haystack for term in RESIDENTIAL_PRODUCT_TERMS):
+        return False
     return True
 
 
@@ -1068,6 +1074,7 @@ def _qualify_prompt_result(
     spec: OpportunitySearchSpec,
     extracted_acres: float | None,
     extracted_lots: int | None,
+    assessment: OpportunityAssessment | None = None,
 ) -> tuple[str | None, List[str], float]:
     notes: List[str] = []
     score = 45.0
@@ -1090,11 +1097,28 @@ def _qualify_prompt_result(
             notes.append(f"{extracted_lots} lots found.")
             score += 22.0
 
+    qualification = "qualified"
     if spec.min_acres is not None and extracted_acres is None:
-        return "needs_review", notes, score
+        qualification = "needs_review"
     if spec.min_lots is not None and extracted_lots is None:
-        return "needs_review", notes, score
-    return "qualified", notes or ["Matches the requested filters."], min(score, 100.0)
+        qualification = "needs_review"
+
+    if assessment is None:
+        return qualification, notes or ["Matches the requested filters."], min(score, 100.0)
+
+    if assessment.opportunity_profile != "subdivision_candidate":
+        notes.append(f"Profile: {OPPORTUNITY_PROFILE_LABELS.get(assessment.opportunity_profile, assessment.opportunity_profile)}.")
+    if assessment.positive_hits:
+        notes.append("Builder positives: " + ", ".join(assessment.positive_hits[:2]) + ".")
+    if assessment.risk_hits:
+        notes.append("Builder risks: " + ", ".join(assessment.risk_hits[:2]) + ".")
+
+    blended_score = min(100.0, round((score * 0.5) + (assessment.priority_score * 0.5), 1))
+    if qualification == "qualified" and assessment.execution_readiness_score < 42.0:
+        qualification = "needs_review"
+        notes.append("Execution timing still looks long-dated for a homebuilder.")
+
+    return qualification, notes or ["Matches the requested filters."], blended_score
 
 
 class SubdivisionScout:
