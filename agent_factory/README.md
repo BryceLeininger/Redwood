@@ -136,6 +136,30 @@ python -m agent_factory.cli subdivision-scout-web-watch \
 
 `sample_watchlist.json` demonstrates an advanced format with per-jurisdiction query overrides and curated official source URLs.
 
+### Subdivision Scout Dashboard
+
+For a local browser UI instead of the CLI:
+
+```bash
+run_subdivision_scout_panel.bat
+```
+
+Or launch the server directly:
+
+```bash
+python -m agent_factory.subdivision_scout_panel_server --host 127.0.0.1 --port 8785
+```
+
+Then open:
+
+`http://127.0.0.1:8785`
+
+The dashboard supports:
+- scoring one parcel from notes
+- ranking a parcel CSV feed
+- running the planning watch against a JSON or line-based watchlist
+- running a combined full sweep with sample data loaders
+
 ## Outlook Integration Without Admin Access
 
 If you do not have Azure admin access, use local Outlook Desktop automation:

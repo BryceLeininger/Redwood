@@ -179,6 +179,8 @@ def create_app(
 
     @app.post("/api/screen-text")
     def screen_text(payload: ScreenTextRequest) -> dict[str, Any]:
+        if not payload.text.strip():
+            raise HTTPException(status_code=400, detail="Parcel notes cannot be empty.")
         scout = _load_scout(output_root, subdivision_agent_dir, payload.agent_dir)
         result = scout.screen_parcel_text(
             text=payload.text,
