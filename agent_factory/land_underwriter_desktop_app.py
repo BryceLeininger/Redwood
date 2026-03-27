@@ -1170,8 +1170,13 @@ class LandUnderwriterDesktopApp:
         series_payload: list[dict[str, Any]] = []
         for index, row in enumerate(self.series_rows, start=1):
             row_text = {key: str(value.get()).strip() for key, value in row.items() if key != "move_up"}
+            default_name = f"Series {chr(64 + index)}"
             lots_raw = row_text.get("lots", "")
-            has_content = any(value for value in row_text.values()) or bool(row["move_up"].get())
+            has_content = (
+                any(value for key, value in row_text.items() if key != "name")
+                or (row_text.get("name") not in ("", default_name))
+                or bool(row["move_up"].get())
+            )
             if not has_content:
                 continue
             lots = _parse_optional_float(lots_raw) if lots_raw else None
@@ -1192,7 +1197,7 @@ class LandUnderwriterDesktopApp:
                 raise ValueError(f"Series row {index} needs Base Price.")
 
             item: dict[str, Any] = {
-                "name": row_text.get("name") or f"Series {index}",
+                "name": row_text.get("name") or default_name,
                 "lots": lots,
                 "avg_sqft": avg_sqft or 0.0,
                 "base_house_price": base_house_price or 0.0,
