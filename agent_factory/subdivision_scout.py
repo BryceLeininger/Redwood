@@ -33,6 +33,8 @@ POSITIVE_SIGNALS: Dict[str, int] = {
     "by right": 10,
     "entitled": 16,
     "tentative map approved": 16,
+    "final map": 20,
+    "recorded final map": 20,
     "vesting tentative map": 12,
     "adjacent to existing subdivision": 10,
     "utilities at site": 12,
@@ -47,11 +49,30 @@ POSITIVE_SIGNALS: Dict[str, int] = {
     "townhome": 6,
     "completed traffic study": 6,
     "arterial frontage": 6,
+    "collector road": 5,
     "sewer nearby": 6,
     "water nearby": 6,
+    "water and sewer nearby": 8,
+    "sewer capacity confirmed": 12,
+    "water capacity confirmed": 10,
     "existing utilities": 10,
     "finished lots": 18,
+    "finished lot": 18,
+    "paper lots": 16,
     "lot take down": 8,
+    "lot takedown": 8,
+    "builder comps": 6,
+    "builder activity": 8,
+    "existing rooftops": 8,
+    "employment center": 6,
+    "clean title": 10,
+    "horizontal work largely complete": 14,
+    "backbone utilities": 10,
+    "minimal grading": 10,
+    "low site prep": 8,
+    "within city limits": 5,
+    "entry-level builder": 7,
+    "supply constrained": 7,
 }
 
 RISK_SIGNALS: Dict[str, int] = {
@@ -66,6 +87,9 @@ RISK_SIGNALS: Dict[str, int] = {
     "no sewer": 18,
     "utility extension": 14,
     "rezone": 14,
+    "general plan amendment": 16,
+    "outside city limits": 14,
+    "county island": 12,
     "zoning variance": 10,
     "entitlement risk": 14,
     "steep": 12,
@@ -79,6 +103,10 @@ RISK_SIGNALS: Dict[str, int] = {
     "fire flow": 8,
     "litigation": 18,
     "high impact fees": 8,
+    "capacity constraint": 14,
+    "uncertain lot yield": 10,
+    "moratorium": 20,
+    "no approvals yet": 8,
 }
 
 APPROVED_QUERY_TEMPLATES = [
@@ -96,8 +124,11 @@ UPCOMING_QUERY_TEMPLATES = [
 LAND_USE_TERMS: Sequence[str] = (
     "tentative map",
     "vesting tentative map",
+    "tentative subdivision map",
     "subdivision",
     "tract map",
+    "final map",
+    "residential lots",
 )
 
 PROCESS_TERMS_BY_STAGE: Dict[str, Sequence[str]] = {
@@ -140,6 +171,96 @@ SINGLE_FAMILY_TERMS: Sequence[str] = (
     "detached housing",
     "single family detached",
 )
+
+RESIDENTIAL_PRODUCT_TERMS: Sequence[str] = (
+    *SINGLE_FAMILY_TERMS,
+    "residential",
+    "residential lots",
+    "detached homes",
+    "dwelling units",
+    "homes",
+    "subdivision",
+)
+
+FINISHED_LOT_TERMS: Sequence[str] = (
+    "finished lots",
+    "finished lot",
+    "paper lots",
+    "lot take down",
+    "lot takedown",
+    "final map",
+    "recorded final map",
+    "horizontal work largely complete",
+)
+
+NEAR_TERM_ENTITLEMENT_TERMS: Sequence[str] = (
+    "tentative map approved",
+    "vesting tentative map",
+    "entitled",
+    "by right",
+    "shovel ready",
+)
+
+ACTIVE_ENTITLEMENT_TERMS: Sequence[str] = (
+    "recommended approval",
+    "public hearing",
+    "staff report",
+    "planning commission",
+    "city council",
+    "under review",
+    "pending approval",
+    "in process",
+)
+
+EARLY_STAGE_TERMS: Sequence[str] = (
+    "annexation candidate",
+    "potential residential rezone",
+    "general plan amendment",
+    "specific plan",
+)
+
+RAW_LAND_TERMS: Sequence[str] = (
+    "raw land",
+    "outside city limits",
+    "septic",
+    "no sewer",
+)
+
+FATAL_RISK_TERMS: Sequence[str] = (
+    "floodplain",
+    "wetlands",
+    "brownfield",
+    "remediation",
+    "endangered species",
+    "litigation",
+    "title issue",
+)
+
+PARCEL_FIELD_LABELS: Dict[str, str] = {
+    "parcel_id": "Parcel ID",
+    "description": "Description",
+    "zoning": "Zoning",
+    "status": "Status",
+    "utilities": "Utilities",
+    "notes": "Notes",
+    "market": "Market",
+    "jurisdiction": "Jurisdiction",
+    "city": "City",
+    "county": "County",
+    "state": "State",
+    "acres": "Acres",
+    "planned_lots": "Planned lots",
+    "density": "Density",
+}
+
+OPPORTUNITY_PROFILE_LABELS: Dict[str, str] = {
+    "finished_lot_delivery": "finished lot or map-recorded delivery",
+    "near_term_entitled_land": "near-term entitled land",
+    "active_entitlement_land": "active entitlement land",
+    "subdivision_candidate": "subdivision candidate",
+    "early_stage_land": "early-stage land",
+    "raw_land": "raw land or long-lead entitlement",
+}
 
 PROMPT_STAGE_TERMS: Dict[str, Sequence[str]] = {
     "approved_recently": (
@@ -202,9 +323,15 @@ class ParcelScreeningResult:
     parcel_id: str
     market: str
     priority_score: float
+    builder_fit_score: float
+    execution_readiness_score: float
     recommendation: str
+    opportunity_profile: str
     model_prediction: str
     model_confidence: float | None
+    extracted_acres: float | None
+    extracted_lots: int | None
+    density_du_per_acre: float | None
     positive_signals: List[str]
     risk_signals: List[str]
     rationale: str
@@ -280,12 +407,33 @@ class OpportunitySearchItem:
     matched_query: str
     extracted_acres: float | None
     extracted_lots: int | None
+    density_du_per_acre: float | None
     qualification: str
     qualification_notes: List[str]
+    opportunity_profile: str
+    builder_fit_score: float
+    execution_readiness_score: float
+    positive_signals: List[str]
+    risk_signals: List[str]
     score: float
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
+
+
+@dataclass(frozen=True)
+class OpportunityAssessment:
+    priority_score: float
+    builder_fit_score: float
+    execution_readiness_score: float
+    recommendation: str
+    opportunity_profile: str
+    extracted_acres: float | None
+    extracted_lots: int | None
+    density_du_per_acre: float | None
+    positive_hits: List[str]
+    risk_hits: List[str]
+    rationale: str
 
 
 def _clean_text(value: str) -> str:
