@@ -285,3 +285,338 @@ class LandUnderwriterDesktopApp:
         self._make_info_chip(strip, self.agent_var).grid(row=0, column=1, sticky="w", padx=(0, 8))
         self._make_info_chip(strip, self.status_var, accent=True).grid(row=0, column=2, sticky="e")
 
+    def _build_builder_tab(self) -> None:
+        self.builder_tab.grid_columnconfigure(0, weight=1)
+        self.builder_tab.grid_rowconfigure(0, weight=1)
+
+        panes = ttk.Panedwindow(self.builder_tab, orient="horizontal")
+        panes.grid(row=0, column=0, sticky="nsew")
+
+        left_host = tk.Frame(self.builder_tab, bg=COLORS["bg"])
+        right_host = tk.Frame(self.builder_tab, bg=COLORS["bg"], width=340)
+        left_host.grid_columnconfigure(0, weight=1)
+        left_host.grid_rowconfigure(0, weight=1)
+        right_host.grid_propagate(False)
+
+        panes.add(left_host, weight=3)
+        panes.add(right_host, weight=1)
+
+        scroller = ScrollableFrame(left_host, bg=COLORS["bg"])
+        scroller.grid(row=0, column=0, sticky="nsew")
+        body = scroller.content
+        body.grid_columnconfigure(0, weight=1)
+
+        self._build_identity_section(body)
+        self._build_land_section(body)
+        self._build_series_section(body)
+        self._build_operations_section(body)
+        self._build_targets_section(body)
+        self._build_notes_section(body)
+
+        self._build_sidebar(right_host)
+        self._attach_live_refresh_bindings()
+
+    def _build_identity_section(self, parent: tk.Widget) -> None:
+        body = self._create_section(
+            parent,
+            title="1. Community Snapshot",
+            subtitle="Anchor the screen with the deal identity before you start tuning assumptions.",
+        )
+        body.grid_columnconfigure((0, 1, 2), weight=1)
+
+        self._labeled_entry(body, "Community Name", "community_name", 0, 0, width=24)
+        self._labeled_entry(body, "Division", "division", 0, 1, width=18)
+        self._labeled_entry(body, "Market", "market", 0, 2, width=18)
+        self._labeled_entry(body, "Gross Acres", "gross_acres", 1, 0, width=10)
+        self._labeled_entry(body, "Land Close Date", "land_close_date", 1, 1, width=14)
+        self._labeled_combo(
+            body,
+            "Takedown Structure",
+            "takedown_structure",
+            ("bulk", "takedown", "rolling"),
+            1,
+            2,
+            width=14,
+        )
+
+    def _build_land_section(self, parent: tk.Widget) -> None:
+        body = self._create_section(
+            parent,
+            title="2. Land Basis And Horizontal Spend",
+            subtitle="Use the simple fields for most deals. If you have a staged takedown, enter one line per event.",
+        )
+        body.grid_columnconfigure((0, 1, 2), weight=1)
+
+        self._labeled_entry(body, "Land Price / Lot", "land_purchase_price_per_lot", 0, 0, width=12)
+        self._labeled_entry(
+            body,
+            "Broker + Closing Costs",
+            "land_brokerage_and_closing_costs_total",
+            0,
+            1,
+            width=14,
+        )
+        self._labeled_entry(body, "Earnest Deposit", "earnest_money_deposit", 0, 2, width=14)
+        self._labeled_checkbox(body, "Deposit Credits At Close", "deposit_credit_at_close", 1, 0)
+        self._labeled_entry(body, "Land Development", "land_development_cost_total", 1, 1, width=14)
+        self._labeled_entry(body, "Project Management", "project_management_cost_total", 1, 2, width=14)
+        self._labeled_entry(body, "Other Land Costs", "other_land_costs_total", 2, 0, width=14)
+
+        events_frame = tk.Frame(body, bg=COLORS["card"])
+        events_frame.grid(row=3, column=0, columnspan=3, sticky="ew", pady=(12, 0))
+        events_frame.grid_columnconfigure(0, weight=1)
+        tk.Label(
+            events_frame,
+            text="Takedown Events",
+            bg=COLORS["card"],
+            fg=COLORS["ink"],
+            font=("Segoe UI", 10, "bold"),
+        ).grid(row=0, column=0, sticky="w")
+        tk.Label(
+            events_frame,
+            text="One event per line: month,lots,price_per_lot  Example: 0,25,67500",
+            bg=COLORS["card"],
+            fg=COLORS["muted"],
+            font=("Segoe UI", 9),
+        ).grid(row=1, column=0, sticky="w", pady=(2, 6))
+        self.events_text = ScrolledText(
+            events_frame,
+            height=4,
+            wrap="none",
+            font=("Consolas", 10),
+            bg="#FFFDFC",
+            fg=COLORS["ink"],
+            insertbackground=COLORS["ink"],
+            relief="flat",
+            borderwidth=1,
+        )
+        self.events_text.grid(row=2, column=0, sticky="ew")
+
+    def _build_series_section(self, parent: tk.Widget) -> None:
+        body = self._create_section(
+            parent,
+            title="3. Product Mix Builder",
+            subtitle="Rows with zero lots are ignored. This stays fast for common underwriting, while Advanced JSON handles edge-case overrides.",
+        )
+        body.grid_columnconfigure(0, weight=1)
+
+        globals_frame = tk.Frame(body, bg=COLORS["card"])
+        globals_frame.grid(row=0, column=0, sticky="ew")
+        globals_frame.grid_columnconfigure((0, 1, 2), weight=1)
+
+        self._labeled_entry(globals_frame, "Options %", "options_pct", 0, 0, width=10)
+        self._labeled_entry(globals_frame, "Price Incentives %", "price_incentives_pct", 0, 1, width=10)
+        self._labeled_entry(globals_frame, "Mortgage Incentives %", "mortgage_incentives_pct", 0, 2, width=10)
+        self._labeled_entry(
+            globals_frame,
+            "Direct Cost Contingency %",
+            "direct_cost_contingency_pct",
+            1,
+            0,
+            width=10,
+        )
+        self._labeled_entry(
+            globals_frame,
+            "Other Vertical / Unit",
+            "other_vertical_costs_per_unit",
+            1,
+            1,
+            width=12,
+        )
+        self._labeled_entry(
+            globals_frame,
+            "Other House Costs / Unit",
+            "other_house_costs_per_unit",
+            1,
+            2,
+            width=12,
+        )
+
+        grid = tk.Frame(body, bg=COLORS["card_alt"], padx=12, pady=12, highlightbackground=COLORS["line"], highlightthickness=1)
+        grid.grid(row=1, column=0, sticky="ew", pady=(14, 0))
+
+        for col, (_, label) in enumerate(SERIES_FIELDS):
+            tk.Label(
+                grid,
+                text=label,
+                bg=COLORS["card_alt"],
+                fg=COLORS["navy"],
+                font=("Segoe UI", 9, "bold"),
+                padx=4,
+                pady=6,
+            ).grid(row=0, column=col, sticky="ew")
+        tk.Label(
+            grid,
+            text="Move-Up",
+            bg=COLORS["card_alt"],
+            fg=COLORS["navy"],
+            font=("Segoe UI", 9, "bold"),
+            padx=4,
+            pady=6,
+        ).grid(row=0, column=len(SERIES_FIELDS), sticky="ew")
+
+        for row_index in range(SERIES_ROW_COUNT):
+            row_vars: dict[str, tk.Variable] = {}
+            for col_index, (field_name, _) in enumerate(SERIES_FIELDS):
+                default = f"Series {chr(65 + row_index)}" if field_name == "name" else ""
+                var = tk.StringVar(value=default)
+                row_vars[field_name] = var
+                entry = tk.Entry(
+                    grid,
+                    textvariable=var,
+                    font=("Segoe UI", 10),
+                    bg="#FFFDFC",
+                    fg=COLORS["ink"],
+                    relief="flat",
+                    highlightthickness=1,
+                    highlightbackground=COLORS["line"],
+                    highlightcolor=COLORS["accent"],
+                    width=12 if field_name == "name" else 10,
+                )
+                entry.grid(row=row_index + 1, column=col_index, sticky="ew", padx=3, pady=3, ipady=5)
+            move_var = tk.BooleanVar(value=False)
+            row_vars["move_up"] = move_var
+            check = tk.Checkbutton(
+                grid,
+                variable=move_var,
+                bg=COLORS["card_alt"],
+                activebackground=COLORS["card_alt"],
+                selectcolor=COLORS["card_alt"],
+            )
+            check.grid(row=row_index + 1, column=len(SERIES_FIELDS), padx=6)
+            self.series_rows.append(row_vars)
+
+    def _build_operations_section(self, parent: tk.Widget) -> None:
+        body = self._create_section(
+            parent,
+            title="4. Operating Plan",
+            subtitle="These timing assumptions drive the schedule, cash curve, and stress-case velocity.",
+        )
+        body.grid_columnconfigure((0, 1, 2), weight=1)
+
+        self._labeled_entry(body, "Architecture + Engineering", "architecture_engineering_total", 0, 0, width=14)
+        self._labeled_entry(body, "Indirect Overhead / Month", "indirect_field_overhead_per_month", 0, 1, width=14)
+        self._labeled_entry(body, "Capitalized Marketing", "capitalized_marketing_total", 0, 2, width=14)
+        self._labeled_entry(body, "Monthly Absorption", "monthly_absorption", 1, 0, width=10)
+        self._labeled_entry(body, "Build Cycle (Months)", "build_cycle_months", 1, 1, width=10)
+        self._labeled_entry(body, "Months To First Home Start", "months_to_first_home_start", 1, 2, width=10)
+        self._labeled_entry(body, "Months To Sales Open", "months_to_sales_open", 2, 0, width=10)
+        self._labeled_entry(body, "Months To First Close", "months_to_first_close", 2, 1, width=10)
+        self._labeled_entry(body, "Site Spend Months", "site_improvement_spend_months", 2, 2, width=10)
+
+    def _build_targets_section(self, parent: tk.Widget) -> None:
+        body = self._create_section(
+            parent,
+            title="5. Returns And Stress Cases",
+            subtitle="Set the decision hurdles and the downside assumptions you want the agent to pressure-test.",
+        )
+        body.grid_columnconfigure((0, 1, 2), weight=1)
+
+        self._labeled_entry(body, "Sales Commission %", "sales_commission_pct", 0, 0, width=10)
+        self._labeled_entry(body, "Corporate Charge %", "corporate_charge_pct", 0, 1, width=10)
+        self._labeled_entry(body, "Excise Tax %", "home_sale_excise_tax_pct", 0, 2, width=10)
+        self._labeled_entry(body, "Target Gross Margin %", "target_gross_margin_pct", 1, 0, width=10)
+        self._labeled_entry(body, "Target Pre-G&A %", "target_pre_gna_margin_pct", 1, 1, width=10)
+        self._labeled_entry(body, "Target IRR %", "target_irr_pct", 1, 2, width=10)
+
+        tk.Label(
+            body,
+            text="Downside",
+            bg=COLORS["card"],
+            fg=COLORS["navy"],
+            font=("Segoe UI", 10, "bold"),
+        ).grid(row=2, column=0, sticky="w", pady=(12, 4))
+        tk.Label(
+            body,
+            text="Severe Downside",
+            bg=COLORS["card"],
+            fg=COLORS["navy"],
+            font=("Segoe UI", 10, "bold"),
+        ).grid(row=2, column=1, sticky="w", pady=(12, 4))
+
+        self._labeled_entry(body, "Sales Price %", "downside_sales_price_delta_pct", 3, 0, width=10)
+        self._labeled_entry(body, "Cost %", "downside_cost_delta_pct", 4, 0, width=10)
+        self._labeled_entry(body, "Absorption %", "downside_absorption_delta_pct", 5, 0, width=10)
+        self._labeled_entry(body, "Sales Price %", "severe_downside_sales_price_delta_pct", 3, 1, width=10)
+        self._labeled_entry(body, "Cost %", "severe_downside_cost_delta_pct", 4, 1, width=10)
+        self._labeled_entry(body, "Absorption %", "severe_downside_absorption_delta_pct", 5, 1, width=10)
+
+    def _build_notes_section(self, parent: tk.Widget) -> None:
+        body = self._create_section(
+            parent,
+            title="6. Notes And Diligence Signals",
+            subtitle="Paste the deal narrative, red flags, or broker notes. The agent scans this text for risk and upside cues.",
+        )
+        body.grid_columnconfigure(0, weight=1)
+        self.notes_text = ScrolledText(
+            body,
+            height=7,
+            wrap="word",
+            font=("Segoe UI", 10),
+            bg="#FFFDFC",
+            fg=COLORS["ink"],
+            insertbackground=COLORS["ink"],
+            relief="flat",
+            borderwidth=1,
+        )
+        self.notes_text.grid(row=0, column=0, sticky="ew")
+
+    def _build_sidebar(self, parent: tk.Widget) -> None:
+        parent.configure(bg=COLORS["bg"])
+        panel = tk.Frame(parent, bg=COLORS["card"], padx=16, pady=16, highlightbackground=COLORS["line"], highlightthickness=1)
+        panel.pack(fill="both", expand=True)
+
+        tk.Label(
+            panel,
+            text="Live Deal Snapshot",
+            bg=COLORS["card"],
+            fg=COLORS["ink"],
+            font=("Aptos", 14, "bold"),
+        ).pack(anchor="w")
+        tk.Label(
+            panel,
+            text="This updates as you build the deal so you can spot broken assumptions before you run the underwrite.",
+            bg=COLORS["card"],
+            fg=COLORS["muted"],
+            font=("Segoe UI", 9),
+            justify="left",
+            wraplength=280,
+        ).pack(anchor="w", pady=(4, 14))
+
+        self.overview_cards: dict[str, tuple[tk.Label, tk.Label]] = {}
+        for key, title in (
+            ("lots", "Total Lots"),
+            ("density", "Density"),
+            ("revenue", "Rough Revenue"),
+            ("land_basis", "Land Basis"),
+            ("site_spend", "Horizontal Spend"),
+            ("absorption", "Absorption"),
+        ):
+            card = tk.Frame(panel, bg=COLORS["card_alt"], padx=12, pady=10, highlightbackground=COLORS["line"], highlightthickness=1)
+            card.pack(fill="x", pady=(0, 10))
+            tk.Label(card, text=title, bg=COLORS["card_alt"], fg=COLORS["muted"], font=("Segoe UI", 9, "bold")).pack(anchor="w")
+            value = tk.Label(card, text="-", bg=COLORS["card_alt"], fg=COLORS["ink"], font=("Aptos", 16, "bold"))
+            value.pack(anchor="w", pady=(4, 0))
+            note = tk.Label(card, text="", bg=COLORS["card_alt"], fg=COLORS["muted"], font=("Segoe UI", 9))
+            note.pack(anchor="w")
+            self.overview_cards[key] = (value, note)
+
+        tips = tk.Frame(panel, bg=COLORS["accent_soft"], padx=12, pady=12, highlightbackground="#E5C9B6", highlightthickness=1)
+        tips.pack(fill="both", expand=True)
+        tk.Label(tips, text="Workflow", bg=COLORS["accent_soft"], fg=COLORS["navy"], font=("Segoe UI", 10, "bold")).pack(anchor="w")
+        guidance = (
+            "1. Use the builder for fast screening.\n"
+            "2. Open Advanced JSON only when you need staged takedowns or custom per-series overrides.\n"
+            "3. Press Ctrl+R to run, Ctrl+S to save, Ctrl+O to open.\n"
+            "4. Review Results Dashboard before deciding whether to pursue, negotiate, or pass."
+        )
+        tk.Label(
+            tips,
+            text=guidance,
+            bg=COLORS["accent_soft"],
+            fg=COLORS["ink"],
+            font=("Segoe UI", 9),
+            justify="left",
+            wraplength=280,
+        ).pack(anchor="w", pady=(8, 0))
+
