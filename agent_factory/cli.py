@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Sequence
 
 from .factory_agent import AgentFactory
 from .integrations.microsoft_graph import GraphAuthConfig, MicrosoftGraphClient
+from .land_underwriter import LandDealUnderwriter
 from .integrations.outlook_local import OutlookLocalClient
 from .outlook_workflow import suggest_reply_body, triage_messages
 from .schemas import AgentBlueprint
@@ -70,6 +71,20 @@ def _build_parser() -> argparse.ArgumentParser:
         "--output-dir",
         default="generated_agents",
         help="Folder where generated agents are stored.",
+    )
+
+    land_underwrite_parser = subparsers.add_parser(
+        "land-underwrite",
+        help="Run workbook-aligned land acquisition underwriting from a JSON request file.",
+    )
+    land_underwrite_parser.add_argument(
+        "--request-file",
+        required=True,
+        help="Path to a JSON file containing one deal request object or a list of deal request objects.",
+    )
+    land_underwrite_parser.add_argument(
+        "--agent-dir",
+        help="Optional LandDealUnderwriter generated agent directory for the text-based pricing signal.",
     )
 
     subdivision_screen_parser = subparsers.add_parser(
@@ -419,6 +434,58 @@ def _handle_describe(args: argparse.Namespace) -> None:
 def _handle_list(args: argparse.Namespace) -> None:
     factory = AgentFactory(output_root=args.output_dir)
     print(json.dumps(factory.list_registered_agents(), indent=2))
+
+
+def _latest_registered_agent_dir(output_root: Path, agent_name: str) -> Path | None:
+    factory = AgentFactory(output_root=output_root)
+    candidates = [
+        item
+        for item in factory.list_registered_agents()
+        if str(item.get("name", "")).strip().lower() == agent_name.strip().lower()
+    ]
+    candidates.sort(key=lambda item: str(item.get("created_at_utc", "")), reverse=True)
+
+    for item in candidates:
+        agent_dir = Path(str(item.get("agent_dir", "")))
+        if agent_dir.exists():
+            return agent_dir.resolve()
+
+    fallback_pattern = f"{agent_name.strip().lower()}_*"
+    for agent_dir in sorted(output_root.glob(fallback_pattern), reverse=True):
+        if agent_dir.is_dir():
+            return agent_dir.resolve()
+    return None
+
+
+def _handle_land_underwrite(args: argparse.Namespace) -> None:
+    request_path = Path(args.request_file)
+    if not request_path.exists():
+        raise ValueError(f"Request file was not found: {request_path}")
+
+    try:
+        payload = json.loads(request_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as error:
+        raise ValueError(f"Request JSON is invalid: {error.msg}") from error
+
+    specialist = None
+    resolved_agent_dir: Path | None = None
+    if args.agent_dir:
+        resolved_agent_dir = Path(args.agent_dir).resolve()
+    else:
+        resolved_agent_dir = _latest_registered_agent_dir(Path("generated_agents"), "LandDealUnderwriter")
+
+    if resolved_agent_dir is not None and resolved_agent_dir.exists():
+        specialist = AgentFactory().load_specialist_agent(resolved_agent_dir)
+
+    underwriter = LandDealUnderwriter(specialist)
+    if isinstance(payload, list):
+        result = underwriter.underwrite_many(payload)
+    elif isinstance(payload, dict):
+        result = underwriter.underwrite(payload)
+    else:
+        raise ValueError("Request JSON must be an object or an array of objects.")
+
+    print(json.dumps(result, indent=2))
 
 
 def _build_subdivision_scout(args: argparse.Namespace) -> SubdivisionScout:
@@ -850,6 +917,8 @@ def main(argv: Sequence[str] | None = None) -> None:
             _handle_describe(args)
         elif args.command == "list":
             _handle_list(args)
+        elif args.command == "land-underwrite":
+            _handle_land_underwrite(args)
         elif args.command == "subdivision-scout-screen":
             _handle_subdivision_scout_screen(args)
         elif args.command == "subdivision-scout-web-watch":
