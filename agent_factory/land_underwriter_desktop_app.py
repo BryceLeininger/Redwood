@@ -1651,3 +1651,363 @@ class LandUnderwriterDesktopApp:
 
         if self.root.winfo_exists():
             self.root.after(150, self._poll_responses)
+
+    def _render_result(self, result: Any) -> None:
+        display_result = result
+        if isinstance(result, list):
+            display_result = result[0] if result and isinstance(result[0], dict) else None
+
+        if not isinstance(display_result, dict):
+            self._update_banner(None)
+            self._render_raw_result(result)
+            return
+
+        self._update_banner(display_result)
+        self._update_metric_cards(display_result)
+        self._populate_scenario_tree(display_result)
+        self._draw_chart(display_result)
+        self._populate_decision_tab(display_result)
+        self._populate_series_tab(display_result)
+        self._render_raw_result(result)
+
+    def _update_banner(self, result: dict[str, Any] | None) -> None:
+        if result is None:
+            self.banner_frame.configure(bg=COLORS["card"])
+            self.recommendation_label.configure(
+                text="No single dashboard result to display.",
+                bg=COLORS["card"],
+                fg=COLORS["navy"],
+            )
+            self.recommendation_subtitle.configure(
+                text="The raw JSON tab still shows the full response.",
+                bg=COLORS["card"],
+                fg=COLORS["muted"],
+            )
+            return
+
+        recommendation = str(result.get("recommendation") or "review").lower()
+        if recommendation == "pursue":
+            bg = COLORS["green_soft"]
+            fg = COLORS["green"]
+        elif recommendation == "negotiate":
+            bg = COLORS["amber_soft"]
+            fg = COLORS["amber"]
+        else:
+            bg = COLORS["red_soft"]
+            fg = COLORS["red"]
+
+        assumptions = result.get("assumptions", {})
+        risk_flags = result.get("risk_flags", [])
+        upside_flags = result.get("upside_flags", [])
+        summary = (
+            f"{result.get('community_name', 'Deal')} | "
+            f"{_format_number(assumptions.get('total_lots'), 0)} lots | "
+            f"{_format_number(assumptions.get('gross_acres'), 1)} acres | "
+            f"{len(risk_flags)} risk flags | {len(upside_flags)} upside flags"
+        )
+
+        self.banner_frame.configure(bg=bg)
+        self.recommendation_label.configure(
+            text=f"Recommendation: {recommendation.upper()}",
+            bg=bg,
+            fg=fg,
+        )
+        self.recommendation_subtitle.configure(text=summary, bg=bg, fg=COLORS["ink"])
+
+    def _update_metric_cards(self, result: dict[str, Any]) -> None:
+        base_case = result["scenarios"]["base_case"]
+        hurdles = result.get("hurdles", {}).get("base_case", {})
+        assumptions = result.get("assumptions", {})
+        investment = base_case["investment_summary"]
+        income = base_case["income_statement"]
+        cash = base_case["cash_flow_metrics"]
+
+        gap = investment.get("land_value_gap_to_residual")
+        peak_month = cash.get("peak_investment_month")
+        peak_date = (base_case.get("schedule", {}).get("date_summary") or {}).get("peak_investment_date")
+
+        cards = {
+            "gross_margin": (
+                _format_pct(income.get("gross_margin_pct")),
+                f"Target {_format_pct(assumptions.get('target_gross_margin_pct'))}",
+                bool(hurdles.get("gross_margin")),
+            ),
+            "pre_gna": (
+                _format_pct(income.get("pre_gna_margin_pct")),
+                f"Target {_format_pct(assumptions.get('target_pre_gna_margin_pct'))}",
+                bool(hurdles.get("pre_gna_margin")),
+            ),
+            "irr": (
+                _format_pct(cash.get("irr_pre_gna_pct")),
+                f"Target {_format_pct(assumptions.get('target_irr_pct'))}",
+                bool(hurdles.get("irr")),
+            ),
+            "residual": (
+                _format_currency(investment.get("residual_max_land_cost_per_lot")),
+                (
+                    f"Above residual by {_format_currency(gap)}"
+                    if isinstance(gap, (float, int)) and gap > 0
+                    else f"Under residual by {_format_currency(abs(float(gap or 0)))}"
+                ),
+                bool(hurdles.get("residual_land_value")),
+            ),
+            "peak": (
+                _format_currency(cash.get("peak_investment")),
+                f"Month {peak_month}" + (f" | {peak_date}" if peak_date else ""),
+                None,
+            ),
+        }
+
+        for key, (value_text, note_text, passed) in cards.items():
+            frame, value_label, note_label = self.metric_cards[key]
+            if passed is True:
+                bg = COLORS["green_soft"]
+            elif passed is False:
+                bg = COLORS["red_soft"]
+            else:
+                bg = COLORS["amber_soft"]
+
+            frame.configure(bg=bg)
+            for child in frame.winfo_children():
+                child.configure(bg=bg)
+
+            value_label.configure(text=value_text, fg=COLORS["ink"])
+            note_label.configure(text=note_text, fg=COLORS["muted"])
+
+    def _populate_scenario_tree(self, result: dict[str, Any]) -> None:
+        for item in self.scenario_tree.get_children():
+            self.scenario_tree.delete(item)
+
+        for scenario_name in ("base_case", "downside_case", "severe_downside_case"):
+            scenario = result.get("scenarios", {}).get(scenario_name)
+            if not scenario:
+                continue
+            self.scenario_tree.insert(
+                "",
+                "end",
+                values=(
+                    _scenario_label(scenario_name),
+                    _format_pct(scenario["income_statement"].get("gross_margin_pct")),
+                    _format_pct(scenario["income_statement"].get("pre_gna_margin_pct")),
+                    _format_pct(scenario["cash_flow_metrics"].get("irr_pre_gna_pct")),
+                    _format_currency(scenario["investment_summary"].get("land_value_gap_to_residual")),
+                    _format_currency(scenario["cash_flow_metrics"].get("peak_investment")),
+                ),
+            )
+
+    def _draw_chart(self, result: dict[str, Any]) -> None:
+        self.chart_canvas.delete("all")
+        width = max(self.chart_canvas.winfo_width(), 640)
+        height = max(self.chart_canvas.winfo_height(), 220)
+        padding_x = 48
+        padding_top = 20
+        padding_bottom = 42
+
+        values = []
+        labels = []
+        for name in ("base_case", "downside_case", "severe_downside_case"):
+            scenario = result.get("scenarios", {}).get(name)
+            if not scenario:
+                continue
+            values.append(float(scenario["income_statement"].get("pre_gna_margin_pct", 0) or 0))
+            labels.append(_scenario_label(name))
+
+        target = float(result.get("assumptions", {}).get("target_pre_gna_margin_pct", 0) or 0)
+        if not values:
+            return
+
+        min_value = min(min(values), target, 0.0)
+        max_value = max(max(values), target, 0.01)
+        if max_value - min_value < 0.05:
+            max_value += 0.03
+            min_value -= 0.03
+
+        def y_for(value: float) -> float:
+            chart_height = height - padding_top - padding_bottom
+            return padding_top + ((max_value - value) / (max_value - min_value)) * chart_height
+
+        baseline_y = y_for(0.0)
+        target_y = y_for(target)
+        self.chart_canvas.create_line(padding_x, baseline_y, width - 20, baseline_y, fill=COLORS["line"], width=1)
+        self.chart_canvas.create_line(
+            padding_x,
+            target_y,
+            width - 20,
+            target_y,
+            fill=COLORS["accent"],
+            width=2,
+            dash=(6, 4),
+        )
+        self.chart_canvas.create_text(
+            width - 24,
+            target_y - 10,
+            text=f"Target {_format_pct(target)}",
+            fill=COLORS["accent"],
+            font=("Segoe UI", 9, "bold"),
+            anchor="e",
+        )
+
+        bar_width = 110
+        gap = 42
+        total_width = len(values) * bar_width + max(0, len(values) - 1) * gap
+        start_x = padding_x + max(0, (width - padding_x - 20 - total_width) / 2)
+        bar_colors = [COLORS["green"], COLORS["amber"], COLORS["red"]]
+
+        for index, value in enumerate(values):
+            x1 = start_x + index * (bar_width + gap)
+            x2 = x1 + bar_width
+            y = y_for(value)
+            fill = bar_colors[min(index, len(bar_colors) - 1)]
+            self.chart_canvas.create_rectangle(x1, min(y, baseline_y), x2, max(y, baseline_y), fill=fill, outline="")
+            self.chart_canvas.create_text(
+                (x1 + x2) / 2,
+                y - 12 if value >= 0 else y + 12,
+                text=_format_pct(value),
+                fill=COLORS["ink"],
+                font=("Segoe UI", 10, "bold"),
+            )
+            self.chart_canvas.create_text(
+                (x1 + x2) / 2,
+                height - 18,
+                text=labels[index],
+                fill=COLORS["navy"],
+                font=("Segoe UI", 9, "bold"),
+            )
+
+    def _populate_decision_tab(self, result: dict[str, Any]) -> None:
+        lines = [f"Recommendation: {str(result.get('recommendation') or '').upper()}", ""]
+
+        reasons = result.get("recommendation_reasons") or []
+        lines.append("Why:")
+        for item in reasons:
+            lines.append(f"- {item}")
+
+        risk_flags = result.get("risk_flags") or []
+        lines.append("")
+        lines.append("Risk Flags:")
+        if risk_flags:
+            for item in risk_flags:
+                lines.append(f"- {item}")
+        else:
+            lines.append("- None detected in notes.")
+
+        upside_flags = result.get("upside_flags") or []
+        lines.append("")
+        lines.append("Upside Flags:")
+        if upside_flags:
+            for item in upside_flags:
+                lines.append(f"- {item}")
+        else:
+            lines.append("- None detected in notes.")
+
+        model_signal = result.get("model_signal")
+        if model_signal:
+            lines.append("")
+            lines.append("Model Signal:")
+            lines.append(f"- Predicted value: {_format_currency(model_signal.get('prediction'))}")
+            lines.append(
+                f"- Variance to actual land: {_format_currency(model_signal.get('variance_to_actual_land_cost'))}"
+            )
+            lines.append(
+                f"- Variance to residual: {_format_currency(model_signal.get('variance_to_residual_land_value'))}"
+            )
+
+        self.decision_text.configure(state="normal")
+        self.decision_text.delete("1.0", "end")
+        self.decision_text.insert("1.0", "\n".join(lines))
+        self.decision_text.configure(state="disabled")
+
+        for item in self.hurdle_tree.get_children():
+            self.hurdle_tree.delete(item)
+
+        for scenario_name in ("base_case", "downside_case", "severe_downside_case"):
+            scenario_hurdles = result.get("hurdles", {}).get(scenario_name)
+            if not scenario_hurdles:
+                continue
+            self.hurdle_tree.insert(
+                "",
+                "end",
+                values=(
+                    _scenario_label(scenario_name),
+                    "PASS" if scenario_hurdles.get("gross_margin") else "FAIL",
+                    "PASS" if scenario_hurdles.get("pre_gna_margin") else "FAIL",
+                    "PASS" if scenario_hurdles.get("irr") else "FAIL",
+                    "PASS" if scenario_hurdles.get("residual_land_value") else "FAIL",
+                ),
+            )
+
+    def _populate_series_tab(self, result: dict[str, Any]) -> None:
+        for item in self.series_tree.get_children():
+            self.series_tree.delete(item)
+
+        base_case = result.get("scenarios", {}).get("base_case", {})
+        for series in base_case.get("series_metrics", []):
+            self.series_tree.insert(
+                "",
+                "end",
+                values=(
+                    series.get("name"),
+                    _format_number(series.get("lots"), 0),
+                    _format_pct(series.get("mix_pct")),
+                    _format_currency(series.get("net_sales_price_per_unit")),
+                    _format_currency(series.get("build_cost_per_unit")),
+                    _format_currency(series.get("revenue_total")),
+                ),
+            )
+
+        schedule = base_case.get("schedule", {})
+        dates = schedule.get("date_summary") or {}
+        cash = base_case.get("cash_flow_metrics", {})
+        schedule_lines = [
+            f"Monthly absorption: {_format_number(schedule.get('monthly_absorption'), 2)}",
+            f"Months to first home start: {_format_number(schedule.get('months_to_first_home_start'), 0)}",
+            f"Months to sales open: {_format_number(schedule.get('months_to_sales_open'), 0)}",
+            f"Months to first close: {_format_number(schedule.get('months_to_first_close'), 0)}",
+            f"Months to last close: {_format_number(schedule.get('months_to_last_close'), 0)}",
+            f"Sellout months: {_format_number(schedule.get('sellout_months'), 0)}",
+            f"Total project months: {_format_number(schedule.get('total_project_months'), 0)}",
+            f"Peak investment month: {_format_number(cash.get('peak_investment_month'), 0)}",
+            f"Months to positive net cash: {_format_number(cash.get('months_to_positive_net_cash'), 0)}",
+        ]
+        if dates:
+            schedule_lines.extend(
+                [
+                    "",
+                    f"Land close date: {dates.get('land_close_date')}",
+                    f"First home start date: {dates.get('first_home_start_date')}",
+                    f"Sales open date: {dates.get('sales_open_date')}",
+                    f"First close date: {dates.get('first_close_date')}",
+                    f"Last close date: {dates.get('last_close_date')}",
+                    f"Peak investment date: {dates.get('peak_investment_date')}",
+                ]
+            )
+
+        self.schedule_text.configure(state="normal")
+        self.schedule_text.delete("1.0", "end")
+        self.schedule_text.insert("1.0", "\n".join(schedule_lines))
+        self.schedule_text.configure(state="disabled")
+
+    def _render_raw_result(self, result: Any) -> None:
+        rendered = json.dumps(result, indent=2)
+        self.raw_result_text.configure(state="normal")
+        self.raw_result_text.delete("1.0", "end")
+        self.raw_result_text.insert("1.0", rendered)
+        self.raw_result_text.configure(state="disabled")
+
+    def _on_close(self) -> None:
+        if self.refresh_job is not None:
+            self.root.after_cancel(self.refresh_job)
+            self.refresh_job = None
+        self.request_queue.put(None)
+        self.root.destroy()
+
+    def run(self) -> None:
+        self.root.mainloop()
+
+
+def main() -> None:
+    LandUnderwriterDesktopApp().run()
+
+
+if __name__ == "__main__":
+    main()
