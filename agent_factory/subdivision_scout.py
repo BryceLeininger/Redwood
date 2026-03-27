@@ -524,54 +524,12 @@ def _extract_signal_hits(text: str, catalog: Dict[str, int]) -> List[str]:
     return sorted(hits, key=lambda phrase: (-catalog[phrase], phrase))
 
 
-def _estimate_priority_score(
-    model_prediction: str,
-    model_confidence: float | None,
-    positive_hits: Sequence[str],
-    risk_hits: Sequence[str],
-) -> float:
-    baseline = {
-        "high_probability": 72.0,
-        "not_ready": 34.0,
-    }.get(model_prediction, 42.0)
-
-    confidence_bonus = 0.0
-    if model_confidence is not None:
-        confidence_bonus = max(0.0, min(model_confidence, 1.0)) * 14.0
-
-    positive_bonus = sum(POSITIVE_SIGNALS[item] for item in positive_hits[:4]) / 2.5
-    risk_penalty = sum(RISK_SIGNALS[item] for item in risk_hits[:4]) / 2.2
-
-    score = baseline + confidence_bonus + positive_bonus - risk_penalty
-    return round(max(0.0, min(100.0, score)), 1)
-
-
 def _recommendation_from_score(score: float) -> str:
-    if score >= 70:
+    if score >= 72:
         return "prioritize"
-    if score >= 45:
+    if score >= 50:
         return "watch"
     return "pass"
-
-
-def _build_rationale(
-    recommendation: str,
-    positive_hits: Sequence[str],
-    risk_hits: Sequence[str],
-    prediction: str,
-) -> str:
-    fragments: List[str] = [f"Model signal: {prediction.replace('_', ' ')}."]
-    if positive_hits:
-        fragments.append("Upside: " + ", ".join(positive_hits[:3]) + ".")
-    if risk_hits:
-        fragments.append("Risks: " + ", ".join(risk_hits[:3]) + ".")
-    if recommendation == "prioritize":
-        fragments.append("This parcel looks actionable for residential subdivision pursuit.")
-    elif recommendation == "watch":
-        fragments.append("This parcel needs targeted diligence before active pursuit.")
-    else:
-        fragments.append("This parcel carries enough entitlement or infrastructure risk to deprioritize.")
-    return " ".join(fragments)
 
 
 def _jurisdiction_tokens(jurisdiction: str) -> List[str]:
