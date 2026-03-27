@@ -137,7 +137,7 @@ def _parse_optional_ratio(value: str) -> float | None:
     return parsed / 100.0 if abs(parsed) > 1 else parsed
 
 
-def _format_input_number(value: Any, digits: int = 2) -> str:
+def _format_input_number(value: Any, digits: int = 4) -> str:
     if value in (None, ""):
         return ""
     number = float(value)
@@ -146,7 +146,7 @@ def _format_input_number(value: Any, digits: int = 2) -> str:
     return f"{number:.{digits}f}".rstrip("0").rstrip(".")
 
 
-def _format_input_ratio(value: Any, digits: int = 2) -> str:
+def _format_input_ratio(value: Any, digits: int = 4) -> str:
     if value in (None, ""):
         return ""
     number = float(value) * 100.0
