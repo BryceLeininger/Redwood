@@ -88,6 +88,29 @@ Run:
 python -m agent_factory.bootstrap_requested_agents
 ```
 
+## Land Deal Underwriter
+
+`LandDealUnderwriter` now includes a workbook-aligned underwriting workflow for homebuilder land acquisition deals.
+
+Run a sample underwrite:
+
+```bash
+python -m agent_factory.cli land-underwrite \
+  --request-file agent_factory/examples/land_underwriter/sample_request.json
+```
+
+If a generated `LandDealUnderwriter` agent exists, the CLI automatically uses the latest one for an additional text-based pricing signal. You can also point to a specific agent:
+
+```bash
+python -m agent_factory.cli land-underwrite \
+  --request-file agent_factory/examples/land_underwriter/sample_request.json \
+  --agent-dir generated_agents/landdealunderwriter_YYYYMMDD_HHMMSS
+```
+
+The JSON request schema is documented by example in:
+
+`agent_factory/examples/land_underwriter/sample_request.json`
+
 ## Residential Subdivision Scout
 
 `ResidentialSubdivisionScout` is an operational workflow layered on top of a generated specialist agent.
