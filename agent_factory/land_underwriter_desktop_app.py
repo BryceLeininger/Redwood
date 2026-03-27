@@ -620,3 +620,316 @@ class LandUnderwriterDesktopApp:
             wraplength=280,
         ).pack(anchor="w", pady=(8, 0))
 
+    def _build_results_tab(self) -> None:
+        self.results_tab.grid_columnconfigure(0, weight=1)
+        self.results_tab.grid_rowconfigure(2, weight=1)
+
+        self.banner_frame = tk.Frame(self.results_tab, bg=COLORS["card"], padx=18, pady=16, highlightbackground=COLORS["line"], highlightthickness=1)
+        self.banner_frame.grid(row=0, column=0, sticky="ew")
+        self.banner_frame.grid_columnconfigure(0, weight=1)
+
+        self.recommendation_label = tk.Label(
+            self.banner_frame,
+            text="Run an underwrite to see the decision.",
+            bg=COLORS["card"],
+            fg=COLORS["navy"],
+            font=("Aptos Display", 20, "bold"),
+        )
+        self.recommendation_label.grid(row=0, column=0, sticky="w")
+        self.recommendation_subtitle = tk.Label(
+            self.banner_frame,
+            text="The dashboard will summarize the recommendation, scenario spread, and key hurdle failures.",
+            bg=COLORS["card"],
+            fg=COLORS["muted"],
+            font=("Segoe UI", 10),
+        )
+        self.recommendation_subtitle.grid(row=1, column=0, sticky="w", pady=(6, 0))
+
+        metrics_row = tk.Frame(self.results_tab, bg=COLORS["bg"])
+        metrics_row.grid(row=1, column=0, sticky="ew", pady=(12, 12))
+        for idx in range(5):
+            metrics_row.grid_columnconfigure(idx, weight=1)
+
+        self.metric_cards: dict[str, tuple[tk.Frame, tk.Label, tk.Label]] = {}
+        for idx, (key, title) in enumerate(
+            (
+                ("gross_margin", "Base Gross Margin"),
+                ("pre_gna", "Base Pre-G&A"),
+                ("irr", "Base IRR"),
+                ("residual", "Residual Land / Lot"),
+                ("peak", "Peak Investment"),
+            )
+        ):
+            frame = tk.Frame(metrics_row, bg=COLORS["card"], padx=14, pady=12, highlightbackground=COLORS["line"], highlightthickness=1)
+            frame.grid(row=0, column=idx, sticky="nsew", padx=(0 if idx == 0 else 8, 0))
+            tk.Label(frame, text=title, bg=COLORS["card"], fg=COLORS["muted"], font=("Segoe UI", 9, "bold")).pack(anchor="w")
+            value = tk.Label(frame, text="-", bg=COLORS["card"], fg=COLORS["ink"], font=("Aptos", 18, "bold"))
+            value.pack(anchor="w", pady=(4, 0))
+            note = tk.Label(frame, text="", bg=COLORS["card"], fg=COLORS["muted"], font=("Segoe UI", 9))
+            note.pack(anchor="w")
+            self.metric_cards[key] = (frame, value, note)
+
+        main = ttk.Panedwindow(self.results_tab, orient="horizontal")
+        main.grid(row=2, column=0, sticky="nsew")
+
+        left = tk.Frame(self.results_tab, bg=COLORS["bg"])
+        right = tk.Frame(self.results_tab, bg=COLORS["bg"])
+        left.grid_columnconfigure(0, weight=1)
+        left.grid_rowconfigure(1, weight=1)
+        right.grid_columnconfigure(0, weight=1)
+        right.grid_rowconfigure(0, weight=1)
+        main.add(left, weight=3)
+        main.add(right, weight=2)
+
+        tk.Label(left, text="Scenario Spread", bg=COLORS["bg"], fg=COLORS["navy"], font=("Segoe UI", 11, "bold")).grid(row=0, column=0, sticky="w", pady=(0, 6))
+        self.scenario_tree = ttk.Treeview(
+            left,
+            columns=("scenario", "gross", "pre_gna", "irr", "residual_gap", "peak"),
+            show="headings",
+            height=8,
+        )
+        for key, label, width in (
+            ("scenario", "Scenario", 120),
+            ("gross", "Gross Margin", 120),
+            ("pre_gna", "Pre-G&A", 120),
+            ("irr", "IRR", 100),
+            ("residual_gap", "Land Gap", 120),
+            ("peak", "Peak Inv.", 120),
+        ):
+            self.scenario_tree.heading(key, text=label)
+            self.scenario_tree.column(key, width=width, anchor="center")
+        self.scenario_tree.grid(row=1, column=0, sticky="nsew")
+
+        tk.Label(left, text="Pre-G&A Margin Chart", bg=COLORS["bg"], fg=COLORS["navy"], font=("Segoe UI", 11, "bold")).grid(row=2, column=0, sticky="w", pady=(14, 6))
+        self.chart_canvas = tk.Canvas(left, bg=COLORS["card"], height=220, highlightthickness=1, highlightbackground=COLORS["line"])
+        self.chart_canvas.grid(row=3, column=0, sticky="ew")
+
+        right_tabs = ttk.Notebook(right)
+        right_tabs.grid(row=0, column=0, sticky="nsew")
+
+        decision_tab = tk.Frame(right_tabs, bg=COLORS["bg"])
+        series_tab = tk.Frame(right_tabs, bg=COLORS["bg"])
+        raw_tab = tk.Frame(right_tabs, bg=COLORS["bg"])
+        right_tabs.add(decision_tab, text="Decision")
+        right_tabs.add(series_tab, text="Series + Schedule")
+        right_tabs.add(raw_tab, text="Raw JSON")
+
+        self._build_decision_tab(decision_tab)
+        self._build_series_tab(series_tab)
+        self._build_raw_result_tab(raw_tab)
+
+    def _build_decision_tab(self, parent: tk.Widget) -> None:
+        parent.grid_columnconfigure(0, weight=1)
+        parent.grid_rowconfigure(1, weight=1)
+        parent.grid_rowconfigure(3, weight=1)
+
+        tk.Label(parent, text="Recommendation Reasons", bg=COLORS["bg"], fg=COLORS["navy"], font=("Segoe UI", 10, "bold")).grid(row=0, column=0, sticky="w", pady=(6, 4))
+        self.decision_text = ScrolledText(
+            parent,
+            height=8,
+            wrap="word",
+            font=("Segoe UI", 10),
+            bg=COLORS["card"],
+            fg=COLORS["ink"],
+            relief="flat",
+            borderwidth=1,
+        )
+        self.decision_text.grid(row=1, column=0, sticky="nsew")
+        self.decision_text.configure(state="disabled")
+
+        tk.Label(parent, text="Hurdle Grid", bg=COLORS["bg"], fg=COLORS["navy"], font=("Segoe UI", 10, "bold")).grid(row=2, column=0, sticky="w", pady=(12, 4))
+        self.hurdle_tree = ttk.Treeview(
+            parent,
+            columns=("scenario", "gross", "pre_gna", "irr", "residual"),
+            show="headings",
+            height=6,
+        )
+        for key, label, width in (
+            ("scenario", "Scenario", 120),
+            ("gross", "Gross", 80),
+            ("pre_gna", "Pre-G&A", 90),
+            ("irr", "IRR", 80),
+            ("residual", "Residual", 90),
+        ):
+            self.hurdle_tree.heading(key, text=label)
+            self.hurdle_tree.column(key, width=width, anchor="center")
+        self.hurdle_tree.grid(row=3, column=0, sticky="nsew")
+
+    def _build_series_tab(self, parent: tk.Widget) -> None:
+        parent.grid_columnconfigure(0, weight=1)
+        parent.grid_rowconfigure(1, weight=1)
+        parent.grid_rowconfigure(3, weight=1)
+
+        tk.Label(parent, text="Base-Case Series Mix", bg=COLORS["bg"], fg=COLORS["navy"], font=("Segoe UI", 10, "bold")).grid(row=0, column=0, sticky="w", pady=(6, 4))
+        self.series_tree = ttk.Treeview(
+            parent,
+            columns=("name", "lots", "mix", "asp", "build", "revenue"),
+            show="headings",
+            height=6,
+        )
+        for key, label, width in (
+            ("name", "Series", 120),
+            ("lots", "Lots", 70),
+            ("mix", "Mix", 70),
+            ("asp", "Net ASP", 110),
+            ("build", "Build / Unit", 110),
+            ("revenue", "Revenue", 120),
+        ):
+            self.series_tree.heading(key, text=label)
+            self.series_tree.column(key, width=width, anchor="center")
+        self.series_tree.grid(row=1, column=0, sticky="nsew")
+
+        tk.Label(parent, text="Base-Case Schedule", bg=COLORS["bg"], fg=COLORS["navy"], font=("Segoe UI", 10, "bold")).grid(row=2, column=0, sticky="w", pady=(12, 4))
+        self.schedule_text = ScrolledText(
+            parent,
+            height=10,
+            wrap="word",
+            font=("Segoe UI", 10),
+            bg=COLORS["card"],
+            fg=COLORS["ink"],
+            relief="flat",
+            borderwidth=1,
+        )
+        self.schedule_text.grid(row=3, column=0, sticky="nsew")
+        self.schedule_text.configure(state="disabled")
+
+    def _build_raw_result_tab(self, parent: tk.Widget) -> None:
+        parent.grid_columnconfigure(0, weight=1)
+        parent.grid_rowconfigure(0, weight=1)
+        self.raw_result_text = ScrolledText(
+            parent,
+            wrap="none",
+            font=("Consolas", 10),
+            bg=COLORS["card"],
+            fg=COLORS["ink"],
+            insertbackground=COLORS["ink"],
+            relief="flat",
+            borderwidth=1,
+        )
+        self.raw_result_text.grid(row=0, column=0, sticky="nsew")
+        self.raw_result_text.configure(state="disabled")
+
+    def _build_json_tab(self) -> None:
+        self.json_tab.grid_columnconfigure(0, weight=1)
+        self.json_tab.grid_rowconfigure(1, weight=1)
+
+        toolbar = tk.Frame(self.json_tab, bg=COLORS["bg"])
+        toolbar.grid(row=0, column=0, sticky="ew", pady=(0, 10))
+        self._make_button(toolbar, "Builder -> JSON", self._sync_builder_to_json, "secondary").grid(row=0, column=0, padx=(0, 8))
+        self._make_button(toolbar, "JSON -> Builder", self._apply_json_to_builder, "secondary").grid(row=0, column=1, padx=(0, 8))
+        self._make_button(toolbar, "Run JSON", self._run_json_request, "primary").grid(row=0, column=2)
+
+        self.json_text = ScrolledText(
+            self.json_tab,
+            wrap="none",
+            font=("Consolas", 10),
+            bg="#FFFDFC",
+            fg=COLORS["ink"],
+            insertbackground=COLORS["ink"],
+            relief="flat",
+            borderwidth=1,
+        )
+        self.json_text.grid(row=1, column=0, sticky="nsew")
+
+    def _create_section(self, parent: tk.Widget, *, title: str, subtitle: str) -> tk.Frame:
+        card = tk.Frame(parent, bg=COLORS["card"], padx=16, pady=14, highlightbackground=COLORS["line"], highlightthickness=1)
+        card.pack(fill="x", pady=(0, 14))
+        tk.Label(card, text=title, bg=COLORS["card"], fg=COLORS["navy"], font=("Aptos", 14, "bold")).pack(anchor="w")
+        tk.Label(card, text=subtitle, bg=COLORS["card"], fg=COLORS["muted"], font=("Segoe UI", 9), justify="left", wraplength=980).pack(anchor="w", pady=(4, 10))
+        body = tk.Frame(card, bg=COLORS["card"])
+        body.pack(fill="x")
+        return body
+
+    def _make_button(self, parent: tk.Widget, text: str, command: Any, variant: str) -> tk.Button:
+        if variant == "primary":
+            bg = COLORS["accent"]
+            fg = "white"
+            active = "#B45D30"
+        else:
+            bg = COLORS["card"]
+            fg = COLORS["navy"]
+            active = COLORS["card_alt"]
+        return tk.Button(
+            parent,
+            text=text,
+            command=command,
+            bg=bg,
+            fg=fg,
+            activebackground=active,
+            activeforeground=fg,
+            relief="flat",
+            borderwidth=0,
+            padx=14,
+            pady=8,
+            font=("Segoe UI", 10, "bold"),
+            cursor="hand2",
+        )
+
+    def _make_info_chip(self, parent: tk.Widget, variable: tk.StringVar, accent: bool = False) -> tk.Frame:
+        chip = tk.Frame(
+            parent,
+            bg=COLORS["accent_soft"] if accent else COLORS["card"],
+            padx=10,
+            pady=6,
+            highlightbackground="#E5C9B6" if accent else COLORS["line"],
+            highlightthickness=1,
+        )
+        tk.Label(
+            chip,
+            textvariable=variable,
+            bg=chip["bg"],
+            fg=COLORS["ink"],
+            font=("Segoe UI", 9),
+        ).pack()
+        return chip
+
+    def _labeled_entry(self, parent: tk.Widget, label: str, key: str, row: int, column: int, *, width: int) -> None:
+        container = tk.Frame(parent, bg=COLORS["card"])
+        container.grid(row=row, column=column, sticky="ew", padx=(0 if column == 0 else 10, 0), pady=(0, 10))
+        tk.Label(container, text=label, bg=COLORS["card"], fg=COLORS["muted"], font=("Segoe UI", 9, "bold")).pack(anchor="w")
+        var = self.form_vars.setdefault(key, tk.StringVar())
+        entry = tk.Entry(
+            container,
+            textvariable=var,
+            font=("Segoe UI", 10),
+            bg="#FFFDFC",
+            fg=COLORS["ink"],
+            relief="flat",
+            highlightthickness=1,
+            highlightbackground=COLORS["line"],
+            highlightcolor=COLORS["accent"],
+            width=width,
+        )
+        entry.pack(fill="x", ipady=5, pady=(4, 0))
+
+    def _labeled_combo(
+        self,
+        parent: tk.Widget,
+        label: str,
+        key: str,
+        values: tuple[str, ...],
+        row: int,
+        column: int,
+        *,
+        width: int,
+    ) -> None:
+        container = tk.Frame(parent, bg=COLORS["card"])
+        container.grid(row=row, column=column, sticky="ew", padx=(0 if column == 0 else 10, 0), pady=(0, 10))
+        tk.Label(container, text=label, bg=COLORS["card"], fg=COLORS["muted"], font=("Segoe UI", 9, "bold")).pack(anchor="w")
+        var = self.form_vars.setdefault(key, tk.StringVar())
+        combo = ttk.Combobox(container, textvariable=var, values=values, width=width, state="readonly")
+        combo.pack(fill="x", pady=(4, 0))
+
+    def _labeled_checkbox(self, parent: tk.Widget, label: str, key: str, row: int, column: int) -> None:
+        var = self.form_vars.setdefault(key, tk.BooleanVar(value=False))
+        check = tk.Checkbutton(
+            parent,
+            text=label,
+            variable=var,
+            bg=COLORS["card"],
+            activebackground=COLORS["card"],
+            selectcolor=COLORS["card"],
+            fg=COLORS["ink"],
+            font=("Segoe UI", 10),
+        )
+        check.grid(row=row, column=column, sticky="w", pady=(8, 10))
