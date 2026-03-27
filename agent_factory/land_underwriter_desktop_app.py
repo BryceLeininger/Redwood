@@ -963,3 +963,691 @@ class LandUnderwriterDesktopApp:
             font=("Segoe UI", 10),
         )
         check.grid(row=row, column=column, sticky="w", pady=(8, 10))
+
+    def _bind_shortcuts(self) -> None:
+        self.root.bind("<Control-r>", lambda event: self._run_active_request())
+        self.root.bind("<Control-s>", lambda event: self._save_request_file())
+        self.root.bind("<Control-o>", lambda event: self._open_request_file())
+        self.root.bind("<Control-l>", lambda event: self._load_sample_request())
+        self.root.bind("<F5>", lambda event: self._run_active_request())
+
+    def _attach_live_refresh_bindings(self) -> None:
+        for variable in self.form_vars.values():
+            variable.trace_add("write", lambda *_: self._schedule_refresh())
+
+        for row in self.series_rows:
+            for variable in row.values():
+                variable.trace_add("write", lambda *_: self._schedule_refresh())
+
+        for widget in (self.notes_text, self.events_text):
+            widget.bind("<KeyRelease>", lambda event: self._schedule_refresh())
+            widget.bind("<FocusOut>", lambda event: self._schedule_refresh())
+            widget.bind("<<Paste>>", lambda event: self.root.after(25, self._schedule_refresh))
+
+        self._schedule_refresh()
+
+    def _schedule_refresh(self) -> None:
+        if self.refresh_job is not None:
+            self.root.after_cancel(self.refresh_job)
+        self.refresh_job = self.root.after(180, self._refresh_builder_overview)
+
+    def _refresh_builder_overview(self) -> None:
+        self.refresh_job = None
+        payload = self._request_from_form(strict=False)
+        series = payload.get("product_series", [])
+        total_lots = sum(float(item.get("lots", 0) or 0) for item in series)
+        gross_acres = float(payload.get("gross_acres", 0) or 0)
+
+        rough_revenue = 0.0
+        for item in series:
+            base_price = float(item.get("base_house_price", 0) or 0)
+            lot_premium = float(item.get("lot_premium", 0) or 0)
+            options_pct = float(item.get("options_pct", 0) or 0)
+            incentive_pct = float(item.get("price_incentives_pct", 0) or 0) + float(
+                item.get("mortgage_incentives_pct", 0) or 0
+            )
+            net_sales_price = base_price + lot_premium + (base_price * options_pct) - (base_price * incentive_pct)
+            rough_revenue += net_sales_price * float(item.get("lots", 0) or 0)
+
+        land_basis = float(payload.get("land_brokerage_and_closing_costs_total", 0) or 0)
+        events = payload.get("land_purchase_events", [])
+        if events:
+            land_basis += sum(
+                float(item.get("lots", 0) or 0) * float(item.get("price_per_lot", 0) or 0)
+                for item in events
+            )
+        else:
+            land_basis += total_lots * float(payload.get("land_purchase_price_per_lot", 0) or 0)
+
+        site_spend = (
+            float(payload.get("land_development_cost_total", 0) or 0)
+            + float(payload.get("project_management_cost_total", 0) or 0)
+            + float(payload.get("other_land_costs_total", 0) or 0)
+        )
+        monthly_absorption = float(payload.get("monthly_absorption", 0) or 0)
+        sellout_months = (total_lots / monthly_absorption) if monthly_absorption > 0 else None
+        density = (total_lots / gross_acres) if gross_acres > 0 else None
+        avg_net_price = (rough_revenue / total_lots) if total_lots > 0 else None
+        land_per_lot = (land_basis / total_lots) if total_lots > 0 else None
+
+        def set_card(key: str, value: str, note: str) -> None:
+            value_label, note_label = self.overview_cards[key]
+            value_label.configure(text=value)
+            note_label.configure(text=note)
+
+        active_series = sum(1 for item in series if float(item.get("lots", 0) or 0) > 0)
+        set_card("lots", _format_number(total_lots, 0), f"{active_series} active series")
+        set_card(
+            "density",
+            _format_number(density, 2),
+            f"{_format_number(gross_acres, 1)} gross acres",
+        )
+        set_card(
+            "revenue",
+            _format_currency(rough_revenue),
+            f"Avg net ASP {_format_currency(avg_net_price)}",
+        )
+        set_card(
+            "land_basis",
+            _format_currency(land_basis),
+            f"{_format_currency(land_per_lot)} per lot",
+        )
+        set_card(
+            "site_spend",
+            _format_currency(site_spend),
+            f"{_format_currency((site_spend / total_lots) if total_lots else None)} per lot",
+        )
+        set_card(
+            "absorption",
+            _format_number(monthly_absorption, 2),
+            f"Approx. sellout {_format_number(sellout_months, 1)} months",
+        )
+
+    def _request_from_form(self, strict: bool = True) -> dict[str, Any]:
+        def text_value(key: str) -> str:
+            variable = self.form_vars.get(key)
+            if variable is None:
+                return ""
+            return str(variable.get()).strip()
+
+        def float_value(key: str) -> float | None:
+            raw = text_value(key)
+            if not raw:
+                return None
+            try:
+                return _parse_optional_float(raw)
+            except ValueError as error:
+                if strict:
+                    raise ValueError(f"{key.replace('_', ' ').title()} is not a valid number.") from error
+                return None
+
+        def int_value(key: str) -> int | None:
+            raw = text_value(key)
+            if not raw:
+                return None
+            try:
+                return _parse_optional_int(raw)
+            except ValueError as error:
+                if strict:
+                    raise ValueError(f"{key.replace('_', ' ').title()} is not a valid whole number.") from error
+                return None
+
+        def ratio_value(key: str) -> float | None:
+            raw = text_value(key)
+            if not raw:
+                return None
+            try:
+                return _parse_optional_ratio(raw)
+            except ValueError as error:
+                if strict:
+                    raise ValueError(f"{key.replace('_', ' ').title()} is not a valid percentage.") from error
+                return None
+
+        def assign_if_present(target: dict[str, Any], key: str, value: Any) -> None:
+            if value not in (None, ""):
+                target[key] = value
+
+        community_name = text_value("community_name") or "Unnamed Community"
+        payload: dict[str, Any] = {
+            "community_name": community_name,
+            "division": text_value("division"),
+            "market": text_value("market"),
+            "gross_acres": float_value("gross_acres") or 0.0,
+            "takedown_structure": text_value("takedown_structure") or "bulk",
+            "deposit_credit_at_close": bool(self.form_vars["deposit_credit_at_close"].get()),
+            "notes": self.notes_text.get("1.0", "end").strip(),
+        }
+
+        for key in (
+            "land_purchase_price_per_lot",
+            "land_brokerage_and_closing_costs_total",
+            "earnest_money_deposit",
+            "land_development_cost_total",
+            "project_management_cost_total",
+            "other_land_costs_total",
+            "capitalized_marketing_total",
+            "architecture_engineering_total",
+            "indirect_field_overhead_per_month",
+            "other_house_costs_per_unit",
+            "monthly_absorption",
+        ):
+            assign_if_present(payload, key, float_value(key))
+
+        for key in (
+            "build_cycle_months",
+            "months_to_first_home_start",
+            "months_to_sales_open",
+            "months_to_first_close",
+            "site_improvement_spend_months",
+        ):
+            assign_if_present(payload, key, int_value(key))
+
+        for key in (
+            "sales_commission_pct",
+            "corporate_charge_pct",
+            "home_sale_excise_tax_pct",
+            "target_gross_margin_pct",
+            "target_pre_gna_margin_pct",
+            "target_irr_pct",
+            "downside_sales_price_delta_pct",
+            "downside_cost_delta_pct",
+            "downside_absorption_delta_pct",
+            "severe_downside_sales_price_delta_pct",
+            "severe_downside_cost_delta_pct",
+            "severe_downside_absorption_delta_pct",
+        ):
+            assign_if_present(payload, key, ratio_value(key))
+
+        if text_value("land_close_date"):
+            payload["land_close_date"] = text_value("land_close_date")
+
+        global_options_pct = ratio_value("options_pct")
+        global_price_incentives_pct = ratio_value("price_incentives_pct")
+        global_mortgage_incentives_pct = ratio_value("mortgage_incentives_pct")
+        global_direct_contingency_pct = ratio_value("direct_cost_contingency_pct")
+        global_other_vertical = float_value("other_vertical_costs_per_unit")
+
+        series_payload: list[dict[str, Any]] = []
+        for index, row in enumerate(self.series_rows, start=1):
+            row_text = {key: str(value.get()).strip() for key, value in row.items() if key != "move_up"}
+            lots_raw = row_text.get("lots", "")
+            has_content = any(value for value in row_text.values()) or bool(row["move_up"].get())
+            if not has_content:
+                continue
+            lots = _parse_optional_float(lots_raw) if lots_raw else None
+            if not lots or lots <= 0:
+                if strict:
+                    raise ValueError(f"Series row {index} needs positive Lots.")
+                continue
+
+            avg_sqft = _parse_optional_float(row_text.get("avg_sqft", "")) if row_text.get("avg_sqft") else None
+            base_house_price = (
+                _parse_optional_float(row_text.get("base_house_price", ""))
+                if row_text.get("base_house_price")
+                else None
+            )
+            if strict and (avg_sqft is None or avg_sqft <= 0):
+                raise ValueError(f"Series row {index} needs Avg Sqft.")
+            if strict and (base_house_price is None or base_house_price <= 0):
+                raise ValueError(f"Series row {index} needs Base Price.")
+
+            item: dict[str, Any] = {
+                "name": row_text.get("name") or f"Series {index}",
+                "lots": lots,
+                "avg_sqft": avg_sqft or 0.0,
+                "base_house_price": base_house_price or 0.0,
+                "move_up": bool(row["move_up"].get()),
+            }
+            assign_if_present(item, "lot_premium", _parse_optional_float(row_text.get("lot_premium", "")) if row_text.get("lot_premium") else None)
+            assign_if_present(item, "direct_cost_psf", _parse_optional_float(row_text.get("direct_cost_psf", "")) if row_text.get("direct_cost_psf") else None)
+            assign_if_present(item, "permit_fees_per_unit", _parse_optional_float(row_text.get("permit_fees_per_unit", "")) if row_text.get("permit_fees_per_unit") else None)
+            assign_if_present(item, "tap_fees_per_unit", _parse_optional_float(row_text.get("tap_fees_per_unit", "")) if row_text.get("tap_fees_per_unit") else None)
+            assign_if_present(item, "options_pct", global_options_pct)
+            assign_if_present(item, "price_incentives_pct", global_price_incentives_pct)
+            assign_if_present(item, "mortgage_incentives_pct", global_mortgage_incentives_pct)
+            assign_if_present(item, "direct_cost_contingency_pct", global_direct_contingency_pct)
+            assign_if_present(item, "other_vertical_costs_per_unit", global_other_vertical)
+            series_payload.append(item)
+
+        if strict and not series_payload:
+            raise ValueError("Enter at least one product series with positive lots.")
+        payload["product_series"] = series_payload
+
+        events_payload: list[dict[str, Any]] = []
+        raw_events = self.events_text.get("1.0", "end").strip()
+        if raw_events:
+            for line_number, raw_line in enumerate(raw_events.splitlines(), start=1):
+                line = raw_line.strip()
+                if not line:
+                    continue
+                parts = [part.strip() for part in line.split(",")]
+                if len(parts) != 3:
+                    if strict:
+                        raise ValueError(
+                            f"Takedown event line {line_number} must be month,lots,price_per_lot."
+                        )
+                    continue
+                try:
+                    month = int(round(float(_clean_number_text(parts[0]))))
+                    lots = float(_clean_number_text(parts[1]))
+                    price_per_lot = float(_clean_number_text(parts[2]))
+                except ValueError as error:
+                    if strict:
+                        raise ValueError(f"Takedown event line {line_number} has an invalid number.") from error
+                    continue
+                if lots <= 0 or price_per_lot <= 0:
+                    if strict:
+                        raise ValueError(
+                            f"Takedown event line {line_number} needs positive lots and price."
+                        )
+                    continue
+                events_payload.append(
+                    {
+                        "month": max(0, month),
+                        "lots": lots,
+                        "price_per_lot": price_per_lot,
+                    }
+                )
+
+        if events_payload:
+            payload["land_purchase_events"] = events_payload
+
+        if strict and not events_payload and (payload.get("land_purchase_price_per_lot") or 0) <= 0:
+            raise ValueError("Enter Land Price / Lot or at least one Takedown Event.")
+
+        return payload
+
+    def _render_json_text(self, payload: Any) -> None:
+        rendered = json.dumps(payload, indent=2)
+        self.json_text.delete("1.0", "end")
+        self.json_text.insert("1.0", rendered)
+
+    def _sync_builder_to_json(self) -> None:
+        try:
+            payload = self._request_from_form(strict=True)
+        except ValueError as error:
+            self._set_status(str(error))
+            messagebox.showerror("Builder Error", str(error), parent=self.root)
+            return
+        self._render_json_text(payload)
+        self.notebook.select(self.json_tab)
+        self._set_status("Builder assumptions copied into Advanced JSON.")
+
+    def _apply_request_to_builder(self, payload: dict[str, Any]) -> None:
+        self.form_vars["community_name"].set(str(payload.get("community_name") or ""))
+        self.form_vars["division"].set(str(payload.get("division") or ""))
+        self.form_vars["market"].set(str(payload.get("market") or ""))
+        self.form_vars["takedown_structure"].set(str(payload.get("takedown_structure") or "bulk"))
+        self.form_vars["land_close_date"].set(str(payload.get("land_close_date") or ""))
+        self.form_vars["deposit_credit_at_close"].set(bool(payload.get("deposit_credit_at_close", True)))
+
+        for key in (
+            "gross_acres",
+            "land_purchase_price_per_lot",
+            "land_brokerage_and_closing_costs_total",
+            "earnest_money_deposit",
+            "land_development_cost_total",
+            "project_management_cost_total",
+            "other_land_costs_total",
+            "capitalized_marketing_total",
+            "architecture_engineering_total",
+            "indirect_field_overhead_per_month",
+            "other_house_costs_per_unit",
+            "monthly_absorption",
+            "build_cycle_months",
+            "months_to_first_home_start",
+            "months_to_sales_open",
+            "months_to_first_close",
+            "site_improvement_spend_months",
+        ):
+            self.form_vars[key].set(_format_input_number(payload.get(key)))
+
+        for key in (
+            "sales_commission_pct",
+            "corporate_charge_pct",
+            "home_sale_excise_tax_pct",
+            "target_gross_margin_pct",
+            "target_pre_gna_margin_pct",
+            "target_irr_pct",
+            "downside_sales_price_delta_pct",
+            "downside_cost_delta_pct",
+            "downside_absorption_delta_pct",
+            "severe_downside_sales_price_delta_pct",
+            "severe_downside_cost_delta_pct",
+            "severe_downside_absorption_delta_pct",
+        ):
+            self.form_vars[key].set(_format_input_ratio(payload.get(key)))
+
+        series = list(payload.get("product_series") or [])
+        warnings: list[str] = []
+        if len(series) > SERIES_ROW_COUNT:
+            warnings.append(f"Builder shows the first {SERIES_ROW_COUNT} series only.")
+
+        globals_source = series[0] if series else {}
+        self.form_vars["options_pct"].set(_format_input_ratio(globals_source.get("options_pct")))
+        self.form_vars["price_incentives_pct"].set(
+            _format_input_ratio(globals_source.get("price_incentives_pct"))
+        )
+        self.form_vars["mortgage_incentives_pct"].set(
+            _format_input_ratio(globals_source.get("mortgage_incentives_pct"))
+        )
+        self.form_vars["direct_cost_contingency_pct"].set(
+            _format_input_ratio(globals_source.get("direct_cost_contingency_pct"))
+        )
+        self.form_vars["other_vertical_costs_per_unit"].set(
+            _format_input_number(globals_source.get("other_vertical_costs_per_unit"))
+        )
+
+        for global_key in (
+            "options_pct",
+            "price_incentives_pct",
+            "mortgage_incentives_pct",
+            "direct_cost_contingency_pct",
+            "other_vertical_costs_per_unit",
+        ):
+            first_value = globals_source.get(global_key)
+            for item in series[1:]:
+                if item.get(global_key) != first_value:
+                    warnings.append(
+                        "Advanced JSON contained mixed per-series overrides; builder normalized them."
+                    )
+                    break
+            if len(warnings) > 1:
+                break
+
+        for index, row in enumerate(self.series_rows):
+            default_name = f"Series {chr(65 + index)}"
+            if index < len(series):
+                item = series[index]
+                row["name"].set(str(item.get("name") or default_name))
+                row["lots"].set(_format_input_number(item.get("lots")))
+                row["avg_sqft"].set(_format_input_number(item.get("avg_sqft")))
+                row["base_house_price"].set(_format_input_number(item.get("base_house_price")))
+                row["lot_premium"].set(_format_input_number(item.get("lot_premium")))
+                row["direct_cost_psf"].set(_format_input_number(item.get("direct_cost_psf")))
+                row["permit_fees_per_unit"].set(_format_input_number(item.get("permit_fees_per_unit")))
+                row["tap_fees_per_unit"].set(_format_input_number(item.get("tap_fees_per_unit")))
+                row["move_up"].set(bool(item.get("move_up", False)))
+            else:
+                row["name"].set(default_name)
+                row["lots"].set("")
+                row["avg_sqft"].set("")
+                row["base_house_price"].set("")
+                row["lot_premium"].set("")
+                row["direct_cost_psf"].set("")
+                row["permit_fees_per_unit"].set("")
+                row["tap_fees_per_unit"].set("")
+                row["move_up"].set(False)
+
+        raw_events = payload.get("land_purchase_events") or payload.get("takedown_schedule") or []
+        event_lines = [
+            f"{int(item.get('month', 0))},{_format_input_number(item.get('lots'))},{_format_input_number(item.get('price_per_lot'))}"
+            for item in raw_events
+        ]
+        self.events_text.delete("1.0", "end")
+        self.events_text.insert("1.0", "\n".join(event_lines))
+
+        self.notes_text.delete("1.0", "end")
+        self.notes_text.insert("1.0", str(payload.get("notes") or ""))
+
+        self._schedule_refresh()
+        if warnings:
+            self._set_status(" ".join(dict.fromkeys(warnings)))
+
+    def _apply_json_to_builder(self) -> None:
+        try:
+            payload = json.loads(self.json_text.get("1.0", "end").strip() or "{}")
+        except json.JSONDecodeError as error:
+            messagebox.showerror("Invalid JSON", error.msg, parent=self.root)
+            self._set_status(f"JSON error: {error.msg}")
+            return
+
+        display_payload = payload
+        if isinstance(payload, list):
+            if not payload or not isinstance(payload[0], dict):
+                messagebox.showerror(
+                    "Unsupported JSON",
+                    "Advanced JSON must contain a request object or an array of request objects.",
+                    parent=self.root,
+                )
+                return
+            display_payload = payload[0]
+            self._set_status("Applied the first request from the JSON array into the builder.")
+        elif not isinstance(payload, dict):
+            messagebox.showerror(
+                "Unsupported JSON",
+                "Advanced JSON must contain a request object.",
+                parent=self.root,
+            )
+            return
+
+        self._apply_request_to_builder(display_payload)
+        self.notebook.select(self.builder_tab)
+        self._set_status("Advanced JSON copied into the Deal Builder.")
+
+    def _load_request_payload(self, payload: Any, file_path: Path | None = None) -> None:
+        display_payload = payload
+        if isinstance(payload, list):
+            if not payload or not isinstance(payload[0], dict):
+                raise ValueError("Request JSON array must contain at least one object.")
+            display_payload = payload[0]
+        elif not isinstance(payload, dict):
+            raise ValueError("Request JSON must be an object or an array of objects.")
+
+        self.current_file = file_path.resolve() if file_path else None
+        self.file_var.set(
+            f"Request: {self.current_file.name}" if self.current_file else "Request: unsaved builder request"
+        )
+
+        generated_root = _repo_root() / "generated_agents"
+        self.latest_agent_dir = _latest_land_underwriter_agent_dir(generated_root)
+        if self.latest_agent_dir is not None:
+            self.agent_var.set(f"Agent: {self.latest_agent_dir.name}")
+        else:
+            self.agent_var.set("Agent: rules engine only (no trained specialist found)")
+
+        self._apply_request_to_builder(display_payload)
+        self._render_json_text(payload)
+        self.notebook.select(self.builder_tab)
+
+        if isinstance(payload, list):
+            self._set_status(f"Loaded {len(payload)} requests; builder is showing the first deal.")
+        else:
+            self._set_status("Request loaded into the Deal Builder.")
+
+    def _load_sample_request(self) -> None:
+        sample_path = _sample_request_path()
+        try:
+            payload = json.loads(sample_path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            messagebox.showerror("Missing Sample", f"Sample request was not found:\n{sample_path}", parent=self.root)
+            self._set_status("Sample request is missing.")
+            return
+        except json.JSONDecodeError as error:
+            messagebox.showerror("Invalid Sample JSON", error.msg, parent=self.root)
+            self._set_status(f"Sample request JSON is invalid: {error.msg}")
+            return
+
+        self._load_request_payload(payload, sample_path)
+
+    def _open_request_file(self) -> None:
+        initial_dir = str(self.current_file.parent) if self.current_file else str(_sample_request_path().parent)
+        selected = filedialog.askopenfilename(
+            parent=self.root,
+            title="Open Underwrite Request",
+            initialdir=initial_dir,
+            filetypes=[("JSON Files", "*.json"), ("All Files", "*.*")],
+        )
+        if not selected:
+            return
+
+        path = Path(selected)
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as error:
+            messagebox.showerror("Invalid JSON", error.msg, parent=self.root)
+            self._set_status(f"Could not open request: {error.msg}")
+            return
+
+        self._load_request_payload(payload, path)
+
+    def _save_request_file(self) -> None:
+        try:
+            if self.notebook.select() == str(self.json_tab):
+                payload = json.loads(self.json_text.get("1.0", "end").strip() or "{}")
+            else:
+                payload = self._request_from_form(strict=True)
+                self._render_json_text(payload)
+        except ValueError as error:
+            messagebox.showerror("Builder Error", str(error), parent=self.root)
+            self._set_status(str(error))
+            return
+        except json.JSONDecodeError as error:
+            messagebox.showerror("Invalid JSON", error.msg, parent=self.root)
+            self._set_status(f"JSON error: {error.msg}")
+            return
+
+        destination = self.current_file
+        if destination is None or destination == _sample_request_path():
+            selected = filedialog.asksaveasfilename(
+                parent=self.root,
+                title="Save Underwrite Request",
+                defaultextension=".json",
+                initialfile="land_deal_request.json",
+                filetypes=[("JSON Files", "*.json"), ("All Files", "*.*")],
+            )
+            if not selected:
+                return
+            destination = Path(selected)
+
+        destination.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        self.current_file = destination.resolve()
+        self.file_var.set(f"Request: {self.current_file.name}")
+        self._set_status(f"Saved request to {self.current_file.name}.")
+
+    def _run_active_request(self) -> None:
+        if self.run_inflight:
+            return
+        if self.notebook.select() == str(self.json_tab):
+            self._run_json_request()
+            return
+        self._run_builder_request()
+
+    def _run_builder_request(self) -> None:
+        try:
+            payload = self._request_from_form(strict=True)
+        except ValueError as error:
+            messagebox.showerror("Builder Error", str(error), parent=self.root)
+            self._set_status(str(error))
+            return
+
+        self._render_json_text(payload)
+        self._enqueue_underwrite(payload)
+
+    def _run_json_request(self) -> None:
+        try:
+            payload = json.loads(self.json_text.get("1.0", "end").strip() or "{}")
+        except json.JSONDecodeError as error:
+            messagebox.showerror("Invalid JSON", error.msg, parent=self.root)
+            self._set_status(f"JSON error: {error.msg}")
+            return
+
+        if not isinstance(payload, (dict, list)):
+            messagebox.showerror(
+                "Unsupported JSON",
+                "Advanced JSON must contain a request object or an array of request objects.",
+                parent=self.root,
+            )
+            return
+
+        self._enqueue_underwrite(payload)
+
+    def _enqueue_underwrite(self, payload: Any) -> None:
+        generated_root = _repo_root() / "generated_agents"
+        self.latest_agent_dir = _latest_land_underwriter_agent_dir(generated_root)
+        if self.latest_agent_dir is not None:
+            self.agent_var.set(f"Agent: {self.latest_agent_dir.name}")
+        else:
+            self.agent_var.set("Agent: rules engine only (no trained specialist found)")
+
+        self._set_busy(True)
+        self._set_status("Running land deal underwrite...")
+        self.notebook.select(self.results_tab)
+        self.request_queue.put(
+            {
+                "payload": payload,
+                "agent_dir": str(self.latest_agent_dir) if self.latest_agent_dir else None,
+            }
+        )
+
+    def _set_status(self, message: str) -> None:
+        self.status_var.set(message)
+
+    def _set_busy(self, busy: bool) -> None:
+        self.run_inflight = busy
+        state = "disabled" if busy else "normal"
+        for button in (self.load_button, self.open_button, self.save_button, self.run_button):
+            button.configure(state=state)
+        self.root.configure(cursor="watch" if busy else "")
+        if not busy:
+            self.root.update_idletasks()
+
+    def _start_worker(self) -> None:
+        self.worker_thread = threading.Thread(target=self._worker_loop, daemon=True)
+        self.worker_thread.start()
+
+    def _worker_loop(self) -> None:
+        while True:
+            request = self.request_queue.get()
+            if request is None:
+                return
+
+            try:
+                payload = request["payload"]
+                agent_dir = request.get("agent_dir")
+                specialist = None
+                if agent_dir:
+                    resolved_agent_dir = Path(agent_dir)
+                    if resolved_agent_dir.exists():
+                        specialist = AgentFactory().load_specialist_agent(resolved_agent_dir)
+                underwriter = LandDealUnderwriter(specialist)
+                if isinstance(payload, list):
+                    result = underwriter.underwrite_many(payload)
+                else:
+                    result = underwriter.underwrite(payload)
+                self.response_queue.put(
+                    (
+                        "success",
+                        {
+                            "result": result,
+                            "agent_dir": agent_dir,
+                        },
+                    )
+                )
+            except Exception as error:  # noqa: BLE001
+                self.response_queue.put(("error", str(error)))
+
+    def _poll_responses(self) -> None:
+        try:
+            while True:
+                kind, payload = self.response_queue.get_nowait()
+                if kind == "success":
+                    self.current_result = payload["result"]
+                    agent_dir = payload.get("agent_dir")
+                    if agent_dir:
+                        self.agent_var.set(f"Agent: {Path(agent_dir).name}")
+                    self._render_result(payload["result"])
+                    if isinstance(payload["result"], list):
+                        self._set_status(f"Underwrite complete for {len(payload['result'])} deals.")
+                    else:
+                        self._set_status("Underwrite complete.")
+                    self._set_busy(False)
+                else:
+                    self._set_busy(False)
+                    self._set_status(f"Underwrite failed: {payload}")
+                    messagebox.showerror("Underwrite Failed", str(payload), parent=self.root)
+        except queue.Empty:
+            pass
+
+        if self.root.winfo_exists():
+            self.root.after(150, self._poll_responses)
