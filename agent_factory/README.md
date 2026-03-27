@@ -160,6 +160,23 @@ The dashboard supports:
 - running the planning watch against a JSON or line-based watchlist
 - running a combined full sweep with sample data loaders
 
+### Desktop Shortcut
+
+To create a double-click desktop icon:
+
+```bash
+install_subdivision_scout_desktop_shortcut.bat
+```
+
+This creates:
+- `Residential Subdivision Scout.lnk` on your Windows Desktop
+
+Direct launch without installing the shortcut:
+
+```bash
+run_subdivision_scout_desktop.bat
+```
+
 ## Outlook Integration Without Admin Access
 
 If you do not have Azure admin access, use local Outlook Desktop automation:
