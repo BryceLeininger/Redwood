@@ -73,16 +73,54 @@ RISK_SIGNALS: Dict[str, int] = {
 }
 
 APPROVED_QUERY_TEMPLATES = [
-    '"{jurisdiction}" "tentative map" approved',
-    '"{jurisdiction}" "vesting tentative map" approved',
-    '"{jurisdiction}" subdivision approved "planning commission"',
+    '"{jurisdiction}" "tentative map" "planning commission"',
+    '"{jurisdiction}" "vesting tentative map"',
+    '"{jurisdiction}" subdivision "staff report"',
 ]
 
 UPCOMING_QUERY_TEMPLATES = [
     '"{jurisdiction}" "tentative map" agenda',
-    '"{jurisdiction}" subdivision "planning commission" agenda',
-    '"{jurisdiction}" "recommended approval" subdivision',
+    '"{jurisdiction}" "recommended approval" "tentative map"',
+    '"{jurisdiction}" subdivision "public hearing"',
 ]
+
+PLANNING_TERMS_BY_STAGE: Dict[str, Sequence[str]] = {
+    "approved_recently": (
+        "tentative map",
+        "vesting tentative map",
+        "subdivision",
+        "tract map",
+        "planning commission",
+        "city council",
+        "staff report",
+        "approved",
+        "approval",
+    ),
+    "approaching_approval": (
+        "tentative map",
+        "vesting tentative map",
+        "subdivision",
+        "tract map",
+        "planning commission",
+        "agenda",
+        "public hearing",
+        "staff report",
+        "recommended approval",
+    ),
+}
+
+EXCLUDED_DOMAIN_KEYWORDS = (
+    "queenonline",
+    "hunting-",
+    "rokslide",
+    "tripadvisor",
+    "wikipedia",
+    "mapquest",
+    "tourist",
+    "facebook",
+    "instagram",
+    "youtube",
+)
 
 
 @dataclass(frozen=True)
@@ -233,6 +271,30 @@ def _build_rationale(
     return " ".join(fragments)
 
 
+def _jurisdiction_tokens(jurisdiction: str) -> List[str]:
+    words = re.findall(r"[a-z0-9]+", jurisdiction.lower())
+    stop_words = {"city", "county", "of", "ca", "az", "nv", "tx", "ut", "usa"}
+    return [word for word in words if word not in stop_words]
+
+
+def _result_is_relevant(stage: str, jurisdiction: str, title: str, url: str, snippet: str) -> bool:
+    haystack = f"{title} {snippet} {url}".lower()
+    domain = urlparse(url).netloc.lower()
+
+    if any(fragment in domain for fragment in EXCLUDED_DOMAIN_KEYWORDS):
+        return False
+
+    tokens = _jurisdiction_tokens(jurisdiction)
+    if tokens and not all(token in haystack for token in tokens):
+        return False
+
+    planning_terms = PLANNING_TERMS_BY_STAGE.get(stage, ())
+    if planning_terms and not any(term in haystack for term in planning_terms):
+        return False
+
+    return True
+
+
 class SubdivisionScout:
     """Operational agent that ranks parcels and monitors planning approvals."""
 
@@ -361,11 +423,21 @@ class SubdivisionScout:
                     dedupe_key = (stage, result["url"].lower())
                     if dedupe_key in seen:
                         continue
-                    seen.add(dedupe_key)
 
                     published_at = _parse_pub_date(result.get("published_at"))
                     if published_at and published_at < cutoff:
                         continue
+
+                    if not _result_is_relevant(
+                        stage=stage,
+                        jurisdiction=jurisdiction,
+                        title=result["title"],
+                        url=result["url"],
+                        snippet=result["snippet"],
+                    ):
+                        continue
+
+                    seen.add(dedupe_key)
 
                     url = result["url"]
                     items.append(
