@@ -1,0 +1,794 @@
+"""Workbook-aligned underwriting workflow for homebuilder land acquisition deals."""
+from __future__ import annotations
+
+import math
+import re
+from dataclasses import dataclass
+from datetime import date, datetime
+from typing import Any, Dict, List, Sequence
+
+from .specialist_agent import SpecialistAgent
+
+DEFAULT_SALES_COMMISSION_PCT = 0.02373404255319149
+DEFAULT_CORPORATE_CHARGE_PCT = 0.037650943812901905
+DEFAULT_CAPITALIZED_MARKETING_PER_LOT = 5524.0
+DEFAULT_OTHER_HOUSE_COSTS_PER_UNIT = 20826.88
+DEFAULT_INDIRECT_FIELD_OVERHEAD_PER_MONTH = 73982.5
+DEFAULT_TARGET_GROSS_MARGIN_PCT = 0.21
+DEFAULT_TARGET_PRE_GNA_MARGIN_PCT = 0.15
+DEFAULT_TARGET_IRR_PCT = 0.20
+
+POSITIVE_SIGNAL_WEIGHTS: Dict[str, int] = {
+    "tentative map": 5,
+    "final map": 8,
+    "approved": 6,
+    "entitled": 8,
+    "utilities at site": 5,
+    "finished lots": 9,
+    "existing subdivision": 4,
+    "growth corridor": 4,
+    "strong demand": 5,
+    "infill": 4,
+    "shovel ready": 10,
+}
+
+RISK_SIGNAL_WEIGHTS: Dict[str, int] = {
+    "annexation": 9,
+    "brownfield": 12,
+    "easement": 5,
+    "entitlement risk": 8,
+    "environmental": 7,
+    "floodplain": 10,
+    "grading": 5,
+    "mitigation": 6,
+    "offsite": 5,
+    "raw land": 4,
+    "remediation": 10,
+    "rezone": 8,
+    "septic": 9,
+    "steep": 6,
+    "utility extension": 8,
+    "variance": 7,
+    "wetlands": 10,
+}
+
+
+def _clean_text(value: str) -> str:
+    return re.sub(r"\s+", " ", value or "").strip()
+
+
+def _safe_div(numerator: float, denominator: float) -> float:
+    if abs(denominator) < 1e-9:
+        return 0.0
+    return numerator / denominator
+
+
+def _round_money(value: float) -> float:
+    return round(float(value), 2)
+
+
+def _round_ratio(value: float | None) -> float | None:
+    if value is None:
+        return None
+    return round(float(value), 4)
+
+
+def _ratio_from_value(value: Any, *, default: float = 0.0) -> float:
+    if value is None or value == "":
+        return default
+    if isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            return default
+        is_percent = "%" in raw
+        raw = raw.replace("%", "").replace("$", "").replace(",", "")
+        parsed = float(raw)
+        if is_percent or abs(parsed) > 1.0:
+            return parsed / 100.0
+        return parsed
+    parsed = float(value)
+    if abs(parsed) > 1.0:
+        return parsed / 100.0
+    return parsed
+
+
+def _float_from_value(value: Any, *, default: float = 0.0) -> float:
+    if value is None or value == "":
+        return default
+    if isinstance(value, str):
+        raw = value.strip().replace("$", "").replace(",", "")
+        if not raw:
+            return default
+        return float(raw)
+    return float(value)
+
+
+def _int_from_value(value: Any, *, default: int = 0) -> int:
+    if value is None or value == "":
+        return default
+    return int(round(_float_from_value(value, default=float(default))))
+
+
+def _bool_from_value(value: Any, *, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "y"}:
+        return True
+    if text in {"0", "false", "no", "n"}:
+        return False
+    return default
+
+
+def _date_from_value(value: Any) -> date | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, date):
+        return value
+    return datetime.fromisoformat(str(value).strip()).date()
+
+
+def _add_months(value: date, months: int) -> date:
+    year = value.year + (value.month - 1 + months) // 12
+    month = (value.month - 1 + months) % 12 + 1
+    day = min(
+        value.day,
+        (
+            31
+            if month in {1, 3, 5, 7, 8, 10, 12}
+            else 30
+            if month in {4, 6, 9, 11}
+            else 29
+            if year % 4 == 0 and (year % 100 != 0 or year % 400 == 0)
+            else 28
+        ),
+    )
+    return date(year, month, day)
+
+
+def _allocate_evenly(
+    cash_flows: List[float],
+    total_amount: float,
+    start_month: int,
+    number_of_months: int,
+) -> None:
+    if abs(total_amount) < 1e-9 or number_of_months <= 0:
+        return
+    start_month = max(0, start_month)
+    per_month = total_amount / float(number_of_months)
+    for offset in range(number_of_months):
+        index = start_month + offset
+        if index >= len(cash_flows):
+            cash_flows.extend([0.0] * (index - len(cash_flows) + 1))
+        cash_flows[index] += per_month
+
+
+def _find_signal_hits(text: str, catalog: Dict[str, int]) -> List[str]:
+    lowered = text.lower()
+    hits = [phrase for phrase in catalog if phrase in lowered]
+    hits.sort(key=lambda item: (-catalog[item], item))
+    return hits
+
+
+def _monthly_irr(cash_flows: Sequence[float]) -> float | None:
+    negatives = any(value < 0 for value in cash_flows)
+    positives = any(value > 0 for value in cash_flows)
+    if not negatives or not positives:
+        return None
+
+    def npv(rate: float) -> float:
+        total = 0.0
+        for index, value in enumerate(cash_flows):
+            total += value / ((1.0 + rate) ** index)
+        return total
+
+    low = -0.9999
+    high = 1.0
+    npv_low = npv(low)
+    npv_high = npv(high)
+
+    expansion_count = 0
+    while npv_low * npv_high > 0 and expansion_count < 20:
+        high *= 2.0
+        npv_high = npv(high)
+        expansion_count += 1
+
+    if npv_low * npv_high > 0:
+        return None
+
+    for _ in range(120):
+        midpoint = (low + high) / 2.0
+        npv_mid = npv(midpoint)
+        if abs(npv_mid) < 1e-8:
+            return midpoint
+        if npv_low * npv_mid <= 0:
+            high = midpoint
+            npv_high = npv_mid
+        else:
+            low = midpoint
+            npv_low = npv_mid
+
+    return (low + high) / 2.0
+
+
+def _annualize_monthly_rate(monthly_rate: float | None) -> float | None:
+    if monthly_rate is None:
+        return None
+    return (1.0 + monthly_rate) ** 12 - 1.0
+
+
+def _closing_schedule(total_lots: float, monthly_absorption: float, first_close_month: int) -> List[tuple[int, float]]:
+    monthly_absorption = max(0.25, monthly_absorption)
+    sold = 0.0
+    month = first_close_month
+    schedule: List[tuple[int, float]] = []
+    period = 1
+
+    while sold < total_lots - 1e-9:
+        cumulative_target = min(total_lots, monthly_absorption * period)
+        closings = cumulative_target - sold
+        if closings <= 1e-9:
+            break
+        schedule.append((month, closings))
+        sold = cumulative_target
+        month += 1
+        period += 1
+
+    if not schedule:
+        schedule.append((first_close_month, total_lots))
+    return schedule
+
+
+@dataclass(frozen=True)
+class ProductSeriesInput:
+    name: str
+    lots: float
+    avg_sqft: float
+    base_house_price: float
+    lot_premium: float = 0.0
+    options_pct: float = 0.0
+    price_incentives_pct: float = 0.03
+    mortgage_incentives_pct: float = 0.03
+    direct_cost_psf: float = 90.0
+    direct_cost_contingency_pct: float = 0.02
+    permit_fees_per_unit: float = 75000.0
+    tap_fees_per_unit: float = 20000.0
+    other_vertical_costs_per_unit: float = 0.0
+    move_up: bool = False
+
+    @classmethod
+    def from_dict(cls, payload: Dict[str, Any], *, default_name: str) -> "ProductSeriesInput":
+        return cls(
+            name=str(payload.get("name") or default_name).strip() or default_name,
+            lots=_float_from_value(payload.get("lots"), default=0.0),
+            avg_sqft=_float_from_value(payload.get("avg_sqft"), default=0.0),
+            base_house_price=_float_from_value(payload.get("base_house_price"), default=0.0),
+            lot_premium=_float_from_value(payload.get("lot_premium"), default=0.0),
+            options_pct=_ratio_from_value(payload.get("options_pct"), default=0.0),
+            price_incentives_pct=_ratio_from_value(payload.get("price_incentives_pct"), default=0.03),
+            mortgage_incentives_pct=_ratio_from_value(payload.get("mortgage_incentives_pct"), default=0.03),
+            direct_cost_psf=_float_from_value(payload.get("direct_cost_psf"), default=90.0),
+            direct_cost_contingency_pct=_ratio_from_value(
+                payload.get("direct_cost_contingency_pct"),
+                default=0.02,
+            ),
+            permit_fees_per_unit=_float_from_value(payload.get("permit_fees_per_unit"), default=75000.0),
+            tap_fees_per_unit=_float_from_value(payload.get("tap_fees_per_unit"), default=20000.0),
+            other_vertical_costs_per_unit=_float_from_value(
+                payload.get("other_vertical_costs_per_unit"),
+                default=0.0,
+            ),
+            move_up=_bool_from_value(payload.get("move_up"), default=False),
+        )
+
+    def net_sales_price_per_unit(self, *, price_multiplier: float = 1.0) -> float:
+        base_price = self.base_house_price * price_multiplier
+        options_value = base_price * self.options_pct
+        incentive_value = base_price * (self.price_incentives_pct + self.mortgage_incentives_pct)
+        premium_value = self.lot_premium * price_multiplier
+        return base_price + premium_value + options_value - incentive_value
+
+    def build_cost_per_unit(self, *, cost_multiplier: float = 1.0) -> float:
+        direct_cost = self.direct_cost_psf * self.avg_sqft * cost_multiplier
+        contingency = direct_cost * self.direct_cost_contingency_pct
+        permit_fees = self.permit_fees_per_unit * cost_multiplier
+        tap_fees = self.tap_fees_per_unit * cost_multiplier
+        other_vertical = self.other_vertical_costs_per_unit * cost_multiplier
+        return direct_cost + contingency + permit_fees + tap_fees + other_vertical
+
+
+@dataclass(frozen=True)
+class LandPurchaseEvent:
+    month: int
+    lots: float
+    price_per_lot: float
+
+    @classmethod
+    def from_dict(cls, payload: Dict[str, Any]) -> "LandPurchaseEvent":
+        return cls(
+            month=max(0, _int_from_value(payload.get("month"), default=0)),
+            lots=max(0.0, _float_from_value(payload.get("lots"), default=0.0)),
+            price_per_lot=max(0.0, _float_from_value(payload.get("price_per_lot"), default=0.0)),
+        )
+
+    def total_cost(self) -> float:
+        return self.lots * self.price_per_lot
+
+
+@dataclass(frozen=True)
+class DealScenario:
+    name: str
+    sales_price_delta_pct: float
+    cost_delta_pct: float
+    absorption_delta_pct: float
+
+
+@dataclass(frozen=True)
+class LandDealInput:
+    community_name: str
+    division: str
+    market: str
+    notes: str
+    gross_acres: float
+    takedown_structure: str
+    product_series: Sequence[ProductSeriesInput]
+    land_purchase_price_per_lot: float
+    land_purchase_events: Sequence[LandPurchaseEvent]
+    land_brokerage_and_closing_costs_total: float
+    earnest_money_deposit: float
+    deposit_credit_at_close: bool
+    land_development_cost_total: float
+    project_management_cost_total: float
+    other_land_costs_total: float
+    capitalized_marketing_total: float | None
+    capitalized_marketing_per_lot: float | None
+    architecture_engineering_total: float
+    indirect_field_overhead_total: float | None
+    indirect_field_overhead_per_month: float | None
+    indirect_field_overhead_per_lot: float | None
+    sales_commission_pct: float
+    home_sale_excise_tax_pct: float
+    corporate_charge_pct: float
+    other_house_costs_per_unit: float
+    monthly_absorption: float
+    build_cycle_months: int
+    months_to_first_home_start: int
+    months_to_sales_open: int
+    months_to_first_close: int | None
+    site_improvement_spend_months: int | None
+    land_close_date: date | None
+    target_gross_margin_pct: float
+    target_pre_gna_margin_pct: float
+    target_irr_pct: float
+    downside_sales_price_delta_pct: float
+    downside_cost_delta_pct: float
+    downside_absorption_delta_pct: float
+    severe_downside_sales_price_delta_pct: float
+    severe_downside_cost_delta_pct: float
+    severe_downside_absorption_delta_pct: float
+
+    @classmethod
+    def from_dict(cls, payload: Dict[str, Any]) -> "LandDealInput":
+        raw_series = payload.get("product_series")
+        if raw_series is None:
+            raw_series = [
+                {
+                    "name": payload.get("product_type") or "Product Series A",
+                    "lots": payload.get("lots") or payload.get("lot_count"),
+                    "avg_sqft": payload.get("avg_sqft"),
+                    "base_house_price": payload.get("base_house_price"),
+                    "lot_premium": payload.get("lot_premium"),
+                    "options_pct": payload.get("options_pct"),
+                    "price_incentives_pct": payload.get("price_incentives_pct"),
+                    "mortgage_incentives_pct": payload.get("mortgage_incentives_pct"),
+                    "direct_cost_psf": payload.get("direct_cost_psf"),
+                    "direct_cost_contingency_pct": payload.get("direct_cost_contingency_pct"),
+                    "permit_fees_per_unit": payload.get("permit_fees_per_unit"),
+                    "tap_fees_per_unit": payload.get("tap_fees_per_unit"),
+                    "other_vertical_costs_per_unit": payload.get("other_vertical_costs_per_unit"),
+                    "move_up": payload.get("move_up"),
+                }
+            ]
+
+        product_series = [
+            ProductSeriesInput.from_dict(item, default_name=f"Product Series {index}")
+            for index, item in enumerate(raw_series, start=1)
+        ]
+        valid_series = [item for item in product_series if item.lots > 0]
+        if not valid_series:
+            raise ValueError("At least one product series with a positive lot count is required.")
+
+        total_lots = sum(item.lots for item in valid_series)
+        raw_events = payload.get("land_purchase_events") or payload.get("takedown_schedule") or []
+        purchase_events = [LandPurchaseEvent.from_dict(item) for item in raw_events]
+        purchase_events = [item for item in purchase_events if item.lots > 0 and item.price_per_lot > 0]
+
+        land_purchase_price_per_lot = _float_from_value(payload.get("land_purchase_price_per_lot"), default=0.0)
+        if not purchase_events:
+            if land_purchase_price_per_lot <= 0:
+                raise ValueError("Provide land_purchase_price_per_lot or land_purchase_events.")
+            purchase_events = [
+                LandPurchaseEvent(
+                    month=0,
+                    lots=total_lots,
+                    price_per_lot=land_purchase_price_per_lot,
+                )
+            ]
+
+        purchase_event_lots = sum(item.lots for item in purchase_events)
+        if abs(purchase_event_lots - total_lots) > 1e-6:
+            raise ValueError("Land purchase events must cover the same total lots as the product series mix.")
+
+        if land_purchase_price_per_lot <= 0:
+            weighted_land_cost = sum(item.total_cost() for item in purchase_events)
+            land_purchase_price_per_lot = _safe_div(weighted_land_cost, total_lots)
+
+        return cls(
+            community_name=str(payload.get("community_name") or "Unnamed Community").strip() or "Unnamed Community",
+            division=str(payload.get("division") or payload.get("market") or "").strip(),
+            market=str(payload.get("market") or payload.get("division") or "").strip(),
+            notes=_clean_text(str(payload.get("notes") or "")),
+            gross_acres=max(0.0, _float_from_value(payload.get("gross_acres"), default=0.0)),
+            takedown_structure=str(payload.get("takedown_structure") or "bulk").strip() or "bulk",
+            product_series=valid_series,
+            land_purchase_price_per_lot=land_purchase_price_per_lot,
+            land_purchase_events=purchase_events,
+            land_brokerage_and_closing_costs_total=_float_from_value(
+                payload.get("land_brokerage_and_closing_costs_total"),
+                default=0.0,
+            ),
+            earnest_money_deposit=_float_from_value(payload.get("earnest_money_deposit"), default=0.0),
+            deposit_credit_at_close=_bool_from_value(payload.get("deposit_credit_at_close"), default=True),
+            land_development_cost_total=_float_from_value(payload.get("land_development_cost_total"), default=0.0),
+            project_management_cost_total=_float_from_value(
+                payload.get("project_management_cost_total"),
+                default=0.0,
+            ),
+            other_land_costs_total=_float_from_value(payload.get("other_land_costs_total"), default=0.0),
+            capitalized_marketing_total=(
+                None
+                if payload.get("capitalized_marketing_total") in (None, "")
+                else _float_from_value(payload.get("capitalized_marketing_total"), default=0.0)
+            ),
+            capitalized_marketing_per_lot=(
+                None
+                if payload.get("capitalized_marketing_per_lot") in (None, "")
+                else _float_from_value(payload.get("capitalized_marketing_per_lot"), default=0.0)
+            ),
+            architecture_engineering_total=_float_from_value(
+                payload.get("architecture_engineering_total"),
+                default=0.0,
+            ),
+            indirect_field_overhead_total=(
+                None
+                if payload.get("indirect_field_overhead_total") in (None, "")
+                else _float_from_value(payload.get("indirect_field_overhead_total"), default=0.0)
+            ),
+            indirect_field_overhead_per_month=(
+                None
+                if payload.get("indirect_field_overhead_per_month") in (None, "")
+                else _float_from_value(payload.get("indirect_field_overhead_per_month"), default=0.0)
+            ),
+            indirect_field_overhead_per_lot=(
+                None
+                if payload.get("indirect_field_overhead_per_lot") in (None, "")
+                else _float_from_value(payload.get("indirect_field_overhead_per_lot"), default=0.0)
+            ),
+            sales_commission_pct=_ratio_from_value(
+                payload.get("sales_commission_pct"),
+                default=DEFAULT_SALES_COMMISSION_PCT,
+            ),
+            home_sale_excise_tax_pct=_ratio_from_value(payload.get("home_sale_excise_tax_pct"), default=0.0),
+            corporate_charge_pct=_ratio_from_value(
+                payload.get("corporate_charge_pct"),
+                default=DEFAULT_CORPORATE_CHARGE_PCT,
+            ),
+            other_house_costs_per_unit=_float_from_value(
+                payload.get("other_house_costs_per_unit"),
+                default=DEFAULT_OTHER_HOUSE_COSTS_PER_UNIT,
+            ),
+            monthly_absorption=max(0.25, _float_from_value(payload.get("monthly_absorption"), default=3.0)),
+            build_cycle_months=max(1, _int_from_value(payload.get("build_cycle_months"), default=5)),
+            months_to_first_home_start=max(
+                0,
+                _int_from_value(payload.get("months_to_first_home_start"), default=6),
+            ),
+            months_to_sales_open=max(
+                0,
+                _int_from_value(payload.get("months_to_sales_open"), default=9),
+            ),
+            months_to_first_close=(
+                None
+                if payload.get("months_to_first_close") in (None, "")
+                else max(0, _int_from_value(payload.get("months_to_first_close"), default=0))
+            ),
+            site_improvement_spend_months=(
+                None
+                if payload.get("site_improvement_spend_months") in (None, "")
+                else max(1, _int_from_value(payload.get("site_improvement_spend_months"), default=1))
+            ),
+            land_close_date=_date_from_value(payload.get("land_close_date")),
+            target_gross_margin_pct=_ratio_from_value(
+                payload.get("target_gross_margin_pct"),
+                default=DEFAULT_TARGET_GROSS_MARGIN_PCT,
+            ),
+            target_pre_gna_margin_pct=_ratio_from_value(
+                payload.get("target_pre_gna_margin_pct"),
+                default=DEFAULT_TARGET_PRE_GNA_MARGIN_PCT,
+            ),
+            target_irr_pct=_ratio_from_value(payload.get("target_irr_pct"), default=DEFAULT_TARGET_IRR_PCT),
+            downside_sales_price_delta_pct=_ratio_from_value(
+                payload.get("downside_sales_price_delta_pct"),
+                default=-0.05,
+            ),
+            downside_cost_delta_pct=_ratio_from_value(payload.get("downside_cost_delta_pct"), default=0.05),
+            downside_absorption_delta_pct=_ratio_from_value(
+                payload.get("downside_absorption_delta_pct"),
+                default=-0.15,
+            ),
+            severe_downside_sales_price_delta_pct=_ratio_from_value(
+                payload.get("severe_downside_sales_price_delta_pct"),
+                default=-0.10,
+            ),
+            severe_downside_cost_delta_pct=_ratio_from_value(
+                payload.get("severe_downside_cost_delta_pct"),
+                default=0.10,
+            ),
+            severe_downside_absorption_delta_pct=_ratio_from_value(
+                payload.get("severe_downside_absorption_delta_pct"),
+                default=-0.25,
+            ),
+        )
+
+    @property
+    def total_lots(self) -> float:
+        return sum(item.lots for item in self.product_series)
+
+    @property
+    def first_close_month(self) -> int:
+        if self.months_to_first_close is not None:
+            return self.months_to_first_close
+        return self.months_to_first_home_start + self.build_cycle_months
+
+    def capitalized_marketing_total_value(self) -> float:
+        if self.capitalized_marketing_total is not None:
+            return self.capitalized_marketing_total
+        if self.capitalized_marketing_per_lot is not None:
+            return self.capitalized_marketing_per_lot * self.total_lots
+        return DEFAULT_CAPITALIZED_MARKETING_PER_LOT * self.total_lots
+
+
+class LandDealUnderwriter:
+    """Applies workbook-style underwriting logic plus optional ML deal context."""
+
+    def __init__(self, specialist: SpecialistAgent | None = None) -> None:
+        self.specialist = specialist
+
+    def underwrite(self, payload: Dict[str, Any] | LandDealInput) -> Dict[str, Any]:
+        request = payload if isinstance(payload, LandDealInput) else LandDealInput.from_dict(payload)
+        note_hits = self._note_signals(request.notes)
+
+        scenarios = [
+            DealScenario("base_case", 0.0, 0.0, 0.0),
+            DealScenario(
+                "downside_case",
+                request.downside_sales_price_delta_pct,
+                request.downside_cost_delta_pct,
+                request.downside_absorption_delta_pct,
+            ),
+            DealScenario(
+                "severe_downside_case",
+                request.severe_downside_sales_price_delta_pct,
+                request.severe_downside_cost_delta_pct,
+                request.severe_downside_absorption_delta_pct,
+            ),
+        ]
+
+        scenario_results = {scenario.name: self._compute_scenario(request, scenario) for scenario in scenarios}
+        base_case = scenario_results["base_case"]
+        downside_case = scenario_results["downside_case"]
+        severe_case = scenario_results["severe_downside_case"]
+
+        hurdle_results = {
+            name: self._scenario_hurdles(request, result)
+            for name, result in scenario_results.items()
+        }
+
+        model_signal = self._model_signal(request, base_case)
+        recommendation, reasons = self._recommendation(
+            request=request,
+            base_case=base_case,
+            downside_case=downside_case,
+            severe_case=severe_case,
+            hurdle_results=hurdle_results,
+            note_hits=note_hits,
+            model_signal=model_signal,
+        )
+
+        return {
+            "agent": self.specialist.metadata["blueprint"]["name"] if self.specialist else "LandDealUnderwriter",
+            "community_name": request.community_name,
+            "division": request.division,
+            "market": request.market,
+            "takedown_structure": request.takedown_structure,
+            "recommendation": recommendation,
+            "recommendation_reasons": reasons,
+            "risk_flags": note_hits["risk_signals"],
+            "upside_flags": note_hits["positive_signals"],
+            "hurdles": hurdle_results,
+            "scenarios": scenario_results,
+            "model_signal": model_signal,
+            "assumptions": self._assumption_summary(request),
+        }
+
+    def underwrite_many(self, payloads: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        return [self.underwrite(item) for item in payloads]
+
+    def _assumption_summary(self, request: LandDealInput) -> Dict[str, Any]:
+        land_close_date = request.land_close_date.isoformat() if request.land_close_date else None
+        return {
+            "community_name": request.community_name,
+            "division": request.division,
+            "market": request.market,
+            "gross_acres": _round_money(request.gross_acres),
+            "total_lots": _round_money(request.total_lots),
+            "density_du_per_acre": _round_money(_safe_div(request.total_lots, request.gross_acres)),
+            "monthly_absorption": _round_money(request.monthly_absorption),
+            "build_cycle_months": request.build_cycle_months,
+            "months_to_first_home_start": request.months_to_first_home_start,
+            "months_to_sales_open": request.months_to_sales_open,
+            "months_to_first_close": request.first_close_month,
+            "land_close_date": land_close_date,
+            "target_gross_margin_pct": _round_ratio(request.target_gross_margin_pct),
+            "target_pre_gna_margin_pct": _round_ratio(request.target_pre_gna_margin_pct),
+            "target_irr_pct": _round_ratio(request.target_irr_pct),
+            "product_series": [
+                {
+                    "name": item.name,
+                    "lots": _round_money(item.lots),
+                    "avg_sqft": _round_money(item.avg_sqft),
+                    "base_house_price": _round_money(item.base_house_price),
+                    "net_sales_price_per_unit": _round_money(item.net_sales_price_per_unit()),
+                    "build_cost_per_unit": _round_money(item.build_cost_per_unit()),
+                    "move_up": item.move_up,
+                }
+                for item in request.product_series
+            ],
+            "land_purchase_events": [
+                {
+                    "month": item.month,
+                    "lots": _round_money(item.lots),
+                    "price_per_lot": _round_money(item.price_per_lot),
+                    "total_cost": _round_money(item.total_cost()),
+                }
+                for item in request.land_purchase_events
+            ],
+        }
+
+    def _note_signals(self, notes: str) -> Dict[str, Any]:
+        positive_hits = _find_signal_hits(notes, POSITIVE_SIGNAL_WEIGHTS)
+        risk_hits = _find_signal_hits(notes, RISK_SIGNAL_WEIGHTS)
+        positive_score = sum(POSITIVE_SIGNAL_WEIGHTS[item] for item in positive_hits[:4])
+        risk_score = sum(RISK_SIGNAL_WEIGHTS[item] for item in risk_hits[:4])
+        return {
+            "positive_signals": positive_hits,
+            "risk_signals": risk_hits,
+            "positive_score": positive_score,
+            "risk_score": risk_score,
+        }
+
+    def _model_signal(self, request: LandDealInput, base_case: Dict[str, Any]) -> Dict[str, Any] | None:
+        if self.specialist is None:
+            return None
+
+        context = request.notes or self._deal_narrative(request, base_case)
+        prediction = self.specialist.predict(context)
+        model_value = _float_from_value(prediction.get("prediction"), default=0.0)
+        actual_land = _float_from_value(
+            base_case["investment_summary"]["actual_land_cost_total"],
+            default=0.0,
+        )
+        residual_land = _float_from_value(
+            base_case["investment_summary"]["residual_max_land_cost_total"],
+            default=0.0,
+        )
+        return {
+            "input_text": context,
+            "prediction": _round_money(model_value),
+            "variance_to_actual_land_cost": _round_money(model_value - actual_land),
+            "variance_to_residual_land_value": _round_money(model_value - residual_land),
+        }
+
+    def _deal_narrative(self, request: LandDealInput, base_case: Dict[str, Any]) -> str:
+        revenue = base_case["income_statement"]["revenue_total"]
+        land_cost = base_case["investment_summary"]["actual_land_cost_total"]
+        gross_margin_pct = base_case["income_statement"]["gross_margin_pct"]
+        irr_pct = base_case["cash_flow_metrics"]["irr_pre_gna_pct"] or 0.0
+        notes = request.notes or "No supplemental notes provided."
+        return (
+            f"{request.community_name} in {request.market or request.division}. "
+            f"{request.total_lots:.0f} lots on {request.gross_acres:.1f} acres. "
+            f"Average absorption {request.monthly_absorption:.2f} homes per month. "
+            f"Revenue {revenue}, land basis {land_cost}, gross margin {gross_margin_pct}, irr {irr_pct}. "
+            f"Notes: {notes}"
+        )
+
+    def _scenario_hurdles(self, request: LandDealInput, result: Dict[str, Any]) -> Dict[str, bool]:
+        gross_margin_pct = _ratio_from_value(result["income_statement"]["gross_margin_pct"], default=0.0)
+        pre_gna_margin_pct = _ratio_from_value(result["income_statement"]["pre_gna_margin_pct"], default=0.0)
+        irr_pct = _ratio_from_value(result["cash_flow_metrics"]["irr_pre_gna_pct"], default=0.0)
+        actual_land_cost = _float_from_value(result["investment_summary"]["actual_land_cost_total"], default=0.0)
+        residual_land_value = _float_from_value(
+            result["investment_summary"]["residual_max_land_cost_total"],
+            default=0.0,
+        )
+        return {
+            "gross_margin": gross_margin_pct >= request.target_gross_margin_pct,
+            "pre_gna_margin": pre_gna_margin_pct >= request.target_pre_gna_margin_pct,
+            "irr": irr_pct >= request.target_irr_pct,
+            "residual_land_value": actual_land_cost <= residual_land_value,
+        }
+
+    def _recommendation(
+        self,
+        *,
+        request: LandDealInput,
+        base_case: Dict[str, Any],
+        downside_case: Dict[str, Any],
+        severe_case: Dict[str, Any],
+        hurdle_results: Dict[str, Dict[str, bool]],
+        note_hits: Dict[str, Any],
+        model_signal: Dict[str, Any] | None,
+    ) -> tuple[str, List[str]]:
+        reasons: List[str] = []
+        base_hurdles = hurdle_results["base_case"]
+        downside_hurdles = hurdle_results["downside_case"]
+        severe_pre_gna = _ratio_from_value(severe_case["income_statement"]["pre_gna_margin_pct"], default=0.0)
+        actual_land_cost = _float_from_value(base_case["investment_summary"]["actual_land_cost_total"], default=0.0)
+        residual_land_value = _float_from_value(
+            base_case["investment_summary"]["residual_max_land_cost_total"],
+            default=0.0,
+        )
+
+        reasons.append(
+            "Base case clears the target gross margin."
+            if base_hurdles["gross_margin"]
+            else "Base case misses the target gross margin."
+        )
+        reasons.append(
+            "Base case clears the target pre-G&A contribution margin."
+            if base_hurdles["pre_gna_margin"]
+            else "Base case misses the target pre-G&A contribution margin."
+        )
+        reasons.append(
+            "Base case clears the target IRR."
+            if base_hurdles["irr"]
+            else "Base case misses the target IRR."
+        )
+        if actual_land_cost > residual_land_value:
+            reasons.append("Actual land basis is above the residual land value.")
+        if note_hits["risk_signals"]:
+            reasons.append("Key diligence risks were detected in the notes.")
+        if model_signal is not None:
+            variance_to_residual = _float_from_value(model_signal["variance_to_residual_land_value"], default=0.0)
+            if variance_to_residual > 0:
+                reasons.append("The text-based pricing model is above the residual land value.")
+            else:
+                reasons.append("The text-based pricing model is at or below the residual land value.")
+
+        if all(base_hurdles.values()) and all(downside_hurdles.values()) and note_hits["risk_score"] <= 12:
+            return "pursue", reasons
+
+        if (
+            base_hurdles["pre_gna_margin"]
+            and base_hurdles["irr"]
+            and actual_land_cost <= residual_land_value * 1.1
+            and severe_pre_gna > 0
+        ):
+            return "negotiate", reasons
+
+        return "pass", reasons
