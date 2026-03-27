@@ -17,7 +17,7 @@ from .schemas import AgentBlueprint, TrainingSummary
 
 def _build_pipeline(task_type: str) -> Pipeline:
     if task_type == "classification":
-        estimator = LogisticRegression(max_iter=1000)
+        estimator = LogisticRegression(max_iter=2000, class_weight="balanced", C=3.0)
     else:
         estimator = Ridge(alpha=1.0)
     return Pipeline(

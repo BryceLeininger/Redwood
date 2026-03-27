@@ -208,7 +208,7 @@ def _estimate_priority_score(
 def _recommendation_from_score(score: float) -> str:
     if score >= 70:
         return "prioritize"
-    if score >= 50:
+    if score >= 45:
         return "watch"
     return "pass"
 
