@@ -106,7 +106,7 @@ function populateAgents(agents, defaultAgentDir) {
     const option = document.createElement("option");
     option.value = agent.agent_dir || "";
     option.textContent = agent.created_at_utc
-      ? `${agent.name} • ${agent.created_at_utc.slice(0, 10)}`
+      ? `${agent.name} | ${agent.created_at_utc.slice(0, 10)}`
       : agent.name || agent.agent_dir;
     if (agent.agent_dir === state.defaultAgentDir) {
       option.selected = true;
@@ -128,7 +128,7 @@ function updateAgentMeta() {
     typeof current.metric_value === "number" ? current.metric_value.toFixed(2) : current.metric_value ?? "n/a";
   const metricName = current.metric_name || "metric";
   const created = current.created_at_utc ? current.created_at_utc.replace("T", " ").replace("Z", " UTC") : "unknown";
-  elements.agentMeta.textContent = `${metricName}: ${metricValue} • created ${created}`;
+  elements.agentMeta.textContent = `${metricName}: ${metricValue} | created ${created}`;
 }
 
 function loadSamplesIntoFields() {
@@ -190,7 +190,7 @@ function renderParcelCard(result) {
           </div>
         </div>
         <div class="score-pill ${recommendationClass(result.recommendation)}">
-          ${escapeHtml(result.recommendation || "watch")} • ${escapeHtml(result.priority_score ?? "n/a")}
+          ${escapeHtml(result.recommendation || "watch")} | ${escapeHtml(result.priority_score ?? "n/a")}
         </div>
       </div>
 
