@@ -506,13 +506,15 @@ def _compose_parcel_text(row: Dict[str, str]) -> str:
         value = (row.get(key) or "").strip()
         if value:
             seen.add(key)
-            parts.append(value)
+            label = PARCEL_FIELD_LABELS.get(key, key.replace("_", " ").title())
+            parts.append(f"{label}: {value}")
     for key, raw_value in row.items():
         if key in seen:
             continue
         value = (raw_value or "").strip()
         if value:
-            parts.append(value)
+            label = PARCEL_FIELD_LABELS.get(key, key.replace("_", " ").title())
+            parts.append(f"{label}: {value}")
     return " | ".join(parts).strip()
 
 
