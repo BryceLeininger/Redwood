@@ -47,10 +47,10 @@ def create_requested_agents(output_dir: Path | str = "generated_agents") -> list
             "blueprint": AgentBlueprint(
                 name="ResidentialSubdivisionScout",
                 description=(
-                    "Screens land parcels for residential subdivision probability and monitors recent approvals "
-                    "and upcoming planning actions."
+                    "Screens land parcels for homebuilder-ready residential subdivision opportunities and monitors "
+                    "recent approvals and upcoming planning actions."
                 ),
-                topic="Residential Subdivision Opportunity Scouting",
+                topic="Residential Homebuilder Opportunity Scouting",
                 task_type="classification",
             ),
             "dataset": root / "examples" / "subdivision_opportunity_scout" / "training.csv",
