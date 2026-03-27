@@ -1285,10 +1285,17 @@ class SubdivisionScout:
 
                         extracted_acres = _extract_acres(page_text)
                         extracted_lots = _extract_lots(page_text)
+                        assessment = _assess_homebuilder_opportunity(
+                            page_text,
+                            preferred_stage=stage,
+                            extracted_acres=extracted_acres,
+                            extracted_lots=extracted_lots,
+                        )
                         qualification, notes, score = _qualify_prompt_result(
                             spec=spec,
                             extracted_acres=extracted_acres,
                             extracted_lots=extracted_lots,
+                            assessment=assessment,
                         )
                         if qualification is None:
                             continue
@@ -1307,8 +1314,14 @@ class SubdivisionScout:
                                 matched_query="curated_source_url",
                                 extracted_acres=extracted_acres,
                                 extracted_lots=extracted_lots,
+                                density_du_per_acre=assessment.density_du_per_acre,
                                 qualification=qualification,
                                 qualification_notes=notes,
+                                opportunity_profile=assessment.opportunity_profile,
+                                builder_fit_score=assessment.builder_fit_score,
+                                execution_readiness_score=assessment.execution_readiness_score,
+                                positive_signals=assessment.positive_hits,
+                                risk_signals=assessment.risk_hits,
                                 score=round(score + 6.0, 1),
                             )
                         )
@@ -1358,10 +1371,17 @@ class SubdivisionScout:
                             combined_text = f"{title} {snippet} {page_text}"
                             extracted_acres = _extract_acres(combined_text)
                             extracted_lots = _extract_lots(combined_text)
+                            assessment = _assess_homebuilder_opportunity(
+                                combined_text,
+                                preferred_stage=stage,
+                                extracted_acres=extracted_acres,
+                                extracted_lots=extracted_lots,
+                            )
                             qualification, notes, score = _qualify_prompt_result(
                                 spec=spec,
                                 extracted_acres=extracted_acres,
                                 extracted_lots=extracted_lots,
+                                assessment=assessment,
                             )
                             if qualification is None:
                                 continue
@@ -1380,8 +1400,14 @@ class SubdivisionScout:
                                     matched_query=prompt_query,
                                     extracted_acres=extracted_acres,
                                     extracted_lots=extracted_lots,
+                                    density_du_per_acre=assessment.density_du_per_acre,
                                     qualification=qualification,
                                     qualification_notes=notes,
+                                    opportunity_profile=assessment.opportunity_profile,
+                                    builder_fit_score=assessment.builder_fit_score,
+                                    execution_readiness_score=assessment.execution_readiness_score,
+                                    positive_signals=assessment.positive_hits,
+                                    risk_signals=assessment.risk_hits,
                                     score=round(score, 1),
                                 )
                             )
