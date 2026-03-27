@@ -9,8 +9,8 @@ from pathlib import Path
 from typing import Any, Optional
 
 import uvicorn
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -31,7 +31,31 @@ SAMPLE_SEARCH_PROMPT = (
     "Search the Sacramento and Central Valley areas for parcels or projects that are at least 5 acres "
     "and either already approved for at least 40 SFD lots or in the process of being approved for at least 40 SFD lots."
 )
-PANEL_API_VERSION = 2
+PANEL_API_VERSION = 3
+
+
+def _panel_cache_headers() -> dict[str, str]:
+    return {
+        "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+        "Pragma": "no-cache",
+        "Expires": "0",
+    }
+
+
+def _panel_asset_version() -> str:
+    asset_paths = [PANEL_DIR / "index.html", PANEL_DIR / "styles.css", PANEL_DIR / "app.js"]
+    mtimes = [int(path.stat().st_mtime) for path in asset_paths if path.exists()]
+    latest_mtime = max(mtimes, default=0)
+    return f"{PANEL_API_VERSION}-{latest_mtime}"
+
+
+def _render_panel_index() -> str:
+    asset_version = _panel_asset_version()
+    index_html = (PANEL_DIR / "index.html").read_text(encoding="utf-8")
+    return (
+        index_html.replace('href="/scout/styles.css"', f'href="/scout/styles.css?v={asset_version}"')
+        .replace('src="/scout/app.js"', f'src="/scout/app.js?v={asset_version}"')
+    )
 
 
 class ScreenTextRequest(BaseModel):
@@ -166,11 +190,20 @@ def create_app(
     subdivision_agent_dir: Optional[Path],
 ) -> FastAPI:
     app = FastAPI(title="Residential Subdivision Scout")
+
+    @app.middleware("http")
+    async def disable_cache_for_panel_assets(request: Request, call_next):
+        response = await call_next(request)
+        if request.url.path == "/" or request.url.path.startswith("/scout/"):
+            for key, value in _panel_cache_headers().items():
+                response.headers[key] = value
+        return response
+
     app.mount("/scout", StaticFiles(directory=str(PANEL_DIR)), name="scout")
 
     @app.get("/")
-    def root() -> FileResponse:
-        return FileResponse(PANEL_DIR / "index.html")
+    def root() -> HTMLResponse:
+        return HTMLResponse(content=_render_panel_index(), headers=_panel_cache_headers())
 
     @app.get("/api/start")
     def start() -> dict[str, Any]:
