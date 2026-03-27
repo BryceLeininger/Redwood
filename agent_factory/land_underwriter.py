@@ -784,10 +784,12 @@ class LandDealUnderwriter:
             return "pursue", reasons
 
         if (
-            base_hurdles["pre_gna_margin"]
+            base_hurdles["gross_margin"]
+            and base_hurdles["pre_gna_margin"]
+            and base_hurdles["residual_land_value"]
             and base_hurdles["irr"]
             and actual_land_cost <= residual_land_value * 1.1
-            and severe_pre_gna > 0
+            and severe_pre_gna > -0.03
         ):
             return "negotiate", reasons
 

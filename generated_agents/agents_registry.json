@@ -61,5 +61,14 @@
     "created_at_utc": "2026-03-27T16:39:42.308148+00:00",
     "metric_name": "accuracy",
     "metric_value": 0.75
+  },
+  {
+    "name": "LandDealUnderwriter",
+    "topic": "Land Acquisition Underwriting",
+    "task_type": "regression",
+    "agent_dir": "C:\\Users\\Bryce Leininger\\Documents\\GitHub\\Redwood\\generated_agents\\landdealunderwriter_20260327_232124",
+    "created_at_utc": "2026-03-27T23:21:24.414730+00:00",
+    "metric_name": "rmse",
+    "metric_value": 1841128.443760789
   }
 ]
