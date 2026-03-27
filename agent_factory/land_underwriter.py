@@ -792,3 +792,260 @@ class LandDealUnderwriter:
             return "negotiate", reasons
 
         return "pass", reasons
+
+    def _compute_scenario(self, request: LandDealInput, scenario: DealScenario) -> Dict[str, Any]:
+        price_multiplier = 1.0 + scenario.sales_price_delta_pct
+        cost_multiplier = 1.0 + scenario.cost_delta_pct
+        absorption = max(0.25, request.monthly_absorption * (1.0 + scenario.absorption_delta_pct))
+        first_close_month = request.first_close_month
+        first_home_start_month = request.months_to_first_home_start
+        sales_open_month = min(request.months_to_sales_open, first_close_month)
+
+        series_metrics: List[Dict[str, Any]] = []
+        revenue_total = 0.0
+        build_cost_total = 0.0
+        for series in request.product_series:
+            net_sales_price = series.net_sales_price_per_unit(price_multiplier=price_multiplier)
+            build_cost = series.build_cost_per_unit(cost_multiplier=cost_multiplier)
+            series_revenue = net_sales_price * series.lots
+            series_build_cost = build_cost * series.lots
+            revenue_total += series_revenue
+            build_cost_total += series_build_cost
+            series_metrics.append(
+                {
+                    "name": series.name,
+                    "lots": _round_money(series.lots),
+                    "mix_pct": _round_ratio(_safe_div(series.lots, request.total_lots)),
+                    "avg_sqft": _round_money(series.avg_sqft),
+                    "net_sales_price_per_unit": _round_money(net_sales_price),
+                    "build_cost_per_unit": _round_money(build_cost),
+                    "revenue_total": _round_money(series_revenue),
+                    "build_cost_total": _round_money(series_build_cost),
+                    "move_up": series.move_up,
+                }
+            )
+
+        total_lots = request.total_lots
+        avg_net_sales_price = _safe_div(revenue_total, total_lots)
+        avg_build_cost_per_unit = _safe_div(build_cost_total, total_lots)
+
+        land_purchase_cost_total = sum(item.total_cost() for item in request.land_purchase_events)
+        actual_land_cost_total = land_purchase_cost_total + request.land_brokerage_and_closing_costs_total
+        land_cost_per_lot = _safe_div(actual_land_cost_total, total_lots)
+
+        land_development_cost_total = request.land_development_cost_total * cost_multiplier
+        project_management_cost_total = request.project_management_cost_total * cost_multiplier
+        site_improvements_total = land_development_cost_total + project_management_cost_total
+        other_land_costs_total = request.other_land_costs_total * cost_multiplier
+        finished_lot_cost_total = actual_land_cost_total + site_improvements_total + other_land_costs_total
+        finished_lot_cost_per_lot = _safe_div(finished_lot_cost_total, total_lots)
+
+        closing_schedule = _closing_schedule(total_lots, absorption, first_close_month)
+        last_close_month = closing_schedule[-1][0]
+        construction_months = max(1, last_close_month - first_home_start_month + 1)
+
+        if request.indirect_field_overhead_total is not None:
+            indirect_field_overhead_total = request.indirect_field_overhead_total * cost_multiplier
+        elif request.indirect_field_overhead_per_month is not None:
+            indirect_field_overhead_total = request.indirect_field_overhead_per_month * cost_multiplier * construction_months
+        elif request.indirect_field_overhead_per_lot is not None:
+            indirect_field_overhead_total = request.indirect_field_overhead_per_lot * cost_multiplier * total_lots
+        else:
+            indirect_field_overhead_total = (
+                DEFAULT_INDIRECT_FIELD_OVERHEAD_PER_MONTH * cost_multiplier * construction_months
+            )
+
+        architecture_engineering_total = request.architecture_engineering_total * cost_multiplier
+        capitalized_marketing_total = request.capitalized_marketing_total_value() * cost_multiplier
+        other_house_costs_total = request.other_house_costs_per_unit * cost_multiplier * total_lots
+
+        house_costs_total = (
+            build_cost_total
+            + indirect_field_overhead_total
+            + architecture_engineering_total
+            + other_house_costs_total
+        )
+        house_costs_per_unit = _safe_div(house_costs_total, total_lots)
+
+        total_cost_of_sales = finished_lot_cost_total + house_costs_total
+        gross_margin = revenue_total - total_cost_of_sales
+        sales_commission_total = revenue_total * request.sales_commission_pct
+        contribution_margin = gross_margin - sales_commission_total
+        home_sale_excise_tax_total = revenue_total * request.home_sale_excise_tax_pct
+        corporate_charge_total = revenue_total * request.corporate_charge_pct
+        pre_gna_contribution = (
+            contribution_margin
+            - capitalized_marketing_total
+            - home_sale_excise_tax_total
+            - corporate_charge_total
+        )
+
+        target_pre_gna_dollars = revenue_total * request.target_pre_gna_margin_pct
+        residual_max_land_cost_total = (
+            revenue_total
+            - site_improvements_total
+            - other_land_costs_total
+            - house_costs_total
+            - sales_commission_total
+            - capitalized_marketing_total
+            - home_sale_excise_tax_total
+            - corporate_charge_total
+            - target_pre_gna_dollars
+        )
+        residual_max_land_cost_per_lot = _safe_div(residual_max_land_cost_total, total_lots)
+        residual_max_land_cost_per_acre = _safe_div(residual_max_land_cost_total, request.gross_acres)
+
+        timeline_length = last_close_month + request.build_cycle_months + 6
+        cash_flows = [0.0] * max(12, timeline_length)
+
+        if request.earnest_money_deposit > 0:
+            cash_flows[0] -= request.earnest_money_deposit
+
+        total_event_lots = sum(item.lots for item in request.land_purchase_events)
+        first_land_close_month = min(item.month for item in request.land_purchase_events)
+        for event in request.land_purchase_events:
+            event_cost = event.total_cost()
+            if request.deposit_credit_at_close and total_event_lots > 0:
+                event_cost -= request.earnest_money_deposit * _safe_div(event.lots, total_event_lots)
+            if event.month >= len(cash_flows):
+                cash_flows.extend([0.0] * (event.month - len(cash_flows) + 1))
+            cash_flows[event.month] -= event_cost
+
+        if request.land_brokerage_and_closing_costs_total:
+            cash_flows[first_land_close_month] -= request.land_brokerage_and_closing_costs_total
+
+        site_spend_months = request.site_improvement_spend_months or max(
+            first_close_month,
+            math.ceil(construction_months * 0.75),
+        )
+        _allocate_evenly(
+            cash_flows,
+            -(site_improvements_total + other_land_costs_total),
+            first_land_close_month,
+            site_spend_months,
+        )
+        _allocate_evenly(
+            cash_flows,
+            -architecture_engineering_total,
+            first_land_close_month,
+            max(1, first_home_start_month),
+        )
+        _allocate_evenly(
+            cash_flows,
+            -indirect_field_overhead_total,
+            first_home_start_month,
+            construction_months,
+        )
+        _allocate_evenly(
+            cash_flows,
+            -capitalized_marketing_total,
+            sales_open_month,
+            max(1, last_close_month - sales_open_month + 1),
+        )
+
+        build_window = max(1, request.build_cycle_months)
+        sales_commission_per_unit = avg_net_sales_price * request.sales_commission_pct
+        excise_per_unit = avg_net_sales_price * request.home_sale_excise_tax_pct
+        corporate_charge_per_unit = avg_net_sales_price * request.corporate_charge_pct
+        close_cost_per_unit = request.other_house_costs_per_unit * cost_multiplier
+
+        for month, closings in closing_schedule:
+            if month >= len(cash_flows):
+                cash_flows.extend([0.0] * (month - len(cash_flows) + 1))
+            cash_flows[month] += closings * avg_net_sales_price
+            cash_flows[month] -= closings * (sales_commission_per_unit + excise_per_unit + corporate_charge_per_unit)
+            cash_flows[month] -= closings * close_cost_per_unit
+            build_cost_amount = closings * avg_build_cost_per_unit
+            _allocate_evenly(
+                cash_flows,
+                -build_cost_amount,
+                max(first_home_start_month, month - build_window + 1),
+                build_window,
+            )
+
+        cumulative_cash: List[float] = []
+        running_balance = 0.0
+        for value in cash_flows:
+            running_balance += value
+            cumulative_cash.append(running_balance)
+
+        peak_investment_balance = min(cumulative_cash)
+        peak_investment_month = cumulative_cash.index(peak_investment_balance)
+        months_to_positive_net_cash = next((index for index, value in enumerate(cumulative_cash) if value >= 0), None)
+        monthly_irr = _monthly_irr(cash_flows)
+        irr_pre_gna_pct = _annualize_monthly_rate(monthly_irr)
+        avg_total_assets = _safe_div(sum(max(-value, 0.0) for value in cumulative_cash), len(cumulative_cash))
+        return_on_average_assets = _safe_div(pre_gna_contribution, avg_total_assets)
+
+        date_summary = None
+        if request.land_close_date is not None:
+            date_summary = {
+                "land_close_date": request.land_close_date.isoformat(),
+                "first_home_start_date": _add_months(request.land_close_date, first_home_start_month).isoformat(),
+                "sales_open_date": _add_months(request.land_close_date, sales_open_month).isoformat(),
+                "first_close_date": _add_months(request.land_close_date, first_close_month).isoformat(),
+                "last_close_date": _add_months(request.land_close_date, last_close_month).isoformat(),
+                "peak_investment_date": _add_months(request.land_close_date, peak_investment_month).isoformat(),
+            }
+
+        return {
+            "scenario": scenario.name,
+            "scenario_adjustments": {
+                "sales_price_delta_pct": _round_ratio(scenario.sales_price_delta_pct),
+                "cost_delta_pct": _round_ratio(scenario.cost_delta_pct),
+                "absorption_delta_pct": _round_ratio(scenario.absorption_delta_pct),
+            },
+            "investment_summary": {
+                "gross_acres": _round_money(request.gross_acres),
+                "total_lots": _round_money(total_lots),
+                "density_du_per_acre": _round_money(_safe_div(total_lots, request.gross_acres)),
+                "actual_land_cost_total": _round_money(actual_land_cost_total),
+                "land_cost_per_lot": _round_money(land_cost_per_lot),
+                "site_improvements_total": _round_money(site_improvements_total),
+                "site_improvements_per_lot": _round_money(_safe_div(site_improvements_total, total_lots)),
+                "other_land_costs_total": _round_money(other_land_costs_total),
+                "finished_lot_cost_total": _round_money(finished_lot_cost_total),
+                "finished_lot_cost_per_lot": _round_money(finished_lot_cost_per_lot),
+                "average_net_sales_price": _round_money(avg_net_sales_price),
+                "finished_lot_cost_pct_of_asp": _round_ratio(_safe_div(finished_lot_cost_per_lot, avg_net_sales_price)),
+                "residual_max_land_cost_total": _round_money(residual_max_land_cost_total),
+                "residual_max_land_cost_per_lot": _round_money(residual_max_land_cost_per_lot),
+                "residual_max_land_cost_per_acre": _round_money(residual_max_land_cost_per_acre),
+                "land_value_gap_to_residual": _round_money(actual_land_cost_total - residual_max_land_cost_total),
+            },
+            "schedule": {
+                "monthly_absorption": _round_money(absorption),
+                "sellout_months": len(closing_schedule),
+                "months_to_first_home_start": first_home_start_month,
+                "months_to_sales_open": sales_open_month,
+                "months_to_first_close": first_close_month,
+                "months_to_last_close": last_close_month,
+                "total_project_months": last_close_month - first_land_close_month + 1,
+                "date_summary": date_summary,
+            },
+            "income_statement": {
+                "revenue_total": _round_money(revenue_total),
+                "house_costs_total": _round_money(house_costs_total),
+                "house_costs_per_unit": _round_money(house_costs_per_unit),
+                "total_cost_of_sales": _round_money(total_cost_of_sales),
+                "gross_margin": _round_money(gross_margin),
+                "gross_margin_pct": _round_ratio(_safe_div(gross_margin, revenue_total)),
+                "sales_commission_total": _round_money(sales_commission_total),
+                "contribution_margin": _round_money(contribution_margin),
+                "contribution_margin_pct": _round_ratio(_safe_div(contribution_margin, revenue_total)),
+                "capitalized_marketing_total": _round_money(capitalized_marketing_total),
+                "home_sale_excise_tax_total": _round_money(home_sale_excise_tax_total),
+                "corporate_charge_total": _round_money(corporate_charge_total),
+                "pre_gna_contribution": _round_money(pre_gna_contribution),
+                "pre_gna_margin_pct": _round_ratio(_safe_div(pre_gna_contribution, revenue_total)),
+            },
+            "cash_flow_metrics": {
+                "irr_pre_gna_pct": _round_ratio(irr_pre_gna_pct),
+                "peak_investment": _round_money(abs(peak_investment_balance)),
+                "peak_investment_month": peak_investment_month,
+                "months_to_positive_net_cash": months_to_positive_net_cash,
+                "average_total_assets": _round_money(avg_total_assets),
+                "return_on_average_total_assets": _round_ratio(return_on_average_assets),
+            },
+            "series_metrics": series_metrics,
+        }
