@@ -121,6 +121,43 @@ EXCLUDED_DOMAIN_KEYWORDS = (
     "youtube",
 )
 
+SINGLE_FAMILY_TERMS: Sequence[str] = (
+    "single family",
+    "single-family",
+    "sfd",
+    "sfr",
+    "detached home",
+    "detached homes",
+    "detached housing",
+    "single family detached",
+)
+
+PROMPT_STAGE_TERMS: Dict[str, Sequence[str]] = {
+    "approved_recently": (
+        "approved",
+        "approval",
+        "entitled",
+        "adopted",
+        "city council",
+        "planning commission",
+    ),
+    "approaching_approval": (
+        "agenda",
+        "public hearing",
+        "recommended approval",
+        "hearing",
+        "staff report",
+        "planning commission",
+    ),
+}
+
+PROMPT_AREA_EXPANSIONS: Dict[str, Sequence[str]] = {
+    "central valley": ("Fresno", "Modesto", "Merced", "Madera", "Stockton", "Visalia"),
+    "sacramento": ("Sacramento", "Sacramento County", "Elk Grove", "Roseville", "Placer County"),
+    "greater sacramento": ("Sacramento", "Sacramento County", "Elk Grove", "Roseville", "Placer County"),
+    "sacramento area": ("Sacramento", "Sacramento County", "Elk Grove", "Roseville", "Placer County"),
+}
+
 
 @dataclass(frozen=True)
 class ParcelScreeningResult:
@@ -173,6 +210,41 @@ class PlanningWatchItem:
     published_at: str | None
     snippet: str
     matched_query: str
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class OpportunitySearchSpec:
+    raw_query: str
+    requested_areas: List[str]
+    search_areas: List[str]
+    min_acres: float | None
+    min_lots: int | None
+    housing_type: str
+    stages: List[str]
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class OpportunitySearchItem:
+    requested_area: str
+    search_area: str
+    stage: str
+    title: str
+    url: str
+    source_domain: str
+    published_at: str | None
+    snippet: str
+    matched_query: str
+    extracted_acres: float | None
+    extracted_lots: int | None
+    qualification: str
+    qualification_notes: List[str]
+    score: float
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
