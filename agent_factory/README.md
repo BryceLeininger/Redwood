@@ -134,6 +134,8 @@ python -m agent_factory.cli subdivision-scout-web-watch \
   --watchlist-file agent_factory/examples/subdivision_opportunity_scout/sample_watchlist.json
 ```
 
+`sample_watchlist.json` demonstrates an advanced format with per-jurisdiction query overrides and curated official source URLs.
+
 ## Outlook Integration Without Admin Access
 
 If you do not have Azure admin access, use local Outlook Desktop automation:

@@ -145,6 +145,8 @@ class WatchTarget:
     jurisdiction: str
     approved_queries: List[str]
     upcoming_queries: List[str]
+    approved_urls: List[str]
+    upcoming_urls: List[str]
 
     def queries_for_stage(self, stage: str, templates: Sequence[str]) -> List[str]:
         if stage == "approved_recently" and self.approved_queries:
@@ -152,6 +154,13 @@ class WatchTarget:
         if stage == "approaching_approval" and self.upcoming_queries:
             return list(self.upcoming_queries)
         return [template.format(jurisdiction=self.jurisdiction) for template in templates]
+
+    def urls_for_stage(self, stage: str) -> List[str]:
+        if stage == "approved_recently":
+            return list(self.approved_urls)
+        if stage == "approaching_approval":
+            return list(self.upcoming_urls)
+        return []
 
 
 @dataclass(frozen=True)
@@ -186,6 +195,27 @@ def _parse_pub_date(value: str | None) -> datetime | None:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     return parsed.astimezone(timezone.utc)
+
+
+def _extract_html_title(html: str) -> str:
+    match = re.search(r"<title[^>]*>(.*?)</title>", html, flags=re.IGNORECASE | re.DOTALL)
+    if not match:
+        return ""
+    return _clean_text(match.group(1))
+
+
+def _extract_relevant_snippet(text: str) -> str:
+    lowered = text.lower()
+    anchors = list(LAND_USE_TERMS) + list(PROCESS_TERMS_BY_STAGE["approved_recently"]) + list(
+        PROCESS_TERMS_BY_STAGE["approaching_approval"]
+    )
+    for anchor in anchors:
+        index = lowered.find(anchor)
+        if index >= 0:
+            start = max(0, index - 120)
+            end = min(len(text), index + 280)
+            return text[start:end].strip()
+    return text[:320].strip()
 
 
 def _default_market(row: Dict[str, str], parcel_id: str) -> str:
@@ -434,6 +464,13 @@ class SubdivisionScout:
         seen = set()
         for target in targets:
             jurisdiction = target.jurisdiction
+            for result in self._scan_source_urls(stage=stage, target=target):
+                dedupe_key = (stage, result.url.lower())
+                if dedupe_key in seen:
+                    continue
+                seen.add(dedupe_key)
+                items.append(result)
+
             for query in target.queries_for_stage(stage, query_templates):
                 for result in self._search_rss(query, max_results=max_results_per_query):
                     dedupe_key = (stage, result["url"].lower())
@@ -479,6 +516,50 @@ class SubdivisionScout:
         )
         return items
 
+    def _scan_source_urls(self, stage: str, target: WatchTarget) -> List[PlanningWatchItem]:
+        items: List[PlanningWatchItem] = []
+        for url in target.urls_for_stage(stage):
+            try:
+                response = requests.get(
+                    url,
+                    timeout=SEARCH_TIMEOUT_SECONDS,
+                    headers={"User-Agent": DEFAULT_USER_AGENT},
+                )
+                response.raise_for_status()
+            except requests.RequestException:
+                continue
+
+            content_type = response.headers.get("content-type", "").lower()
+            if "pdf" in content_type:
+                continue
+
+            html = response.text
+            title = _extract_html_title(html) or url
+            text = _clean_text(html)
+            snippet = _extract_relevant_snippet(text)
+            if not _result_is_relevant(
+                stage=stage,
+                jurisdiction=target.jurisdiction,
+                title=title,
+                url=url,
+                snippet=snippet,
+            ):
+                continue
+
+            items.append(
+                PlanningWatchItem(
+                    stage=stage,
+                    jurisdiction=target.jurisdiction,
+                    title=title,
+                    url=url,
+                    source_domain=urlparse(url).netloc.lower(),
+                    published_at=None,
+                    snippet=snippet,
+                    matched_query="configured_source_url",
+                )
+            )
+        return items
+
     def _search_rss(self, query: str, max_results: int) -> List[Dict[str, str]]:
         url = f"https://www.bing.com/search?format=rss&q={quote_plus(query)}&count={max_results}"
         response = requests.get(
@@ -515,7 +596,14 @@ def load_jurisdictions(jurisdictions: Sequence[str], watchlist_file: str | None 
 def load_watch_targets(jurisdictions: Sequence[str], watchlist_file: str | None = None) -> List[WatchTarget]:
     values = [item.strip() for item in jurisdictions if item and item.strip()]
     targets: List[WatchTarget] = [
-        WatchTarget(jurisdiction=item, approved_queries=[], upcoming_queries=[]) for item in values
+        WatchTarget(
+            jurisdiction=item,
+            approved_queries=[],
+            upcoming_queries=[],
+            approved_urls=[],
+            upcoming_urls=[],
+        )
+        for item in values
     ]
 
     if watchlist_file:
@@ -547,7 +635,15 @@ def load_watch_targets(jurisdictions: Sequence[str], watchlist_file: str | None 
             for line in path.read_text(encoding="utf-8").splitlines():
                 line = line.strip()
                 if line:
-                    targets.append(WatchTarget(jurisdiction=line, approved_queries=[], upcoming_queries=[]))
+                    targets.append(
+                        WatchTarget(
+                            jurisdiction=line,
+                            approved_queries=[],
+                            upcoming_queries=[],
+                            approved_urls=[],
+                            upcoming_urls=[],
+                        )
+                    )
 
     deduped: List[WatchTarget] = []
     seen = set()
@@ -565,7 +661,13 @@ def _parse_watch_target(value: Any) -> WatchTarget:
         item = value.strip()
         if not item:
             raise ValueError("Watch target strings cannot be empty.")
-        return WatchTarget(jurisdiction=item, approved_queries=[], upcoming_queries=[])
+        return WatchTarget(
+            jurisdiction=item,
+            approved_queries=[],
+            upcoming_queries=[],
+            approved_urls=[],
+            upcoming_urls=[],
+        )
 
     if not isinstance(value, dict):
         raise ValueError("Watch targets must be strings or objects.")
@@ -576,11 +678,17 @@ def _parse_watch_target(value: Any) -> WatchTarget:
 
     approved_queries = value.get("approved_queries", [])
     upcoming_queries = value.get("upcoming_queries", [])
+    approved_urls = value.get("approved_urls", [])
+    upcoming_urls = value.get("upcoming_urls", [])
     if not isinstance(approved_queries, list) or not isinstance(upcoming_queries, list):
         raise ValueError("Watch target query overrides must be arrays of strings.")
+    if not isinstance(approved_urls, list) or not isinstance(upcoming_urls, list):
+        raise ValueError("Watch target source url lists must be arrays of strings.")
 
     return WatchTarget(
         jurisdiction=jurisdiction,
         approved_queries=[str(item).strip() for item in approved_queries if str(item).strip()],
         upcoming_queries=[str(item).strip() for item in upcoming_queries if str(item).strip()],
+        approved_urls=[str(item).strip() for item in approved_urls if str(item).strip()],
+        upcoming_urls=[str(item).strip() for item in upcoming_urls if str(item).strip()],
     )

@@ -6,8 +6,15 @@
         "site:fresno.legistar.com Fresno \"Vesting Tentative Tract Map\" \"1/7/2026\"",
         "site:fresno.legistar.com Fresno \"Vesting Tentative Tract Map No. 6443\""
       ],
+      "approved_urls": [
+        "https://fresno.legistar.com/LegislationDetail.aspx?FullText=1&G=5CDFE46C-C830-41E2-821F-18AAEC736CE6&GUID=F70BBBEA-8159-4330-81A6-E01D3CB2DD9A&ID=7790199&Options=&Search=",
+        "https://fresno.legistar.com/LegislationDetail.aspx?FullText=1&G=5CDFE46C-C830-41E2-821F-18AAEC736CE6&GUID=043AAB11-3E5E-454B-B009-8D23954095D8&ID=7790198&Options=&Search="
+      ],
       "upcoming_queries": [
         "site:fresno.gov/planning/plans-projects-under-review Fresno \"Vesting Tentative Tract Map\""
+      ],
+      "upcoming_urls": [
+        "https://www.fresno.gov/planning/plans-projects-under-review/"
       ]
     },
     {
@@ -15,8 +22,15 @@
       "approved_queries": [
         "site:cityofmerced.legistar.com Merced \"Vesting Tentative Subdivision Map\" \"1/21/2026\""
       ],
+      "approved_urls": [
+        "https://cityofmerced.legistar.com/LegislationDetail.aspx?From=RSS&FullText=1&GUID=007E35C0-D6C3-4866-911F-5F0B5331BB41&ID=7808919",
+        "https://cityofmerced.legistar.com/LegislationDetail.aspx?FullText=1&GUID=04918849-5CAD-41D7-AD3B-65BE1EDD2CF1&ID=7808923&Options=&Search="
+      ],
       "upcoming_queries": [
         "site:cityofmerced.gov Merced \"public hearings\" \"Vesting Tentative Subdivision Map\""
+      ],
+      "upcoming_urls": [
+        "https://www.cityofmerced.gov/government/city-council/public-hearings"
       ]
     },
     {
@@ -24,15 +38,25 @@
       "upcoming_queries": [
         "site:files.ceqanet.lci.ca.gov Lemoore \"Tentative Subdivision Map Tract 948 Project\""
       ],
-      "approved_queries": []
+      "approved_queries": [],
+      "approved_urls": [],
+      "upcoming_urls": [
+        "https://ceqanet.lci.ca.gov/2025090164/2"
+      ]
     },
     {
       "jurisdiction": "Placer County, CA",
       "approved_queries": [
         "site:placer.ca.gov \"Tentative Subdivision Map\" \"Granite Bay Golf Course\""
       ],
+      "approved_urls": [
+        "https://www.placer.ca.gov/2826/Negative-Declarations"
+      ],
       "upcoming_queries": [
         "site:placer.ca.gov/AgendaCenter/ViewFile \"Tentative Subdivision Map\" \"Granite Bay Golf Course\""
+      ],
+      "upcoming_urls": [
+        "https://www.placer.ca.gov/AgendaCenter/ViewFile/Agenda/_02182026-6340"
       ]
     }
   ]
