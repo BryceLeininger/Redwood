@@ -3,13 +3,18 @@ const elements = {
   agentMeta: document.getElementById("agentMeta"),
   loadSamplesBtn: document.getElementById("loadSamplesBtn"),
   refreshAgentsBtn: document.getElementById("refreshAgentsBtn"),
+  samplePromptBtn: document.getElementById("samplePromptBtn"),
   sampleSingleBtn: document.getElementById("sampleSingleBtn"),
   sampleCsvBtn: document.getElementById("sampleCsvBtn"),
   sampleWatchBtn: document.getElementById("sampleWatchBtn"),
+  promptSearchBtn: document.getElementById("promptSearchBtn"),
   screenTextBtn: document.getElementById("screenTextBtn"),
   screenCsvBtn: document.getElementById("screenCsvBtn"),
   watchBtn: document.getElementById("watchBtn"),
   fullSweepBtn: document.getElementById("fullSweepBtn"),
+  promptSearchInput: document.getElementById("promptSearchInput"),
+  promptLookbackInput: document.getElementById("promptLookbackInput"),
+  promptMaxResultsInput: document.getElementById("promptMaxResultsInput"),
   parcelIdInput: document.getElementById("parcelIdInput"),
   marketInput: document.getElementById("marketInput"),
   singleParcelInput: document.getElementById("singleParcelInput"),
@@ -29,6 +34,7 @@ const elements = {
 const state = {
   agents: [],
   defaultAgentDir: null,
+  sampleSearchPrompt: "",
   sampleSingleParcelText: "",
   sampleParcelCsv: "",
   sampleWatchlist: "",
@@ -56,9 +62,11 @@ function setBusy(isBusy) {
   [
     elements.loadSamplesBtn,
     elements.refreshAgentsBtn,
+    elements.samplePromptBtn,
     elements.sampleSingleBtn,
     elements.sampleCsvBtn,
     elements.sampleWatchBtn,
+    elements.promptSearchBtn,
     elements.screenTextBtn,
     elements.screenCsvBtn,
     elements.watchBtn,
@@ -132,6 +140,7 @@ function updateAgentMeta() {
 }
 
 function loadSamplesIntoFields() {
+  elements.promptSearchInput.value = state.sampleSearchPrompt;
   elements.singleParcelInput.value = state.sampleSingleParcelText;
   elements.csvInput.value = state.sampleParcelCsv;
   elements.watchlistInput.value = state.sampleWatchlist;
@@ -258,6 +267,116 @@ function renderWatchStage(title, stageClass, items) {
           : `<article class="empty-state"><p class="empty-title">No matches returned.</p><p>Try expanding the watchlist or increasing the lookback window.</p></article>`
       }
     </article>
+  `;
+}
+
+function renderInterpretationCard(spec) {
+  const requestedAreas = Array.isArray(spec.requested_areas) ? spec.requested_areas : [];
+  const searchAreas = Array.isArray(spec.search_areas) ? spec.search_areas : [];
+  const stages = Array.isArray(spec.stages) ? spec.stages : [];
+
+  return `
+    <article class="interpretation-card">
+      <div class="watch-stage-header">
+        <h3>Interpreted Search</h3>
+        <span class="tag">${escapeHtml(spec.housing_type || "residential")}</span>
+      </div>
+      <div class="tag-row">
+        ${requestedAreas.map((item) => `<span class="tag">${escapeHtml(item)}</span>`).join("")}
+      </div>
+      <div class="meta-row">
+        <span>Expanded search areas: ${escapeHtml(searchAreas.join(", ") || "n/a")}</span>
+        <span>Min acres: ${escapeHtml(spec.min_acres ?? "n/a")}</span>
+        <span>Min lots: ${escapeHtml(spec.min_lots ?? "n/a")}</span>
+      </div>
+      <div class="tag-row">
+        ${stages.map((item) => `<span class="tag">${escapeHtml(item.replaceAll("_", " "))}</span>`).join("")}
+      </div>
+    </article>
+  `;
+}
+
+function renderSearchResultCard(item) {
+  const notes = Array.isArray(item.qualification_notes) ? item.qualification_notes : [];
+  const stageClass = item.stage === "approved_recently" ? "stage-approved" : "stage-upcoming";
+  const qualificationClass = item.qualification === "qualified" ? "positive" : "risk";
+
+  return `
+    <article class="watch-card">
+      <div class="watch-card-header">
+        <div>
+          <h4 class="card-title">${escapeHtml(item.title || "Untitled item")}</h4>
+          <div class="meta-row">
+            <span>${escapeHtml(item.requested_area || "")}</span>
+            <span>${escapeHtml(item.search_area || "")}</span>
+            <span>${escapeHtml(item.source_domain || "")}</span>
+          </div>
+        </div>
+        <div class="tag-row">
+          <span class="tag ${stageClass}">${escapeHtml(item.stage || "")}</span>
+          <span class="tag ${qualificationClass}">${escapeHtml(item.qualification || "")}</span>
+          <span class="tag">Score ${escapeHtml(item.score ?? "n/a")}</span>
+        </div>
+      </div>
+
+      <p class="rationale">${escapeHtml(item.snippet || "")}</p>
+
+      <div class="meta-row">
+        <span>Acres: ${escapeHtml(item.extracted_acres ?? "not found")}</span>
+        <span>Lots: ${escapeHtml(item.extracted_lots ?? "not found")}</span>
+        <span>${escapeHtml(item.published_at ? new Date(item.published_at).toLocaleString() : "Undated source")}</span>
+      </div>
+
+      ${
+        notes.length
+          ? `<div class="tag-row">${notes.map((note) => `<span class="tag">${escapeHtml(note)}</span>`).join("")}</div>`
+          : ""
+      }
+
+      <div class="tag-row">
+        <a class="watch-link" href="${escapeHtml(item.url || "#")}" target="_blank" rel="noreferrer">Open source</a>
+      </div>
+    </article>
+  `;
+}
+
+function renderPromptSearch(payload) {
+  const qualified = Array.isArray(payload.qualified_results) ? payload.qualified_results : [];
+  const review = Array.isArray(payload.review_results) ? payload.review_results : [];
+  const interpreted = payload.interpreted_search || {};
+
+  renderSummary([
+    {
+      label: "Requested Areas",
+      value: Array.isArray(interpreted.requested_areas) ? interpreted.requested_areas.length : 0,
+      note: Array.isArray(interpreted.requested_areas) ? interpreted.requested_areas.join(", ") : "",
+    },
+    { label: "Qualified Results", value: qualified.length, note: "Matches the parsed thresholds" },
+    { label: "Needs Review", value: review.length, note: "Stage matched but acreage or lots need confirmation" },
+    {
+      label: "Filters",
+      value: `${interpreted.min_acres ?? "?"} ac / ${interpreted.min_lots ?? "?"} lots`,
+      note: (interpreted.housing_type || "residential").replaceAll("_", " "),
+    },
+  ]);
+
+  const qualifiedSection = qualified.length
+    ? `<article class="section-card"><div class="watch-stage-header"><h3>Qualified Results</h3><span class="tag positive">${qualified.length} hit${qualified.length === 1 ? "" : "s"}</span></div>${qualified
+        .map(renderSearchResultCard)
+        .join("")}</article>`
+    : `<article class="empty-state"><p class="empty-title">No fully qualified matches yet.</p><p>Try widening the areas, reducing the thresholds, or increasing the lookback window.</p></article>`;
+
+  const reviewSection = review.length
+    ? `<article class="section-card"><div class="watch-stage-header"><h3>Needs Review</h3><span class="tag risk">${review.length} hit${review.length === 1 ? "" : "s"}</span></div>${review
+        .map(renderSearchResultCard)
+        .join("")}</article>`
+    : "";
+
+  elements.resultBody.innerHTML = `
+    ${renderInterpretationCard(interpreted)}
+    ${qualifiedSection}
+    ${reviewSection}
+    ${renderRawResponse(payload)}
   `;
 }
 
@@ -391,6 +510,7 @@ async function loadStartData() {
 
   try {
     const payload = await fetchJson("/api/start");
+    state.sampleSearchPrompt = payload.sample_search_prompt || "";
     state.sampleSingleParcelText = payload.sample_single_parcel_text || "";
     state.sampleParcelCsv = payload.sample_parcel_csv || "";
     state.sampleWatchlist = payload.sample_watchlist || "";

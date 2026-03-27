@@ -27,6 +27,10 @@ SAMPLE_SINGLE_PARCEL_TEXT = (
     "12 acres adjacent to an existing subdivision with by-right single-family zoning, "
     "utilities stubbed to site, arterial frontage, and completed traffic study."
 )
+SAMPLE_SEARCH_PROMPT = (
+    "Search the Sacramento and Central Valley areas for parcels or projects that are at least 5 acres "
+    "and either already approved for at least 40 SFD lots or in the process of being approved for at least 40 SFD lots."
+)
 
 
 class ScreenTextRequest(BaseModel):
@@ -61,6 +65,13 @@ class FullSweepRequest(BaseModel):
     min_score: float = 0.0
     lookback_days: int = 120
     max_results_per_query: int = 5
+
+
+class PromptSearchRequest(BaseModel):
+    agent_dir: str | None = None
+    query: str
+    lookback_days: int = 365
+    max_results_per_query: int = 6
 
 
 def _list_scout_agents(output_root: Path) -> list[dict[str, Any]]:
@@ -168,6 +179,7 @@ def create_app(
             "reply": "Residential Subdivision Scout ready.",
             "default_agent_dir": str(default_agent) if default_agent else None,
             "agents": agents,
+            "sample_search_prompt": SAMPLE_SEARCH_PROMPT,
             "sample_single_parcel_text": SAMPLE_SINGLE_PARCEL_TEXT,
             "sample_parcel_csv": SAMPLE_PARCELS_PATH.read_text(encoding="utf-8") if SAMPLE_PARCELS_PATH.exists() else "",
             "sample_watchlist": SAMPLE_WATCHLIST_PATH.read_text(encoding="utf-8") if SAMPLE_WATCHLIST_PATH.exists() else "",
@@ -176,6 +188,20 @@ def create_app(
     @app.get("/api/agents")
     def agents() -> dict[str, Any]:
         return {"agents": _list_scout_agents(output_root)}
+
+    @app.post("/api/search-prompt")
+    def search_prompt(payload: PromptSearchRequest) -> dict[str, Any]:
+        if not payload.query.strip():
+            raise HTTPException(status_code=400, detail="Search request cannot be empty.")
+        scout = _load_scout(output_root, subdivision_agent_dir, payload.agent_dir)
+        try:
+            return scout.search_opportunities(
+                query=payload.query,
+                lookback_days=payload.lookback_days,
+                max_results_per_query=payload.max_results_per_query,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.post("/api/screen-text")
     def screen_text(payload: ScreenTextRequest) -> dict[str, Any]:

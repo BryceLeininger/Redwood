@@ -15,6 +15,40 @@
           <p class="hero-text">
             Screen a parcel, rank a feed, and monitor tentative maps from one local dashboard.
           </p>
+
+          <article class="prompt-search-card">
+            <div class="panel-heading">
+              <div>
+                <p class="panel-kicker">Prompt Search</p>
+                <h2>Search From General Criteria</h2>
+              </div>
+              <button id="samplePromptBtn" class="mini-button" type="button">Use Example</button>
+            </div>
+
+            <label class="field-block">
+              <span>Search Parameters</span>
+              <textarea
+                id="promptSearchInput"
+                rows="4"
+                placeholder="Type a general request, for example: Search the Sacramento and Central Valley areas for parcels or projects that are at least 5 acres and either already approved for at least 40 SFD lots or in the process of being approved for at least 40 SFD lots."
+              ></textarea>
+            </label>
+
+            <div class="field-row compact">
+              <label>
+                <span>Search Lookback</span>
+                <input id="promptLookbackInput" type="number" min="1" value="365" />
+              </label>
+              <label>
+                <span>Hits / Query</span>
+                <input id="promptMaxResultsInput" type="number" min="1" value="6" />
+              </label>
+            </div>
+
+            <div class="button-row">
+              <button id="promptSearchBtn" class="button accent" type="button">Search Opportunities</button>
+            </div>
+          </article>
         </div>
 
         <div class="hero-side">

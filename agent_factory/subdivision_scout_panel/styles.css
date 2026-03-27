@@ -156,6 +156,15 @@ select {
   border: 1px solid rgba(76, 60, 42, 0.12);
 }
 
+.prompt-search-card {
+  margin-top: 18px;
+  padding: 18px;
+  border-radius: var(--radius-xl);
+  background: linear-gradient(180deg, rgba(255, 247, 236, 0.98), rgba(255, 251, 245, 0.9));
+  border: 1px solid rgba(182, 91, 50, 0.18);
+  box-shadow: 0 14px 30px rgba(143, 66, 32, 0.12);
+}
+
 .agent-select,
 input,
 textarea,
@@ -515,6 +524,13 @@ select:focus {
 .section-card {
   display: grid;
   gap: 14px;
+}
+
+.interpretation-card {
+  padding: 18px;
+  border-radius: var(--radius-lg);
+  border: 1px solid rgba(76, 60, 42, 0.12);
+  background: rgba(255, 252, 247, 0.86);
 }
 
 .section-card h3,

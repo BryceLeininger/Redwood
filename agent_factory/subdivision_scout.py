@@ -413,6 +413,278 @@ def _result_is_relevant(stage: str, jurisdiction: str, title: str, url: str, sni
     return True
 
 
+def _split_area_phrase(value: str) -> List[str]:
+    parts = re.split(r",|/|&|\band\b", value, flags=re.IGNORECASE)
+    cleaned: List[str] = []
+    for part in parts:
+        item = re.sub(r"\b(?:areas?|markets?|regions?)\b", " ", part, flags=re.IGNORECASE)
+        item = re.sub(r"\s+", " ", item).strip(" ,.")
+        if item:
+            cleaned.append(item)
+    return cleaned
+
+
+def _extract_requested_areas(query: str) -> List[str]:
+    patterns = (
+        r"(?:search|scan|find|look(?:\s+for)?)\s+(?:the\s+)?(.+?)\s+(?:areas?|markets?|regions?)\s+for\b",
+        r"(?:search|scan|find|look(?:\s+for)?)\s+(?:the\s+)?(.+?)\s+for\b",
+        r"\bin\s+(.+?)\s+(?:for|with|that)\b",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, query, flags=re.IGNORECASE)
+        if not match:
+            continue
+        areas = _split_area_phrase(match.group(1))
+        if areas:
+            return areas
+    return []
+
+
+def _extract_threshold_number(query: str, unit_pattern: str) -> float | None:
+    patterns = (
+        rf"(?:at\s+least|min(?:imum)?(?:\s+of)?|>=|over)\s+(\d+(?:\.\d+)?)\s*(?:\+)?\s*{unit_pattern}",
+        rf"\b(\d+(?:\.\d+)?)\+\s*{unit_pattern}",
+        rf"\b(\d+(?:\.\d+)?)\s*{unit_pattern}\s*(?:or\s+more|minimum|min\b)",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, query, flags=re.IGNORECASE)
+        if match:
+            try:
+                return float(match.group(1))
+            except ValueError:
+                return None
+    return None
+
+
+def _detect_housing_type(query: str) -> str:
+    lowered = query.lower()
+    if any(term in lowered for term in SINGLE_FAMILY_TERMS):
+        return "single_family_detached"
+    return "residential"
+
+
+def _detect_requested_stages(query: str) -> List[str]:
+    lowered = query.lower()
+    wants_approved = any(
+        phrase in lowered
+        for phrase in (
+            "already approved",
+            "approved for",
+            "approved subdivision",
+            "approved map",
+            "entitled",
+            "vested",
+        )
+    )
+    wants_upcoming = any(
+        phrase in lowered
+        for phrase in (
+            "in the process of being approved",
+            "being approved",
+            "about to be approved",
+            "pending approval",
+            "upcoming approval",
+            "public hearing",
+            "agenda",
+            "recommended approval",
+            "in process",
+        )
+    )
+    if wants_approved and wants_upcoming:
+        return ["approved_recently", "approaching_approval"]
+    if wants_approved:
+        return ["approved_recently"]
+    if wants_upcoming:
+        return ["approaching_approval"]
+    return ["approved_recently", "approaching_approval"]
+
+
+def _expand_requested_areas(requested_areas: Sequence[str]) -> List[str]:
+    expanded: List[str] = []
+    seen = set()
+    for area in requested_areas:
+        candidates = PROMPT_AREA_EXPANSIONS.get(area.lower(), (area,))
+        for candidate in candidates:
+            key = candidate.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            expanded.append(candidate)
+    return expanded
+
+
+def _parse_opportunity_search_query(query: str) -> OpportunitySearchSpec:
+    requested_areas = _extract_requested_areas(query)
+    search_areas = _expand_requested_areas(requested_areas) if requested_areas else []
+    min_acres = _extract_threshold_number(query, r"acres?\b")
+    min_lots = _extract_threshold_number(
+        query,
+        r"(?:(?:sfd|sfr)\s+|single[- ]family\s+|detached\s+)?(?:lots|homes|units)\b",
+    )
+    return OpportunitySearchSpec(
+        raw_query=query.strip(),
+        requested_areas=requested_areas,
+        search_areas=search_areas,
+        min_acres=min_acres,
+        min_lots=int(min_lots) if min_lots is not None else None,
+        housing_type=_detect_housing_type(query),
+        stages=_detect_requested_stages(query),
+    )
+
+
+def _query_variants_for_prompt(spec: OpportunitySearchSpec, area: str, stage: str) -> List[str]:
+    stage_fragments = {
+        "approved_recently": [
+            ["subdivision", '"tentative map"', "approved"],
+            ["subdivision", '"vesting tentative map"', "approved"],
+            ["subdivision", '"staff report"', "approved"],
+        ],
+        "approaching_approval": [
+            ["subdivision", '"tentative map"', "agenda"],
+            ["subdivision", '"public hearing"', '"tentative map"'],
+            ["subdivision", '"recommended approval"', '"tentative map"'],
+        ],
+    }
+    housing_fragment = ['"single family"'] if spec.housing_type == "single_family_detached" else []
+    number_fragment = []
+    if spec.min_lots is not None:
+        number_fragment.append(f'"{spec.min_lots} lots"')
+    if spec.min_acres is not None:
+        acres_label = int(spec.min_acres) if float(spec.min_acres).is_integer() else spec.min_acres
+        number_fragment.append(f'"{acres_label} acres"')
+
+    queries: List[str] = []
+    for fragments in stage_fragments.get(stage, []):
+        parts = [f'"{area}"', *fragments, *housing_fragment]
+        if number_fragment:
+            queries.append(" ".join(parts + number_fragment[:1]))
+        queries.append(" ".join(parts))
+    deduped: List[str] = []
+    seen = set()
+    for item in queries:
+        key = item.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(item)
+    return deduped
+
+
+def _fetch_result_page_text(url: str) -> str:
+    try:
+        response = requests.get(
+            url,
+            timeout=SEARCH_TIMEOUT_SECONDS,
+            headers={"User-Agent": DEFAULT_USER_AGENT},
+        )
+        response.raise_for_status()
+    except requests.RequestException:
+        return ""
+
+    content_type = response.headers.get("content-type", "").lower()
+    if "pdf" in content_type:
+        return ""
+
+    return _clean_text(response.text)[:18000]
+
+
+def _extract_acres(text: str) -> float | None:
+    candidates = []
+    for pattern in (r"\b(\d+(?:\.\d+)?)\s*acres?\b", r"\b(\d+(?:\.\d+)?)\s*-\s*acre\b"):
+        for match in re.finditer(pattern, text, flags=re.IGNORECASE):
+            try:
+                value = float(match.group(1))
+            except ValueError:
+                continue
+            if 0.25 <= value <= 10000:
+                candidates.append(value)
+    return max(candidates) if candidates else None
+
+
+def _extract_lots(text: str) -> int | None:
+    candidates = []
+    patterns = (
+        r"\b(\d{1,4})\s*-\s*lots?\b",
+        r"\b(\d{1,4})\s+lots?\b",
+        r"\b(\d{1,4})\s+(?:single[- ]family|detached|sfd|sfr)\s+(?:lots|homes|units)\b",
+        r"\b(\d{1,4})\s+(?:single[- ]family|detached)\s+homes\b",
+        r"\b(\d{1,4})\s+residential\s+lots?\b",
+    )
+    for pattern in patterns:
+        for match in re.finditer(pattern, text, flags=re.IGNORECASE):
+            try:
+                value = int(match.group(1))
+            except ValueError:
+                continue
+            if 2 <= value <= 2000:
+                candidates.append(value)
+    return max(candidates) if candidates else None
+
+
+def _area_tokens_for_prompt(area: str) -> List[str]:
+    tokens = _jurisdiction_tokens(area)
+    return [token for token in tokens if len(token) >= 4]
+
+
+def _result_matches_prompt_search(
+    spec: OpportunitySearchSpec,
+    stage: str,
+    search_area: str,
+    title: str,
+    url: str,
+    snippet: str,
+    page_text: str,
+) -> bool:
+    haystack = f"{title} {snippet} {page_text} {url}".lower()
+    domain = urlparse(url).netloc.lower()
+
+    if any(fragment in domain for fragment in EXCLUDED_DOMAIN_KEYWORDS):
+        return False
+    if not any(term in haystack for term in LAND_USE_TERMS):
+        return False
+    if not any(term in haystack for term in PROMPT_STAGE_TERMS.get(stage, ())):
+        return False
+    area_tokens = _area_tokens_for_prompt(search_area)
+    if area_tokens and not any(token in haystack for token in area_tokens):
+        return False
+    if spec.housing_type == "single_family_detached" and not any(term in haystack for term in SINGLE_FAMILY_TERMS):
+        return False
+    return True
+
+
+def _qualify_prompt_result(
+    spec: OpportunitySearchSpec,
+    extracted_acres: float | None,
+    extracted_lots: int | None,
+) -> tuple[str | None, List[str], float]:
+    notes: List[str] = []
+    score = 45.0
+
+    if spec.min_acres is not None:
+        if extracted_acres is None:
+            notes.append(f"Site area not confirmed against {spec.min_acres} acres.")
+        elif extracted_acres < spec.min_acres:
+            return None, [f"Only {extracted_acres} acres found."], 0.0
+        else:
+            notes.append(f"{extracted_acres} acres found.")
+            score += 18.0
+
+    if spec.min_lots is not None:
+        if extracted_lots is None:
+            notes.append(f"Lot count not confirmed against {spec.min_lots} lots.")
+        elif extracted_lots < spec.min_lots:
+            return None, [f"Only {extracted_lots} lots found."], 0.0
+        else:
+            notes.append(f"{extracted_lots} lots found.")
+            score += 22.0
+
+    if spec.min_acres is not None and extracted_acres is None:
+        return "needs_review", notes, score
+    if spec.min_lots is not None and extracted_lots is None:
+        return "needs_review", notes, score
+    return "qualified", notes or ["Matches the requested filters."], min(score, 100.0)
+
+
 class SubdivisionScout:
     """Operational agent that ranks parcels and monitors planning approvals."""
 
@@ -522,6 +794,114 @@ class SubdivisionScout:
             "jurisdictions": [target.jurisdiction for target in cleaned_targets],
             "approved_recently": [item.to_dict() for item in approved_recently],
             "approaching_approval": [item.to_dict() for item in approaching_approval],
+        }
+
+    def search_opportunities(
+        self,
+        query: str,
+        lookback_days: int = 365,
+        max_results_per_query: int = 6,
+    ) -> Dict[str, Any]:
+        spec = _parse_opportunity_search_query(query)
+        if not spec.search_areas:
+            raise ValueError("Could not detect any search areas. Specify a city, county, or region in the request.")
+
+        lookback_days = max(1, lookback_days)
+        max_results_per_query = max(1, max_results_per_query)
+        cutoff = datetime.now(timezone.utc) - timedelta(days=lookback_days)
+
+        page_cache: Dict[str, str] = {}
+        results: List[OpportunitySearchItem] = []
+        seen = set()
+
+        for requested_area in spec.requested_areas:
+            expanded_areas = PROMPT_AREA_EXPANSIONS.get(requested_area.lower(), (requested_area,))
+            for search_area in expanded_areas:
+                for stage in spec.stages:
+                    for prompt_query in _query_variants_for_prompt(spec, search_area, stage):
+                        try:
+                            search_results = self._search_rss(prompt_query, max_results=max_results_per_query)
+                        except (requests.RequestException, ET.ParseError):
+                            continue
+
+                        for result in search_results:
+                            url = result["url"]
+                            dedupe_key = url.lower()
+                            if dedupe_key in seen:
+                                continue
+
+                            published_at = _parse_pub_date(result.get("published_at"))
+                            if published_at and published_at < cutoff:
+                                continue
+
+                            page_text = page_cache.get(url)
+                            if page_text is None:
+                                page_text = _fetch_result_page_text(url)
+                                page_cache[url] = page_text
+
+                            title = result["title"]
+                            snippet = result["snippet"]
+                            if not _result_matches_prompt_search(
+                                spec=spec,
+                                stage=stage,
+                                search_area=search_area,
+                                title=title,
+                                url=url,
+                                snippet=snippet,
+                                page_text=page_text,
+                            ):
+                                continue
+
+                            combined_text = f"{title} {snippet} {page_text}"
+                            extracted_acres = _extract_acres(combined_text)
+                            extracted_lots = _extract_lots(combined_text)
+                            qualification, notes, score = _qualify_prompt_result(
+                                spec=spec,
+                                extracted_acres=extracted_acres,
+                                extracted_lots=extracted_lots,
+                            )
+                            if qualification is None:
+                                continue
+
+                            seen.add(dedupe_key)
+                            results.append(
+                                OpportunitySearchItem(
+                                    requested_area=requested_area,
+                                    search_area=search_area,
+                                    stage=stage,
+                                    title=title,
+                                    url=url,
+                                    source_domain=urlparse(url).netloc.lower(),
+                                    published_at=published_at.isoformat() if published_at else None,
+                                    snippet=_extract_relevant_snippet(combined_text),
+                                    matched_query=prompt_query,
+                                    extracted_acres=extracted_acres,
+                                    extracted_lots=extracted_lots,
+                                    qualification=qualification,
+                                    qualification_notes=notes,
+                                    score=round(score, 1),
+                                )
+                            )
+
+        results.sort(
+            key=lambda item: (
+                1 if item.qualification == "qualified" else 0,
+                item.score,
+                item.published_at or "",
+                item.title.lower(),
+            ),
+            reverse=True,
+        )
+
+        qualified = [item.to_dict() for item in results if item.qualification == "qualified"]
+        review = [item.to_dict() for item in results if item.qualification != "qualified"]
+        return {
+            "agent": self.specialist.metadata["blueprint"]["name"],
+            "query": query.strip(),
+            "interpreted_search": spec.to_dict(),
+            "lookback_days": lookback_days,
+            "qualified_results": qualified,
+            "review_results": review,
         }
 
     def _search_stage(
