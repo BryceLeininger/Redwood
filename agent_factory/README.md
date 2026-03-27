@@ -155,6 +155,7 @@ Then open:
 `http://127.0.0.1:8785`
 
 The dashboard supports:
+- typing a general search request at the top of the page and letting the scout interpret areas, acreage, lot-count, and approval-stage filters
 - scoring one parcel from notes
 - ranking a parcel CSV feed
 - running the planning watch against a JSON or line-based watchlist
