@@ -182,8 +182,17 @@ def _monthly_irr(cash_flows: Sequence[float]) -> float | None:
 
     def npv(rate: float) -> float:
         total = 0.0
+        base = 1.0 + rate
         for index, value in enumerate(cash_flows):
-            total += value / ((1.0 + rate) ** index)
+            if index == 0 or value == 0:
+                total += value
+                continue
+            try:
+                discount = base**index
+            except OverflowError:
+                # Extremely large candidate rates make distant cash flows converge to zero.
+                continue
+            total += value / discount
         return total
 
     low = -0.9999
@@ -218,7 +227,10 @@ def _monthly_irr(cash_flows: Sequence[float]) -> float | None:
 def _annualize_monthly_rate(monthly_rate: float | None) -> float | None:
     if monthly_rate is None:
         return None
-    return (1.0 + monthly_rate) ** 12 - 1.0
+    try:
+        return (1.0 + monthly_rate) ** 12 - 1.0
+    except OverflowError:
+        return None
 
 
 def _closing_schedule(total_lots: float, monthly_absorption: float, first_close_month: int) -> List[tuple[int, float]]:
