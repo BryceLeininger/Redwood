@@ -31,6 +31,7 @@ SAMPLE_SEARCH_PROMPT = (
     "Search the Sacramento and Central Valley areas for parcels or projects that are at least 5 acres "
     "and either already approved for at least 40 SFD lots or in the process of being approved for at least 40 SFD lots."
 )
+PANEL_API_VERSION = 2
 
 
 class ScreenTextRequest(BaseModel):
@@ -177,6 +178,7 @@ def create_app(
         default_agent = _default_agent_dir(output_root, subdivision_agent_dir)
         return {
             "reply": "Residential Subdivision Scout ready.",
+            "api_version": PANEL_API_VERSION,
             "default_agent_dir": str(default_agent) if default_agent else None,
             "agents": agents,
             "sample_search_prompt": SAMPLE_SEARCH_PROMPT,
