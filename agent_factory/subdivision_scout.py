@@ -942,12 +942,14 @@ class SubdivisionScout:
                             )
                         )
 
-                    should_fallback_to_web = len(results) == stage_result_count_before
+                    should_fallback_to_web = (
+                        search_area not in PROMPT_SOURCE_URL_CATALOG and len(results) == stage_result_count_before
+                    )
                     if not should_fallback_to_web:
                         continue
 
                     prompt_queries = _query_variants_for_prompt(spec, search_area, stage)
-                    query_limit = 2 if search_area in PROMPT_SOURCE_URL_CATALOG else 3
+                    query_limit = 3
                     for prompt_query in prompt_queries[:query_limit]:
                         try:
                             search_results = self._search_duckduckgo_html(prompt_query, max_results=max_results_per_query)
