@@ -525,7 +525,7 @@ def _extract_signal_hits(text: str, catalog: Dict[str, int]) -> List[str]:
 
 
 def _recommendation_from_score(score: float) -> str:
-    if score >= 72:
+    if score >= 70:
         return "prioritize"
     if score >= 50:
         return "watch"
