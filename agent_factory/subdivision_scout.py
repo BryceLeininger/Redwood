@@ -1156,23 +1156,29 @@ class SubdivisionScout:
                         model_confidence = None
                     break
 
-            positive_hits = _extract_signal_hits(source_text, POSITIVE_SIGNALS)
-            risk_hits = _extract_signal_hits(source_text, RISK_SIGNALS)
-            priority_score = _estimate_priority_score(model_prediction, model_confidence, positive_hits, risk_hits)
-            recommendation = _recommendation_from_score(priority_score)
-            rationale = _build_rationale(recommendation, positive_hits, risk_hits, model_prediction)
+            assessment = _assess_homebuilder_opportunity(
+                source_text,
+                model_prediction=model_prediction,
+                model_confidence=model_confidence,
+            )
 
             results.append(
                 ParcelScreeningResult(
                     parcel_id=parcel_id,
                     market=market,
-                    priority_score=priority_score,
-                    recommendation=recommendation,
+                    priority_score=assessment.priority_score,
+                    builder_fit_score=assessment.builder_fit_score,
+                    execution_readiness_score=assessment.execution_readiness_score,
+                    recommendation=assessment.recommendation,
+                    opportunity_profile=assessment.opportunity_profile,
                     model_prediction=model_prediction,
                     model_confidence=model_confidence,
-                    positive_signals=positive_hits,
-                    risk_signals=risk_hits,
-                    rationale=rationale,
+                    extracted_acres=assessment.extracted_acres,
+                    extracted_lots=assessment.extracted_lots,
+                    density_du_per_acre=assessment.density_du_per_acre,
+                    positive_signals=assessment.positive_hits,
+                    risk_signals=assessment.risk_hits,
+                    rationale=assessment.rationale,
                     source_text=source_text,
                     top_classes=top_classes,
                 )
