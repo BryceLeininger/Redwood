@@ -559,6 +559,9 @@ async function importFile(file, target) {
 
 elements.agentSelect.addEventListener("change", updateAgentMeta);
 elements.loadSamplesBtn.addEventListener("click", loadSamplesIntoFields);
+elements.samplePromptBtn.addEventListener("click", () => {
+  elements.promptSearchInput.value = state.sampleSearchPrompt;
+});
 elements.sampleSingleBtn.addEventListener("click", () => {
   elements.singleParcelInput.value = state.sampleSingleParcelText;
 });
@@ -574,6 +577,22 @@ elements.csvFileInput.addEventListener("change", async (event) => {
 });
 elements.watchFileInput.addEventListener("change", async (event) => {
   await importFile(event.target.files?.[0], elements.watchlistInput);
+});
+
+elements.promptSearchBtn.addEventListener("click", () => {
+  runAction(
+    "Searching",
+    () => ({
+      path: "/api/search-prompt",
+      body: {
+        agent_dir: selectedAgentDir(),
+        query: elements.promptSearchInput.value,
+        lookback_days: Number(elements.promptLookbackInput.value || 365),
+        max_results_per_query: Number(elements.promptMaxResultsInput.value || 6),
+      },
+    }),
+    renderPromptSearch
+  );
 });
 
 elements.screenTextBtn.addEventListener("click", () => {
