@@ -10,7 +10,7 @@ from email.utils import parsedate_to_datetime
 from html import unescape
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Sequence
-from urllib.parse import quote_plus, urlparse
+from urllib.parse import parse_qs, quote_plus, unquote, urlparse
 from xml.etree import ElementTree as ET
 
 import requests
@@ -588,6 +588,17 @@ def _fetch_result_page_text(url: str) -> str:
     return _clean_text(response.text)[:18000]
 
 
+def _normalize_search_result_url(value: str) -> str:
+    url = unescape(value or "").strip()
+    parsed = urlparse(url)
+    if "duckduckgo.com" not in parsed.netloc.lower():
+        return url
+    redirect_target = parse_qs(parsed.query).get("uddg")
+    if redirect_target:
+        return unquote(redirect_target[0])
+    return url
+
+
 def _extract_acres(text: str) -> float | None:
     candidates = []
     for pattern in (r"\b(\d+(?:\.\d+)?)\s*acres?\b", r"\b(\d+(?:\.\d+)?)\s*-\s*acre\b"):
@@ -1043,6 +1054,39 @@ class SubdivisionScout:
                     "published_at": published_at,
                 }
             )
+        return items
+
+    def _search_duckduckgo_html(self, query: str, max_results: int) -> List[Dict[str, str]]:
+        response = requests.post(
+            "https://html.duckduckgo.com/html/",
+            data={"q": query},
+            timeout=SEARCH_TIMEOUT_SECONDS,
+            headers={"User-Agent": DEFAULT_USER_AGENT},
+        )
+        response.raise_for_status()
+
+        items: List[Dict[str, str]] = []
+        pattern = re.compile(
+            r'<a rel="nofollow" class="result__a" href="(?P<url>[^"]+)">(?P<title>.*?)</a>(?P<body>.*?)'
+            r'class="result__snippet"[^>]*>(?P<snippet>.*?)</(?:a|div)>',
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        for match in pattern.finditer(response.text):
+            title = _clean_text(match.group("title"))
+            url = _normalize_search_result_url(match.group("url"))
+            snippet = _clean_text(match.group("snippet"))
+            if not title or not url:
+                continue
+            items.append(
+                {
+                    "title": title,
+                    "url": url,
+                    "snippet": snippet,
+                    "published_at": "",
+                }
+            )
+            if len(items) >= max_results:
+                break
         return items
 
 
