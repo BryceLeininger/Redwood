@@ -19,6 +19,15 @@ from .specialist_agent import SpecialistAgent
 
 SEARCH_TIMEOUT_SECONDS = 20
 DEFAULT_USER_AGENT = "RedwoodSubdivisionScout/1.0"
+SEARCH_BROWSER_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0 Safari/537.36"
+    ),
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Referer": "https://duckduckgo.com/",
+}
 
 POSITIVE_SIGNALS: Dict[str, int] = {
     "by right": 10,
@@ -831,7 +840,7 @@ class SubdivisionScout:
                 for stage in spec.stages:
                     for prompt_query in _query_variants_for_prompt(spec, search_area, stage):
                         try:
-                            search_results = self._search_rss(prompt_query, max_results=max_results_per_query)
+                            search_results = self._search_duckduckgo_html(prompt_query, max_results=max_results_per_query)
                         except (requests.RequestException, ET.ParseError):
                             continue
 
@@ -1061,7 +1070,7 @@ class SubdivisionScout:
             "https://html.duckduckgo.com/html/",
             data={"q": query},
             timeout=SEARCH_TIMEOUT_SECONDS,
-            headers={"User-Agent": DEFAULT_USER_AGENT},
+            headers=SEARCH_BROWSER_HEADERS,
         )
         response.raise_for_status()
 
