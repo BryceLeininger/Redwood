@@ -1171,6 +1171,20 @@ class LandUnderwriterDesktopApp:
         for index, row in enumerate(self.series_rows, start=1):
             row_text = {key: str(value.get()).strip() for key, value in row.items() if key != "move_up"}
             default_name = f"Series {chr(64 + index)}"
+
+            def parse_row_number(field_name: str) -> float | None:
+                raw_value = row_text.get(field_name, "")
+                if not raw_value:
+                    return None
+                try:
+                    return _parse_optional_float(raw_value)
+                except ValueError as error:
+                    if strict:
+                        raise ValueError(
+                            f"Series row {index} has an invalid value for {field_name.replace('_', ' ')}."
+                        ) from error
+                    return None
+
             lots_raw = row_text.get("lots", "")
             has_content = (
                 any(value for key, value in row_text.items() if key != "name")
@@ -1179,18 +1193,14 @@ class LandUnderwriterDesktopApp:
             )
             if not has_content:
                 continue
-            lots = _parse_optional_float(lots_raw) if lots_raw else None
+            lots = parse_row_number("lots")
             if not lots or lots <= 0:
                 if strict:
                     raise ValueError(f"Series row {index} needs positive Lots.")
                 continue
 
-            avg_sqft = _parse_optional_float(row_text.get("avg_sqft", "")) if row_text.get("avg_sqft") else None
-            base_house_price = (
-                _parse_optional_float(row_text.get("base_house_price", ""))
-                if row_text.get("base_house_price")
-                else None
-            )
+            avg_sqft = parse_row_number("avg_sqft")
+            base_house_price = parse_row_number("base_house_price")
             if strict and (avg_sqft is None or avg_sqft <= 0):
                 raise ValueError(f"Series row {index} needs Avg Sqft.")
             if strict and (base_house_price is None or base_house_price <= 0):
@@ -1203,10 +1213,10 @@ class LandUnderwriterDesktopApp:
                 "base_house_price": base_house_price or 0.0,
                 "move_up": bool(row["move_up"].get()),
             }
-            assign_if_present(item, "lot_premium", _parse_optional_float(row_text.get("lot_premium", "")) if row_text.get("lot_premium") else None)
-            assign_if_present(item, "direct_cost_psf", _parse_optional_float(row_text.get("direct_cost_psf", "")) if row_text.get("direct_cost_psf") else None)
-            assign_if_present(item, "permit_fees_per_unit", _parse_optional_float(row_text.get("permit_fees_per_unit", "")) if row_text.get("permit_fees_per_unit") else None)
-            assign_if_present(item, "tap_fees_per_unit", _parse_optional_float(row_text.get("tap_fees_per_unit", "")) if row_text.get("tap_fees_per_unit") else None)
+            assign_if_present(item, "lot_premium", parse_row_number("lot_premium"))
+            assign_if_present(item, "direct_cost_psf", parse_row_number("direct_cost_psf"))
+            assign_if_present(item, "permit_fees_per_unit", parse_row_number("permit_fees_per_unit"))
+            assign_if_present(item, "tap_fees_per_unit", parse_row_number("tap_fees_per_unit"))
             assign_if_present(item, "options_pct", global_options_pct)
             assign_if_present(item, "price_incentives_pct", global_price_incentives_pct)
             assign_if_present(item, "mortgage_incentives_pct", global_mortgage_incentives_pct)
