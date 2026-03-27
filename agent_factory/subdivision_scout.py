@@ -886,9 +886,13 @@ class SubdivisionScout:
         seen = set()
 
         for requested_area in spec.requested_areas:
-            expanded_areas = PROMPT_AREA_EXPANSIONS.get(requested_area.lower(), (requested_area,))
-            for search_area in expanded_areas:
+            expanded_areas = list(PROMPT_AREA_EXPANSIONS.get(requested_area.lower(), (requested_area,)))
+            curated_areas = [area for area in expanded_areas if area in PROMPT_SOURCE_URL_CATALOG]
+            search_areas = curated_areas or [requested_area]
+
+            for search_area in search_areas:
                 for stage in spec.stages:
+                    stage_result_count_before = len(results)
                     for source_url in PROMPT_SOURCE_URL_CATALOG.get(search_area, {}).get(stage, ()):
                         dedupe_key = source_url.lower()
                         if dedupe_key in seen:
@@ -938,7 +942,13 @@ class SubdivisionScout:
                             )
                         )
 
-                    for prompt_query in _query_variants_for_prompt(spec, search_area, stage):
+                    should_fallback_to_web = len(results) == stage_result_count_before
+                    if not should_fallback_to_web:
+                        continue
+
+                    prompt_queries = _query_variants_for_prompt(spec, search_area, stage)
+                    query_limit = 2 if search_area in PROMPT_SOURCE_URL_CATALOG else 3
+                    for prompt_query in prompt_queries[:query_limit]:
                         try:
                             search_results = self._search_duckduckgo_html(prompt_query, max_results=max_results_per_query)
                         except (requests.RequestException, ET.ParseError):
