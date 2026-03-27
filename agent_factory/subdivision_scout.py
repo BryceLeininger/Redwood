@@ -191,9 +191,8 @@ def _estimate_priority_score(
 ) -> float:
     baseline = {
         "high_probability": 72.0,
-        "medium_probability": 52.0,
-        "low_probability": 24.0,
-    }.get(model_prediction, 50.0)
+        "not_ready": 34.0,
+    }.get(model_prediction, 42.0)
 
     confidence_bonus = 0.0
     if model_confidence is not None:
