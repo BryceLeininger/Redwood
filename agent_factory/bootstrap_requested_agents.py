@@ -35,6 +35,19 @@ def create_requested_agents(output_dir: Path | str = "generated_agents") -> list
         },
         {
             "blueprint": AgentBlueprint(
+                name="ResidentialLandDueDiligenceAdvisor",
+                description=(
+                    "Reviews residential land acquisition diligence notes, classifies overall diligence posture, "
+                    "and supports follow-up risk assessment for homebuilder opportunities."
+                ),
+                topic="Residential Land Acquisition Due Diligence",
+                task_type="classification",
+            ),
+            "dataset": root / "examples" / "residential_land_due_diligence" / "training.csv",
+            "knowledge": [root / "examples" / "residential_land_due_diligence" / "knowledge"],
+        },
+        {
+            "blueprint": AgentBlueprint(
                 name="HousingMarketResearcher",
                 description="Researches housing markets and classifies market momentum conditions.",
                 topic="Housing Market Research",

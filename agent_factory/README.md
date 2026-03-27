@@ -79,6 +79,7 @@ You can rename these with `--input-column` and `--target-column`.
 This project includes a helper script that creates:
 - `OutlookEmailManager`
 - `LandDealUnderwriter`
+- `ResidentialLandDueDiligenceAdvisor`
 - `HousingMarketResearcher`
 - `ResidentialSubdivisionScout`
 
@@ -121,6 +122,43 @@ Desktop shortcut install:
 
 ```bash
 install_land_underwriter_desktop_shortcut.bat
+```
+
+## Residential Land Due Diligence Advisor
+
+`ResidentialLandDueDiligenceAdvisor` is a specialist agent focused on residential land acquisition diligence for homebuilders and land teams.
+
+It can:
+- classify diligence notes as `advance`, `targeted_follow_up`, or `fatal_flaw_risk`
+- answer retrieval-based questions about entitlement, utilities, environmental, title, site, and contract diligence
+
+Create the agent:
+
+```bash
+python -m agent_factory.cli create-agent \
+  --name "ResidentialLandDueDiligenceAdvisor" \
+  --description "Reviews residential land acquisition diligence notes, classifies overall diligence posture, and supports follow-up risk assessment for homebuilder opportunities." \
+  --topic "Residential Land Acquisition Due Diligence" \
+  --task-type classification \
+  --dataset agent_factory/examples/residential_land_due_diligence/training.csv \
+  --knowledge agent_factory/examples/residential_land_due_diligence/knowledge \
+  --output-dir generated_agents
+```
+
+Run a diligence classification:
+
+```bash
+python -m agent_factory.cli predict \
+  --agent-dir generated_agents/residentiallandduediligenceadvisor_YYYYMMDD_HHMMSS \
+  --input "Raw land outside city limits requiring annexation, septic, utility extension, and significant drainage work before any residential map can move forward."
+```
+
+Ask a diligence question:
+
+```bash
+python -m agent_factory.cli ask \
+  --agent-dir generated_agents/residentiallandduediligenceadvisor_YYYYMMDD_HHMMSS \
+  --question "What contract items matter most when buying long-lead residential land with unresolved utility risk?"
 ```
 
 ## Residential Subdivision Scout
