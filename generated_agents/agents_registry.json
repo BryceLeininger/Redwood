@@ -34,5 +34,14 @@
     "created_at_utc": "2026-02-05T22:29:34.815722+00:00",
     "metric_name": "accuracy",
     "metric_value": 0.5
+  },
+  {
+    "name": "ResidentialSubdivisionScout",
+    "topic": "Residential Subdivision Opportunity Scouting",
+    "task_type": "classification",
+    "agent_dir": "C:\\Users\\Bryce Leininger\\Documents\\GitHub\\Redwood\\generated_agents\\residentialsubdivisionscout_20260327_163620",
+    "created_at_utc": "2026-03-27T16:36:20.421380+00:00",
+    "metric_name": "accuracy",
+    "metric_value": 0.375
   }
 ]
