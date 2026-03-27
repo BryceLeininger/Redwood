@@ -3,5 +3,6 @@
 from .factory_agent import AgentFactory
 from .schemas import AgentBlueprint
 from .specialist_agent import SpecialistAgent
+from .subdivision_scout import SubdivisionScout
 
-__all__ = ["AgentFactory", "AgentBlueprint", "SpecialistAgent"]
+__all__ = ["AgentFactory", "AgentBlueprint", "SpecialistAgent", "SubdivisionScout"]

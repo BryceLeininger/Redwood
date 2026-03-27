@@ -74,17 +74,64 @@ You can rename these with `--input-column` and `--target-column`.
 - Larger datasets use a holdout split for evaluation metrics.
 - Topic answers are retrieval-based excerpts from indexed knowledge docs.
 
-## Bootstrap the Three Requested Agents
+## Bootstrap the Preconfigured Agents
 
 This project includes a helper script that creates:
 - `OutlookEmailManager`
 - `LandDealUnderwriter`
 - `HousingMarketResearcher`
+- `ResidentialSubdivisionScout`
 
 Run:
 
 ```bash
 python -m agent_factory.bootstrap_requested_agents
+```
+
+## Residential Subdivision Scout
+
+`ResidentialSubdivisionScout` is an operational workflow layered on top of a generated specialist agent.
+
+It can:
+- Score parcel candidates for residential subdivision probability.
+- Rank parcels with positive and negative diligence signals.
+- Search the web for recently approved tentative maps and projects approaching approval.
+
+Create the agent:
+
+```bash
+python -m agent_factory.cli create-agent \
+  --name "ResidentialSubdivisionScout" \
+  --description "Screens land parcels for residential subdivision probability and monitors recent approvals and upcoming planning actions." \
+  --topic "Residential Subdivision Opportunity Scouting" \
+  --task-type classification \
+  --dataset agent_factory/examples/subdivision_opportunity_scout/training.csv \
+  --knowledge agent_factory/examples/subdivision_opportunity_scout/knowledge \
+  --output-dir generated_agents
+```
+
+Score one parcel:
+
+```bash
+python -m agent_factory.cli subdivision-scout-screen \
+  --agent-dir generated_agents/residentialsubdivisionscout_YYYYMMDD_HHMMSS \
+  --input "12 acres adjacent to an existing subdivision with by-right single-family zoning and utilities stubbed to site."
+```
+
+Score a parcel feed:
+
+```bash
+python -m agent_factory.cli subdivision-scout-screen \
+  --agent-dir generated_agents/residentialsubdivisionscout_YYYYMMDD_HHMMSS \
+  --parcel-file agent_factory/examples/subdivision_opportunity_scout/sample_parcels.csv
+```
+
+Monitor planning activity:
+
+```bash
+python -m agent_factory.cli subdivision-scout-web-watch \
+  --agent-dir generated_agents/residentialsubdivisionscout_YYYYMMDD_HHMMSS \
+  --watchlist-file agent_factory/examples/subdivision_opportunity_scout/sample_watchlist.json
 ```
 
 ## Outlook Integration Without Admin Access

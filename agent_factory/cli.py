@@ -13,6 +13,7 @@ from .integrations.microsoft_graph import GraphAuthConfig, MicrosoftGraphClient
 from .integrations.outlook_local import OutlookLocalClient
 from .outlook_workflow import suggest_reply_body, triage_messages
 from .schemas import AgentBlueprint
+from .subdivision_scout import SubdivisionScout, load_jurisdictions
 
 LOCAL_OUTLOOK_CACHE_PATH = Path("generated_agents") / "outlook_local_cache.json"
 
@@ -69,6 +70,88 @@ def _build_parser() -> argparse.ArgumentParser:
         "--output-dir",
         default="generated_agents",
         help="Folder where generated agents are stored.",
+    )
+
+    subdivision_screen_parser = subparsers.add_parser(
+        "subdivision-scout-screen",
+        help="Rank candidate parcels for residential subdivision viability.",
+    )
+    subdivision_screen_parser.add_argument("--agent-dir", required=True, help="Generated scout agent directory path.")
+    subdivision_screen_input = subdivision_screen_parser.add_mutually_exclusive_group(required=True)
+    subdivision_screen_input.add_argument("--input", help="Single parcel description to score.")
+    subdivision_screen_input.add_argument("--parcel-file", help="CSV of parcel candidates to score.")
+    subdivision_screen_parser.add_argument("--market", default="unknown", help="Market/jurisdiction for --input mode.")
+    subdivision_screen_parser.add_argument("--parcel-id", default="parcel-1", help="Parcel id for --input mode.")
+    subdivision_screen_parser.add_argument("--top", type=int, default=10, help="Maximum scored parcels to return.")
+    subdivision_screen_parser.add_argument(
+        "--min-score",
+        type=float,
+        default=0.0,
+        help="Minimum priority score required in the output.",
+    )
+
+    subdivision_watch_parser = subparsers.add_parser(
+        "subdivision-scout-web-watch",
+        help="Search the web for recent tentative map approvals and near-term approvals.",
+    )
+    subdivision_watch_parser.add_argument("--agent-dir", required=True, help="Generated scout agent directory path.")
+    subdivision_watch_parser.add_argument(
+        "--jurisdiction",
+        action="append",
+        default=[],
+        help="Jurisdiction to monitor. Repeat the flag for multiple markets.",
+    )
+    subdivision_watch_parser.add_argument(
+        "--watchlist-file",
+        help="Optional JSON or text file containing jurisdictions to monitor.",
+    )
+    subdivision_watch_parser.add_argument(
+        "--lookback-days",
+        type=int,
+        default=45,
+        help="Only include results newer than this many days when publication dates are available.",
+    )
+    subdivision_watch_parser.add_argument(
+        "--max-results-per-query",
+        type=int,
+        default=6,
+        help="How many search results to request for each jurisdiction/query template.",
+    )
+
+    subdivision_run_parser = subparsers.add_parser(
+        "subdivision-scout-run",
+        help="Run parcel screening and web monitoring together.",
+    )
+    subdivision_run_parser.add_argument("--agent-dir", required=True, help="Generated scout agent directory path.")
+    subdivision_run_parser.add_argument("--parcel-file", help="Optional CSV of parcel candidates to score.")
+    subdivision_run_parser.add_argument(
+        "--jurisdiction",
+        action="append",
+        default=[],
+        help="Jurisdiction to monitor. Repeat the flag for multiple markets.",
+    )
+    subdivision_run_parser.add_argument(
+        "--watchlist-file",
+        help="Optional JSON or text file containing jurisdictions to monitor.",
+    )
+    subdivision_run_parser.add_argument("--top", type=int, default=10, help="Maximum scored parcels to return.")
+    subdivision_run_parser.add_argument(
+        "--min-score",
+        type=float,
+        default=0.0,
+        help="Minimum parcel priority score required in the output.",
+    )
+    subdivision_run_parser.add_argument(
+        "--lookback-days",
+        type=int,
+        default=45,
+        help="Only include web results newer than this many days when publication dates are available.",
+    )
+    subdivision_run_parser.add_argument(
+        "--max-results-per-query",
+        type=int,
+        default=6,
+        help="How many search results to request for each jurisdiction/query template.",
     )
 
     outlook_inbox_parser = subparsers.add_parser(
@@ -336,6 +419,75 @@ def _handle_describe(args: argparse.Namespace) -> None:
 def _handle_list(args: argparse.Namespace) -> None:
     factory = AgentFactory(output_root=args.output_dir)
     print(json.dumps(factory.list_registered_agents(), indent=2))
+
+
+def _build_subdivision_scout(args: argparse.Namespace) -> SubdivisionScout:
+    specialist = AgentFactory().load_specialist_agent(Path(args.agent_dir))
+    return SubdivisionScout(specialist)
+
+
+def _filter_scored_parcels(items: List[dict], top: int, min_score: float) -> List[dict]:
+    filtered = [item for item in items if float(item.get("priority_score", 0.0)) >= min_score]
+    top = max(1, top)
+    return filtered[:top]
+
+
+def _handle_subdivision_scout_screen(args: argparse.Namespace) -> None:
+    scout = _build_subdivision_scout(args)
+    if args.input:
+        scored = [
+            scout.screen_parcel_text(
+                text=args.input,
+                parcel_id=args.parcel_id,
+                market=args.market,
+            )
+        ]
+    else:
+        scored = scout.screen_parcel_file(Path(args.parcel_file))
+
+    payload = {
+        "agent": scout.specialist.metadata["blueprint"]["name"],
+        "results": _filter_scored_parcels(scored, top=args.top, min_score=args.min_score),
+    }
+    print(json.dumps(payload, indent=2))
+
+
+def _handle_subdivision_scout_web_watch(args: argparse.Namespace) -> None:
+    scout = _build_subdivision_scout(args)
+    jurisdictions = load_jurisdictions(args.jurisdiction, args.watchlist_file)
+    payload = scout.watch_planning_activity(
+        jurisdictions=jurisdictions,
+        lookback_days=args.lookback_days,
+        max_results_per_query=args.max_results_per_query,
+    )
+    print(json.dumps(payload, indent=2))
+
+
+def _handle_subdivision_scout_run(args: argparse.Namespace) -> None:
+    scout = _build_subdivision_scout(args)
+    jurisdictions = load_jurisdictions(args.jurisdiction, args.watchlist_file)
+
+    scored: List[dict] = []
+    if args.parcel_file:
+        scored = scout.screen_parcel_file(Path(args.parcel_file))
+
+    planning_activity = None
+    if jurisdictions:
+        planning_activity = scout.watch_planning_activity(
+            jurisdictions=jurisdictions,
+            lookback_days=args.lookback_days,
+            max_results_per_query=args.max_results_per_query,
+        )
+
+    if not scored and planning_activity is None:
+        raise ValueError("Provide --parcel-file and/or at least one jurisdiction or --watchlist-file.")
+
+    payload = {
+        "agent": scout.specialist.metadata["blueprint"]["name"],
+        "screened_parcels": _filter_scored_parcels(scored, top=args.top, min_score=args.min_score),
+        "planning_activity": planning_activity,
+    }
+    print(json.dumps(payload, indent=2))
 
 
 def _build_graph_client() -> MicrosoftGraphClient:
@@ -698,6 +850,12 @@ def main(argv: Sequence[str] | None = None) -> None:
             _handle_describe(args)
         elif args.command == "list":
             _handle_list(args)
+        elif args.command == "subdivision-scout-screen":
+            _handle_subdivision_scout_screen(args)
+        elif args.command == "subdivision-scout-web-watch":
+            _handle_subdivision_scout_web_watch(args)
+        elif args.command == "subdivision-scout-run":
+            _handle_subdivision_scout_run(args)
         elif args.command == "outlook-inbox":
             _handle_outlook_inbox(args)
         elif args.command == "outlook-draft-reply":

@@ -1,4 +1,4 @@
-"""Bootstrap script to create the three requested specialist agents."""
+"""Bootstrap script to create the preconfigured specialist agents."""
 from __future__ import annotations
 
 import json
@@ -42,6 +42,19 @@ def create_requested_agents(output_dir: Path | str = "generated_agents") -> list
             ),
             "dataset": root / "examples" / "housing_market_researcher" / "training.csv",
             "knowledge": [root / "examples" / "housing_market_researcher" / "knowledge"],
+        },
+        {
+            "blueprint": AgentBlueprint(
+                name="ResidentialSubdivisionScout",
+                description=(
+                    "Screens land parcels for residential subdivision probability and monitors recent approvals "
+                    "and upcoming planning actions."
+                ),
+                topic="Residential Subdivision Opportunity Scouting",
+                task_type="classification",
+            ),
+            "dataset": root / "examples" / "subdivision_opportunity_scout" / "training.csv",
+            "knowledge": [root / "examples" / "subdivision_opportunity_scout" / "knowledge"],
         },
     ]
 
