@@ -79,5 +79,14 @@
     "created_at_utc": "2026-03-27T23:33:59.775325+00:00",
     "metric_name": "accuracy",
     "metric_value": 0.8181818181818182
+  },
+  {
+    "name": "ResidentialLandDueDiligenceAdvisor",
+    "topic": "Residential Land Acquisition Due Diligence",
+    "task_type": "classification",
+    "agent_dir": "C:\\Users\\Bryce Leininger\\Documents\\GitHub\\Redwood\\generated_agents\\residentiallandduediligenceadvisor_20260327_234853",
+    "created_at_utc": "2026-03-27T23:48:53.551845+00:00",
+    "metric_name": "accuracy",
+    "metric_value": 0.3333333333333333
   }
 ]
