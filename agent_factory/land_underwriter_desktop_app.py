@@ -1406,6 +1406,10 @@ class LandUnderwriterDesktopApp:
         self.notes_text.insert("1.0", str(payload.get("notes") or ""))
 
         self._schedule_refresh()
+        if self.refresh_job is not None:
+            self.root.after_cancel(self.refresh_job)
+            self.refresh_job = None
+        self._refresh_builder_overview()
         if warnings:
             self._set_status(" ".join(dict.fromkeys(warnings)))
 
