@@ -111,6 +111,18 @@ The JSON request schema is documented by example in:
 
 `agent_factory/examples/land_underwriter/sample_request.json`
 
+Desktop launch:
+
+```bash
+run_land_underwriter_desktop.bat
+```
+
+Desktop shortcut install:
+
+```bash
+install_land_underwriter_desktop_shortcut.bat
+```
+
 ## Residential Subdivision Scout
 
 `ResidentialSubdivisionScout` is an operational workflow layered on top of a generated specialist agent.
