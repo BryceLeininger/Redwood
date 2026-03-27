@@ -1,9 +1,39 @@
 {
-  "jurisdictions": [
-    "Roseville, CA",
-    "Elk Grove, CA",
-    "Folsom, CA",
-    "Menifee, CA",
-    "Queen Creek, AZ"
+  "targets": [
+    {
+      "jurisdiction": "Fresno, CA",
+      "approved_queries": [
+        "site:fresno.legistar.com Fresno \"Vesting Tentative Tract Map\" \"1/7/2026\"",
+        "site:fresno.legistar.com Fresno \"Vesting Tentative Tract Map No. 6443\""
+      ],
+      "upcoming_queries": [
+        "site:fresno.gov/planning/plans-projects-under-review Fresno \"Vesting Tentative Tract Map\""
+      ]
+    },
+    {
+      "jurisdiction": "Merced, CA",
+      "approved_queries": [
+        "site:cityofmerced.legistar.com Merced \"Vesting Tentative Subdivision Map\" \"1/21/2026\""
+      ],
+      "upcoming_queries": [
+        "site:cityofmerced.gov Merced \"public hearings\" \"Vesting Tentative Subdivision Map\""
+      ]
+    },
+    {
+      "jurisdiction": "Lemoore, CA",
+      "upcoming_queries": [
+        "site:files.ceqanet.lci.ca.gov Lemoore \"Tentative Subdivision Map Tract 948 Project\""
+      ],
+      "approved_queries": []
+    },
+    {
+      "jurisdiction": "Placer County, CA",
+      "approved_queries": [
+        "site:placer.ca.gov \"Tentative Subdivision Map\" \"Granite Bay Golf Course\""
+      ],
+      "upcoming_queries": [
+        "site:placer.ca.gov/AgendaCenter/ViewFile \"Tentative Subdivision Map\" \"Granite Bay Golf Course\""
+      ]
+    }
   ]
 }

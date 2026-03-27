@@ -13,7 +13,7 @@ from .integrations.microsoft_graph import GraphAuthConfig, MicrosoftGraphClient
 from .integrations.outlook_local import OutlookLocalClient
 from .outlook_workflow import suggest_reply_body, triage_messages
 from .schemas import AgentBlueprint
-from .subdivision_scout import SubdivisionScout, load_jurisdictions
+from .subdivision_scout import SubdivisionScout, load_watch_targets
 
 LOCAL_OUTLOOK_CACHE_PATH = Path("generated_agents") / "outlook_local_cache.json"
 
@@ -454,9 +454,9 @@ def _handle_subdivision_scout_screen(args: argparse.Namespace) -> None:
 
 def _handle_subdivision_scout_web_watch(args: argparse.Namespace) -> None:
     scout = _build_subdivision_scout(args)
-    jurisdictions = load_jurisdictions(args.jurisdiction, args.watchlist_file)
+    watch_targets = load_watch_targets(args.jurisdiction, args.watchlist_file)
     payload = scout.watch_planning_activity(
-        jurisdictions=jurisdictions,
+        targets=watch_targets,
         lookback_days=args.lookback_days,
         max_results_per_query=args.max_results_per_query,
     )
@@ -465,16 +465,16 @@ def _handle_subdivision_scout_web_watch(args: argparse.Namespace) -> None:
 
 def _handle_subdivision_scout_run(args: argparse.Namespace) -> None:
     scout = _build_subdivision_scout(args)
-    jurisdictions = load_jurisdictions(args.jurisdiction, args.watchlist_file)
+    watch_targets = load_watch_targets(args.jurisdiction, args.watchlist_file)
 
     scored: List[dict] = []
     if args.parcel_file:
         scored = scout.screen_parcel_file(Path(args.parcel_file))
 
     planning_activity = None
-    if jurisdictions:
+    if watch_targets:
         planning_activity = scout.watch_planning_activity(
-            jurisdictions=jurisdictions,
+            targets=watch_targets,
             lookback_days=args.lookback_days,
             max_results_per_query=args.max_results_per_query,
         )

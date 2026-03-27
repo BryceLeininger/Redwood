@@ -84,12 +84,15 @@ UPCOMING_QUERY_TEMPLATES = [
     '"{jurisdiction}" subdivision "public hearing"',
 ]
 
-PLANNING_TERMS_BY_STAGE: Dict[str, Sequence[str]] = {
+LAND_USE_TERMS: Sequence[str] = (
+    "tentative map",
+    "vesting tentative map",
+    "subdivision",
+    "tract map",
+)
+
+PROCESS_TERMS_BY_STAGE: Dict[str, Sequence[str]] = {
     "approved_recently": (
-        "tentative map",
-        "vesting tentative map",
-        "subdivision",
-        "tract map",
         "planning commission",
         "city council",
         "staff report",
@@ -97,10 +100,6 @@ PLANNING_TERMS_BY_STAGE: Dict[str, Sequence[str]] = {
         "approval",
     ),
     "approaching_approval": (
-        "tentative map",
-        "vesting tentative map",
-        "subdivision",
-        "tract map",
         "planning commission",
         "agenda",
         "public hearing",
@@ -139,6 +138,20 @@ class ParcelScreeningResult:
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
+
+
+@dataclass(frozen=True)
+class WatchTarget:
+    jurisdiction: str
+    approved_queries: List[str]
+    upcoming_queries: List[str]
+
+    def queries_for_stage(self, stage: str, templates: Sequence[str]) -> List[str]:
+        if stage == "approved_recently" and self.approved_queries:
+            return list(self.approved_queries)
+        if stage == "approaching_approval" and self.upcoming_queries:
+            return list(self.upcoming_queries)
+        return [template.format(jurisdiction=self.jurisdiction) for template in templates]
 
 
 @dataclass(frozen=True)
@@ -288,8 +301,11 @@ def _result_is_relevant(stage: str, jurisdiction: str, title: str, url: str, sni
     if tokens and not all(token in haystack for token in tokens):
         return False
 
-    planning_terms = PLANNING_TERMS_BY_STAGE.get(stage, ())
-    if planning_terms and not any(term in haystack for term in planning_terms):
+    if not any(term in haystack for term in LAND_USE_TERMS):
+        return False
+
+    process_terms = PROCESS_TERMS_BY_STAGE.get(stage, ())
+    if process_terms and not any(term in haystack for term in process_terms):
         return False
 
     return True
@@ -371,12 +387,12 @@ class SubdivisionScout:
 
     def watch_planning_activity(
         self,
-        jurisdictions: Sequence[str],
+        targets: Sequence[WatchTarget],
         lookback_days: int = 45,
         max_results_per_query: int = 6,
     ) -> Dict[str, Any]:
-        cleaned_jurisdictions = [item.strip() for item in jurisdictions if item and item.strip()]
-        if not cleaned_jurisdictions:
+        cleaned_targets = [target for target in targets if target.jurisdiction.strip()]
+        if not cleaned_targets:
             raise ValueError("At least one jurisdiction is required for planning activity monitoring.")
 
         lookback_days = max(1, lookback_days)
@@ -385,14 +401,14 @@ class SubdivisionScout:
 
         approved_recently = self._search_stage(
             stage="approved_recently",
-            jurisdictions=cleaned_jurisdictions,
+            targets=cleaned_targets,
             query_templates=APPROVED_QUERY_TEMPLATES,
             cutoff=cutoff,
             max_results_per_query=max_results_per_query,
         )
         approaching_approval = self._search_stage(
             stage="approaching_approval",
-            jurisdictions=cleaned_jurisdictions,
+            targets=cleaned_targets,
             query_templates=UPCOMING_QUERY_TEMPLATES,
             cutoff=cutoff,
             max_results_per_query=max_results_per_query,
@@ -401,7 +417,7 @@ class SubdivisionScout:
         return {
             "agent": self.specialist.metadata["blueprint"]["name"],
             "lookback_days": lookback_days,
-            "jurisdictions": cleaned_jurisdictions,
+            "jurisdictions": [target.jurisdiction for target in cleaned_targets],
             "approved_recently": [item.to_dict() for item in approved_recently],
             "approaching_approval": [item.to_dict() for item in approaching_approval],
         }
@@ -409,16 +425,16 @@ class SubdivisionScout:
     def _search_stage(
         self,
         stage: str,
-        jurisdictions: Sequence[str],
+        targets: Sequence[WatchTarget],
         query_templates: Sequence[str],
         cutoff: datetime,
         max_results_per_query: int,
     ) -> List[PlanningWatchItem]:
         items: List[PlanningWatchItem] = []
         seen = set()
-        for jurisdiction in jurisdictions:
-            for template in query_templates:
-                query = template.format(jurisdiction=jurisdiction)
+        for target in targets:
+            jurisdiction = target.jurisdiction
+            for query in target.queries_for_stage(stage, query_templates):
                 for result in self._search_rss(query, max_results=max_results_per_query):
                     dedupe_key = (stage, result["url"].lower())
                     if dedupe_key in seen:
@@ -493,7 +509,15 @@ class SubdivisionScout:
 
 
 def load_jurisdictions(jurisdictions: Sequence[str], watchlist_file: str | None = None) -> List[str]:
+    return [target.jurisdiction for target in load_watch_targets(jurisdictions, watchlist_file)]
+
+
+def load_watch_targets(jurisdictions: Sequence[str], watchlist_file: str | None = None) -> List[WatchTarget]:
     values = [item.strip() for item in jurisdictions if item and item.strip()]
+    targets: List[WatchTarget] = [
+        WatchTarget(jurisdiction=item, approved_queries=[], upcoming_queries=[]) for item in values
+    ]
+
     if watchlist_file:
         path = Path(watchlist_file)
         if not path.exists():
@@ -502,26 +526,61 @@ def load_jurisdictions(jurisdictions: Sequence[str], watchlist_file: str | None 
         if path.suffix.lower() == ".json":
             payload = json.loads(path.read_text(encoding="utf-8"))
             if isinstance(payload, list):
-                values.extend(str(item).strip() for item in payload if str(item).strip())
+                for item in payload:
+                    targets.append(_parse_watch_target(item))
             elif isinstance(payload, dict):
-                items = payload.get("jurisdictions", [])
-                if not isinstance(items, list):
-                    raise ValueError("Watchlist JSON object must contain a 'jurisdictions' list.")
-                values.extend(str(item).strip() for item in items if str(item).strip())
+                target_items = payload.get("targets")
+                if target_items is not None:
+                    if not isinstance(target_items, list):
+                        raise ValueError("Watchlist JSON field 'targets' must be a list.")
+                    for item in target_items:
+                        targets.append(_parse_watch_target(item))
+                else:
+                    items = payload.get("jurisdictions", [])
+                    if not isinstance(items, list):
+                        raise ValueError("Watchlist JSON object must contain a 'jurisdictions' list or 'targets' list.")
+                    for item in items:
+                        targets.append(_parse_watch_target(item))
             else:
                 raise ValueError("Watchlist JSON must be an array of jurisdiction strings or an object.")
         else:
             for line in path.read_text(encoding="utf-8").splitlines():
                 line = line.strip()
                 if line:
-                    values.append(line)
+                    targets.append(WatchTarget(jurisdiction=line, approved_queries=[], upcoming_queries=[]))
 
-    deduped: List[str] = []
+    deduped: List[WatchTarget] = []
     seen = set()
-    for item in values:
-        key = item.lower()
+    for item in targets:
+        key = item.jurisdiction.lower()
         if key in seen:
             continue
         seen.add(key)
         deduped.append(item)
     return deduped
+
+
+def _parse_watch_target(value: Any) -> WatchTarget:
+    if isinstance(value, str):
+        item = value.strip()
+        if not item:
+            raise ValueError("Watch target strings cannot be empty.")
+        return WatchTarget(jurisdiction=item, approved_queries=[], upcoming_queries=[])
+
+    if not isinstance(value, dict):
+        raise ValueError("Watch targets must be strings or objects.")
+
+    jurisdiction = str(value.get("jurisdiction") or value.get("name") or "").strip()
+    if not jurisdiction:
+        raise ValueError("Watch target objects must include a jurisdiction or name.")
+
+    approved_queries = value.get("approved_queries", [])
+    upcoming_queries = value.get("upcoming_queries", [])
+    if not isinstance(approved_queries, list) or not isinstance(upcoming_queries, list):
+        raise ValueError("Watch target query overrides must be arrays of strings.")
+
+    return WatchTarget(
+        jurisdiction=jurisdiction,
+        approved_queries=[str(item).strip() for item in approved_queries if str(item).strip()],
+        upcoming_queries=[str(item).strip() for item in upcoming_queries if str(item).strip()],
+    )
