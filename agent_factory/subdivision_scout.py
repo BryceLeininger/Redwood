@@ -157,6 +157,8 @@ PROMPT_STAGE_TERMS: Dict[str, Sequence[str]] = {
         "hearing",
         "staff report",
         "planning commission",
+        "under review",
+        "projects of interest",
     ),
 }
 
@@ -165,6 +167,33 @@ PROMPT_AREA_EXPANSIONS: Dict[str, Sequence[str]] = {
     "sacramento": ("Sacramento", "Sacramento County", "Elk Grove", "Roseville", "Placer County"),
     "greater sacramento": ("Sacramento", "Sacramento County", "Elk Grove", "Roseville", "Placer County"),
     "sacramento area": ("Sacramento", "Sacramento County", "Elk Grove", "Roseville", "Placer County"),
+}
+
+PROMPT_SOURCE_URL_CATALOG: Dict[str, Dict[str, Sequence[str]]] = {
+    "Fresno": {
+        "approved_recently": (
+            "https://fresno.legistar.com/gateway.aspx?m=l&id=/matter.aspx?key=19987",
+            "https://fresno.legistar.com/gateway.aspx?m=l&id=/matter.aspx?key=19848",
+        ),
+        "approaching_approval": (
+            "https://fresno.legistar.com/gateway.aspx?m=l&id=/matter.aspx?key=19773",
+            "https://www.fresno.gov/planning/plans-projects-under-review/",
+        ),
+    },
+    "Merced": {
+        "approved_recently": (
+            "https://cityofmerced.legistar.com/LegislationDetail.aspx?From=RSS&FullText=1&GUID=007E35C0-D6C3-4866-911F-5F0B5331BB41&ID=7808919",
+            "https://cityofmerced.legistar.com/LegislationDetail.aspx?FullText=1&GUID=04918849-5CAD-41D7-AD3B-65BE1EDD2CF1&ID=7808923&Options=&Search=",
+        ),
+        "approaching_approval": (
+            "https://www.cityofmerced.gov/government/city-council/public-hearings",
+        ),
+    },
+    "Roseville": {
+        "approaching_approval": (
+            "https://www.roseville.ca.us/projectsofinterest",
+        ),
+    },
 }
 
 
@@ -545,12 +574,14 @@ def _query_variants_for_prompt(spec: OpportunitySearchSpec, area: str, stage: st
     stage_fragments = {
         "approved_recently": [
             ["subdivision", '"tentative map"', "approved"],
-            ["subdivision", '"vesting tentative map"', "approved"],
+            ['"vesting tentative tract map"', "approved"],
+            ['"tentative tract map"', "approved"],
             ["subdivision", '"staff report"', "approved"],
         ],
         "approaching_approval": [
             ["subdivision", '"tentative map"', "agenda"],
-            ["subdivision", '"public hearing"', '"tentative map"'],
+            ['"tentative tract map"', '"planning commission"'],
+            ['"plans projects under review"', "subdivision"],
             ["subdivision", '"recommended approval"', '"tentative map"'],
         ],
     }
@@ -565,8 +596,8 @@ def _query_variants_for_prompt(spec: OpportunitySearchSpec, area: str, stage: st
     queries: List[str] = []
     for fragments in stage_fragments.get(stage, []):
         parts = [f'"{area}"', *fragments, *housing_fragment]
-        if number_fragment:
-            queries.append(" ".join(parts + number_fragment[:1]))
+        for numeric_hint in number_fragment[:2]:
+            queries.append(" ".join(parts + [numeric_hint]))
         queries.append(" ".join(parts))
     deduped: List[str] = []
     seen = set()
@@ -595,6 +626,26 @@ def _fetch_result_page_text(url: str) -> str:
         return ""
 
     return _clean_text(response.text)[:18000]
+
+
+def _fetch_source_page(url: str) -> tuple[str, str]:
+    try:
+        response = requests.get(
+            url,
+            timeout=SEARCH_TIMEOUT_SECONDS,
+            headers={"User-Agent": DEFAULT_USER_AGENT},
+        )
+        response.raise_for_status()
+    except requests.RequestException:
+        return "", ""
+
+    content_type = response.headers.get("content-type", "").lower()
+    if "pdf" in content_type:
+        return "", ""
+
+    html = response.text
+    title = _extract_html_title(html) or url
+    return title, _clean_text(html)[:18000]
 
 
 def _normalize_search_result_url(value: str) -> str:
@@ -838,6 +889,55 @@ class SubdivisionScout:
             expanded_areas = PROMPT_AREA_EXPANSIONS.get(requested_area.lower(), (requested_area,))
             for search_area in expanded_areas:
                 for stage in spec.stages:
+                    for source_url in PROMPT_SOURCE_URL_CATALOG.get(search_area, {}).get(stage, ()):
+                        dedupe_key = source_url.lower()
+                        if dedupe_key in seen:
+                            continue
+
+                        title, page_text = _fetch_source_page(source_url)
+                        if not page_text:
+                            continue
+                        if not _result_matches_prompt_search(
+                            spec=spec,
+                            stage=stage,
+                            search_area=search_area,
+                            title=title,
+                            url=source_url,
+                            snippet=page_text[:400],
+                            page_text=page_text,
+                        ):
+                            continue
+
+                        extracted_acres = _extract_acres(page_text)
+                        extracted_lots = _extract_lots(page_text)
+                        qualification, notes, score = _qualify_prompt_result(
+                            spec=spec,
+                            extracted_acres=extracted_acres,
+                            extracted_lots=extracted_lots,
+                        )
+                        if qualification is None:
+                            continue
+
+                        seen.add(dedupe_key)
+                        results.append(
+                            OpportunitySearchItem(
+                                requested_area=requested_area,
+                                search_area=search_area,
+                                stage=stage,
+                                title=title,
+                                url=source_url,
+                                source_domain=urlparse(source_url).netloc.lower(),
+                                published_at=None,
+                                snippet=_extract_relevant_snippet(page_text),
+                                matched_query="curated_source_url",
+                                extracted_acres=extracted_acres,
+                                extracted_lots=extracted_lots,
+                                qualification=qualification,
+                                qualification_notes=notes,
+                                score=round(score + 6.0, 1),
+                            )
+                        )
+
                     for prompt_query in _query_variants_for_prompt(spec, search_area, stage):
                         try:
                             search_results = self._search_duckduckgo_html(prompt_query, max_results=max_results_per_query)
