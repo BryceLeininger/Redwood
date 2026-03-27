@@ -7,7 +7,7 @@ import threading
 import tkinter as tk
 from datetime import datetime
 from pathlib import Path
-from tkinter import filedialog, ttk
+from tkinter import filedialog, messagebox, ttk
 from tkinter.scrolledtext import ScrolledText
 from typing import Any
 
@@ -130,6 +130,35 @@ def _format_pct(value: Any) -> str:
     return f"{float(value) * 100:.1f}%"
 
 
+def _parse_optional_ratio(value: str) -> float | None:
+    parsed = _parse_optional_float(value)
+    if parsed is None:
+        return None
+    return parsed / 100.0 if abs(parsed) > 1 else parsed
+
+
+def _format_input_number(value: Any, digits: int = 2) -> str:
+    if value in (None, ""):
+        return ""
+    number = float(value)
+    if number.is_integer():
+        return str(int(number))
+    return f"{number:.{digits}f}".rstrip("0").rstrip(".")
+
+
+def _format_input_ratio(value: Any, digits: int = 2) -> str:
+    if value in (None, ""):
+        return ""
+    number = float(value) * 100.0
+    if number.is_integer():
+        return str(int(number))
+    return f"{number:.{digits}f}".rstrip("0").rstrip(".")
+
+
+def _scenario_label(name: str) -> str:
+    return name.replace("_", " ").replace("case", "case").title()
+
+
 class ScrollableFrame(tk.Frame):
     def __init__(self, parent: tk.Widget, *, bg: str) -> None:
         super().__init__(parent, bg=bg)
@@ -181,6 +210,7 @@ class LandUnderwriterDesktopApp:
         self.latest_agent_dir: Path | None = None
         self.refresh_job: str | None = None
         self.run_inflight = False
+        self.current_result: Any = None
 
         self.form_vars: dict[str, tk.Variable] = {}
         self.series_rows: list[dict[str, tk.Variable]] = []
