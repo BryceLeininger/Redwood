@@ -16,7 +16,107 @@
             Screen a parcel, rank a feed, and monitor tentative maps from one local dashboard.
           </p>
 
-          <article class="prompt-search-card">
+          <div class="hero-ribbon">
+            <article class="hero-metric">
+              <p class="hero-metric-label">01</p>
+              <h2>Search by market brief</h2>
+              <p>Turn a plain-English land brief into qualified subdivision leads.</p>
+            </article>
+            <article class="hero-metric">
+              <p class="hero-metric-label">02</p>
+              <h2>Stress test one site</h2>
+              <p>Score broker notes, zoning, utilities, and entitlement context in seconds.</p>
+            </article>
+            <article class="hero-metric">
+              <p class="hero-metric-label">03</p>
+              <h2>Track local approvals</h2>
+              <p>Watch jurisdictions for tentative maps, hearings, and recent approvals.</p>
+            </article>
+          </div>
+        </div>
+
+        <div class="hero-side">
+          <div class="hero-card session-card">
+            <div class="session-header">
+              <div>
+                <p class="hero-card-label">Active Agent</p>
+                <h2 class="session-title">Scout Session</h2>
+              </div>
+              <span class="session-badge">Ready</span>
+            </div>
+
+            <label class="field-block">
+              <span>Agent Version</span>
+              <select id="agentSelect" class="agent-select" aria-label="Select scout agent"></select>
+            </label>
+            <p id="agentMeta" class="agent-meta">Loading agent registry...</p>
+
+            <div class="hero-actions">
+              <button id="loadSamplesBtn" class="button secondary" type="button">Load Samples</button>
+              <button id="refreshAgentsBtn" class="button ghost" type="button">Refresh Agents</button>
+            </div>
+
+            <div class="session-grid">
+              <article class="session-note">
+                <strong>Best for</strong>
+                <p>Greenfield opportunities, infill subdivisions, tentative maps, and lot-count driven sourcing.</p>
+              </article>
+              <article class="session-note">
+                <strong>Suggested flow</strong>
+                <p>Search a market first, score the best sites, then run a full sweep when the pipeline looks live.</p>
+              </article>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <main class="workspace">
+        <section class="control-column">
+          <article class="panel intro-panel">
+            <div class="panel-heading">
+              <div>
+                <p class="panel-kicker">Workflow</p>
+                <h2>Run The Scout</h2>
+              </div>
+            </div>
+
+            <p class="panel-subtext">
+              Start broad, narrow into parcel-level diligence, and finish with a combined run when you are ready to compare parcel quality with planning activity.
+            </p>
+
+            <div class="workflow-grid">
+              <article class="workflow-step">
+                <span class="step-number">01</span>
+                <div class="step-copy">
+                  <h3>Search a market</h3>
+                  <p>Describe the geography, approvals, acreage, and lot count you want.</p>
+                </div>
+              </article>
+              <article class="workflow-step">
+                <span class="step-number">02</span>
+                <div class="step-copy">
+                  <h3>Score a parcel</h3>
+                  <p>Paste raw notes to quickly gauge whether a site deserves more diligence.</p>
+                </div>
+              </article>
+              <article class="workflow-step">
+                <span class="step-number">03</span>
+                <div class="step-copy">
+                  <h3>Rank a feed</h3>
+                  <p>Upload a parcel CSV to sort candidates by priority score.</p>
+                </div>
+              </article>
+              <article class="workflow-step">
+                <span class="step-number">04</span>
+                <div class="step-copy">
+                  <h3>Watch approvals</h3>
+                  <p>Track jurisdictions for tentative maps, agenda items, and recent approvals.</p>
+                </div>
+              </article>
+            </div>
+          </article>
+
+          <article class="panel prompt-panel">
             <div class="panel-heading">
               <div>
                 <p class="panel-kicker">Prompt Search</p>
@@ -24,6 +124,10 @@
               </div>
               <button id="samplePromptBtn" class="mini-button" type="button">Use Example</button>
             </div>
+
+            <p class="panel-subtext">
+              Describe location, acreage, lot count, and approval stage in one request.
+            </p>
 
             <label class="field-block">
               <span>Search Parameters</span>
@@ -49,24 +153,7 @@
               <button id="promptSearchBtn" class="button accent" type="button">Search Opportunities</button>
             </div>
           </article>
-        </div>
 
-        <div class="hero-side">
-          <div class="hero-card">
-            <p class="hero-card-label">Active Agent</p>
-            <select id="agentSelect" class="agent-select" aria-label="Select scout agent"></select>
-            <p id="agentMeta" class="agent-meta">Loading agent registry...</p>
-          </div>
-
-          <div class="hero-actions">
-            <button id="loadSamplesBtn" class="button secondary" type="button">Load Samples</button>
-            <button id="refreshAgentsBtn" class="button ghost" type="button">Refresh Agents</button>
-          </div>
-        </div>
-      </header>
-
-      <main class="workspace">
-        <section class="control-column">
           <article class="panel">
             <div class="panel-heading">
               <div>
@@ -75,6 +162,10 @@
               </div>
               <button id="sampleSingleBtn" class="mini-button" type="button">Use Sample</button>
             </div>
+
+            <p class="panel-subtext">
+              Best for broker notes, entitlement summaries, zoning context, and early diligence writeups.
+            </p>
 
             <div class="field-row compact">
               <label>
@@ -116,6 +207,10 @@
               </div>
             </div>
 
+            <p class="panel-subtext">
+              Upload or paste a parcel feed with one row per candidate site to create a ranked queue.
+            </p>
+
             <div class="field-row compact">
               <label>
                 <span>Top Results</span>
@@ -156,6 +251,10 @@
               </div>
             </div>
 
+            <p class="panel-subtext">
+              Track planning commission agendas, hearing items, and approval-stage subdivision activity.
+            </p>
+
             <div class="field-row compact">
               <label>
                 <span>Lookback Days</span>
@@ -189,9 +288,15 @@
               </div>
             </div>
 
-            <p class="accent-copy">
-              Uses the CSV if present. If the CSV is empty, it falls back to the single parcel input.
+            <p class="panel-subtext accent-copy">
+              Uses the CSV if present. If the CSV is empty, it falls back to the single parcel input so you can compare parcel scoring and planning activity in one pass.
             </p>
+
+            <div class="sweep-checklist">
+              <span class="check-chip">Parcel ranking</span>
+              <span class="check-chip">Planning watch</span>
+              <span class="check-chip">Shared thresholds</span>
+            </div>
 
             <div class="button-row">
               <button id="fullSweepBtn" class="button accent" type="button">Run Full Sweep</button>
@@ -200,24 +305,51 @@
         </section>
 
         <section class="results-column">
-          <div class="results-topline">
-            <div>
-              <p class="panel-kicker">Run Output</p>
-              <h2>Results</h2>
+          <article class="panel results-shell">
+            <div class="results-topline">
+              <div>
+                <p class="panel-kicker">Run Output</p>
+                <h2>Results</h2>
+              </div>
+              <div id="statusPill" class="status-pill idle">Ready</div>
             </div>
-            <div id="statusPill" class="status-pill idle">Ready</div>
-          </div>
 
-          <section id="summaryCards" class="summary-grid"></section>
+            <p id="resultsMeta" class="results-meta">
+              Choose a workflow on the left to start screening opportunities.
+            </p>
 
-          <section id="resultBody" class="result-stack">
-            <article class="empty-state">
-              <p class="empty-title">Nothing has run yet.</p>
-              <p>
-                Load the sample data or paste a live parcel feed and watchlist to start screening opportunities.
-              </p>
-            </article>
-          </section>
+            <section id="summaryCards" class="summary-grid"></section>
+
+            <section id="resultBody" class="result-stack">
+              <article class="empty-state onboarding-state">
+                <div class="empty-illustration" aria-hidden="true"></div>
+                <div class="empty-copy">
+                  <p class="empty-title">Nothing has run yet.</p>
+                  <p>
+                    Start with a market brief, a parcel note set, or a feed of candidate sites. The scout will stage the output here.
+                  </p>
+                </div>
+
+                <div class="empty-grid">
+                  <article class="empty-tip">
+                    <span class="empty-step">1</span>
+                    <h3>Prompt search</h3>
+                    <p>Use plain English to find live subdivision candidates by stage and thresholds.</p>
+                  </article>
+                  <article class="empty-tip">
+                    <span class="empty-step">2</span>
+                    <h3>Parcel scoring</h3>
+                    <p>Paste raw diligence notes to see whether a specific site is worth chasing.</p>
+                  </article>
+                  <article class="empty-tip">
+                    <span class="empty-step">3</span>
+                    <h3>Full sweep</h3>
+                    <p>Combine parcel ranking with planning activity when you want a cleaner market snapshot.</p>
+                  </article>
+                </div>
+              </article>
+            </section>
+          </article>
         </section>
       </main>
     </div>

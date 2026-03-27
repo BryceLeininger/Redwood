@@ -1,6 +1,7 @@
 const elements = {
   agentSelect: document.getElementById("agentSelect"),
   agentMeta: document.getElementById("agentMeta"),
+  resultsMeta: document.getElementById("resultsMeta"),
   loadSamplesBtn: document.getElementById("loadSamplesBtn"),
   refreshAgentsBtn: document.getElementById("refreshAgentsBtn"),
   samplePromptBtn: document.getElementById("samplePromptBtn"),
@@ -51,6 +52,36 @@ function escapeHtml(value) {
 
 function selectedAgentDir() {
   return elements.agentSelect.value || null;
+}
+
+function selectedAgent() {
+  return state.agents.find((agent) => agent.agent_dir === selectedAgentDir()) || state.agents[0] || null;
+}
+
+function selectedAgentName() {
+  return selectedAgent()?.name || "ResidentialSubdivisionScout";
+}
+
+function formatDateTime(value) {
+  if (!value) {
+    return "unknown";
+  }
+
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString();
+}
+
+function formatRunTime() {
+  return new Intl.DateTimeFormat(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(new Date());
+}
+
+function setResultsMeta(text) {
+  if (elements.resultsMeta) {
+    elements.resultsMeta.textContent = text;
+  }
 }
 
 function setStatus(text, tone = "idle") {
@@ -107,6 +138,7 @@ function populateAgents(agents, defaultAgentDir) {
     elements.agentSelect.appendChild(option);
     elements.agentMeta.textContent =
       "Create the agent first with `python -m agent_factory.cli create-agent ...` or use the bootstrap helper.";
+    setResultsMeta("No scout agents were found. Create one first, then refresh the registry.");
     return;
   }
 
@@ -126,7 +158,7 @@ function populateAgents(agents, defaultAgentDir) {
 }
 
 function updateAgentMeta() {
-  const current = state.agents.find((agent) => agent.agent_dir === selectedAgentDir()) || state.agents[0];
+  const current = selectedAgent();
   if (!current) {
     elements.agentMeta.textContent = "No agent selected.";
     return;
@@ -135,7 +167,7 @@ function updateAgentMeta() {
   const metricValue =
     typeof current.metric_value === "number" ? current.metric_value.toFixed(2) : current.metric_value ?? "n/a";
   const metricName = current.metric_name || "metric";
-  const created = current.created_at_utc ? current.created_at_utc.replace("T", " ").replace("Z", " UTC") : "unknown";
+  const created = formatDateTime(current.created_at_utc);
   elements.agentMeta.textContent = `${metricName}: ${metricValue} | created ${created}`;
 }
 
@@ -144,6 +176,7 @@ function loadSamplesIntoFields() {
   elements.singleParcelInput.value = state.sampleSingleParcelText;
   elements.csvInput.value = state.sampleParcelCsv;
   elements.watchlistInput.value = state.sampleWatchlist;
+  setResultsMeta("Sample prompt, parcel notes, CSV, and watchlist loaded into the workspace.");
 }
 
 function renderSummary(cards) {
@@ -168,7 +201,7 @@ function renderSummary(cards) {
 function renderRawResponse(payload) {
   return `
     <details class="raw-response">
-      <summary>Raw response</summary>
+      <summary>View raw response</summary>
       <pre>${escapeHtml(JSON.stringify(payload, null, 2))}</pre>
     </details>
   `;
@@ -473,6 +506,7 @@ function renderFullSweep(payload) {
 async function runAction(statusText, requestFactory, renderer) {
   if (!state.agents.length) {
     setStatus("No Agent", "error");
+    setResultsMeta("No scout agent is available. Create or refresh a ResidentialSubdivisionScout agent first.");
     elements.resultBody.innerHTML =
       '<article class="empty-state"><p class="empty-title">No scout agent is available.</p><p>Create `ResidentialSubdivisionScout` first, then refresh the registry.</p></article>';
     return;
@@ -480,6 +514,7 @@ async function runAction(statusText, requestFactory, renderer) {
 
   setBusy(true);
   setStatus(statusText, "loading");
+  setResultsMeta(`${statusText} with ${selectedAgentName()}...`);
 
   try {
     const { path, body } = requestFactory();
@@ -490,6 +525,7 @@ async function runAction(statusText, requestFactory, renderer) {
     });
     renderer(payload);
     setStatus("Completed", "success");
+    setResultsMeta(`${statusText} completed at ${formatRunTime()}.`);
   } catch (error) {
     renderSummary([]);
     elements.resultBody.innerHTML = `
@@ -499,6 +535,7 @@ async function runAction(statusText, requestFactory, renderer) {
       </article>
     `;
     setStatus("Error", "error");
+    setResultsMeta(`${statusText} failed. Review the response below and adjust the inputs.`);
   } finally {
     setBusy(false);
   }
@@ -507,6 +544,7 @@ async function runAction(statusText, requestFactory, renderer) {
 async function loadStartData() {
   setBusy(true);
   setStatus("Loading", "loading");
+  setResultsMeta("Loading the scout workspace.");
 
   try {
     const payload = await fetchJson("/api/start");
@@ -516,6 +554,9 @@ async function loadStartData() {
     state.sampleWatchlist = payload.sample_watchlist || "";
     populateAgents(payload.agents || [], payload.default_agent_dir || null);
     setStatus("Ready", "idle");
+    if ((payload.agents || []).length) {
+      setResultsMeta("Choose a workflow on the left to start screening opportunities.");
+    }
   } catch (error) {
     elements.resultBody.innerHTML = `
       <article class="empty-state">
@@ -524,6 +565,7 @@ async function loadStartData() {
       </article>
     `;
     setStatus("Error", "error");
+    setResultsMeta("Startup failed. The dashboard could not load its initial data.");
   } finally {
     setBusy(false);
   }
@@ -532,11 +574,15 @@ async function loadStartData() {
 async function refreshAgents() {
   setBusy(true);
   setStatus("Refreshing", "loading");
+  setResultsMeta("Refreshing the available scout agents.");
 
   try {
     const payload = await fetchJson("/api/agents");
     populateAgents(payload.agents || [], selectedAgentDir() || state.defaultAgentDir);
     setStatus("Ready", "idle");
+    if ((payload.agents || []).length) {
+      setResultsMeta("Agent list refreshed. Pick a version and run a workflow.");
+    }
   } catch (error) {
     setStatus("Error", "error");
     elements.resultBody.innerHTML = `
@@ -545,6 +591,7 @@ async function refreshAgents() {
         <p>${escapeHtml(error.message)}</p>
       </article>
     `;
+    setResultsMeta("Agent refresh failed. Check the message below and try again.");
   } finally {
     setBusy(false);
   }
@@ -555,21 +602,26 @@ async function importFile(file, target) {
     return;
   }
   target.value = await file.text();
+  setResultsMeta(`${file.name} imported into the current workflow.`);
 }
 
 elements.agentSelect.addEventListener("change", updateAgentMeta);
 elements.loadSamplesBtn.addEventListener("click", loadSamplesIntoFields);
 elements.samplePromptBtn.addEventListener("click", () => {
   elements.promptSearchInput.value = state.sampleSearchPrompt;
+  setResultsMeta("Sample market brief loaded.");
 });
 elements.sampleSingleBtn.addEventListener("click", () => {
   elements.singleParcelInput.value = state.sampleSingleParcelText;
+  setResultsMeta("Sample parcel notes loaded.");
 });
 elements.sampleCsvBtn.addEventListener("click", () => {
   elements.csvInput.value = state.sampleParcelCsv;
+  setResultsMeta("Sample parcel CSV loaded.");
 });
 elements.sampleWatchBtn.addEventListener("click", () => {
   elements.watchlistInput.value = state.sampleWatchlist;
+  setResultsMeta("Sample watchlist loaded.");
 });
 elements.refreshAgentsBtn.addEventListener("click", refreshAgents);
 elements.csvFileInput.addEventListener("change", async (event) => {
