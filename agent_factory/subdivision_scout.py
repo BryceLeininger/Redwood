@@ -811,7 +811,11 @@ def _normalize_search_result_url(value: str) -> str:
 
 def _extract_acres(text: str) -> float | None:
     candidates = []
-    for pattern in (r"\b(\d+(?:\.\d+)?)\s*acres?\b", r"\b(\d+(?:\.\d+)?)\s*-\s*acre\b"):
+    for pattern in (
+        r"\b(\d+(?:\.\d+)?)\s*acres?\b",
+        r"\b(\d+(?:\.\d+)?)\s*-\s*acre\b",
+        r"\bacres?\s*[:=]\s*(\d+(?:\.\d+)?)\b",
+    ):
         for match in re.finditer(pattern, text, flags=re.IGNORECASE):
             try:
                 value = float(match.group(1))
@@ -825,6 +829,8 @@ def _extract_acres(text: str) -> float | None:
 def _extract_lots(text: str) -> int | None:
     candidates = []
     patterns = (
+        r"\bplanned\s+lots?\s*[:=]\s*(\d{1,4})\b",
+        r"\b(?:lots?|homes|units)\s*[:=]\s*(\d{1,4})\b",
         r"\b(\d{1,4})\s*-\s*lots?\b",
         r"\b(\d{1,4})\s+lots?\b",
         r"\b(\d{1,4})\s+(?:single[- ]family|detached|sfd|sfr)\s+(?:lots|homes|units)\b",
@@ -840,6 +846,233 @@ def _extract_lots(text: str) -> int | None:
             if 2 <= value <= 2000:
                 candidates.append(value)
     return max(candidates) if candidates else None
+
+
+def _clamp(value: float, lower: float = 0.0, upper: float = 100.0) -> float:
+    return max(lower, min(upper, value))
+
+
+def _extract_density_du_per_acre(acres: float | None, lots: int | None) -> float | None:
+    if acres is None or lots is None or acres <= 0:
+        return None
+    return round(lots / acres, 2)
+
+
+def _contains_any(lowered: str, phrases: Sequence[str]) -> bool:
+    return any(phrase in lowered for phrase in phrases)
+
+
+def _infer_opportunity_profile(lowered: str, preferred_stage: str | None = None) -> str:
+    if _contains_any(lowered, FINISHED_LOT_TERMS):
+        return "finished_lot_delivery"
+    if _contains_any(lowered, NEAR_TERM_ENTITLEMENT_TERMS) or preferred_stage == "approved_recently":
+        return "near_term_entitled_land"
+    if _contains_any(lowered, RAW_LAND_TERMS) and not _contains_any(lowered, ACTIVE_ENTITLEMENT_TERMS):
+        return "raw_land"
+    if _contains_any(lowered, ACTIVE_ENTITLEMENT_TERMS) or preferred_stage == "approaching_approval":
+        return "active_entitlement_land"
+    if _contains_any(lowered, EARLY_STAGE_TERMS):
+        return "early_stage_land"
+    return "subdivision_candidate"
+
+
+def _utility_readiness_score(lowered: str) -> float:
+    score = 0.0
+    if any(phrase in lowered for phrase in ("sewer capacity confirmed", "water capacity confirmed", "utilities at site")):
+        score += 12.0
+    elif "existing utilities" in lowered:
+        score += 10.0
+    elif "utilities stubbed" in lowered:
+        score += 9.0
+    elif "water and sewer nearby" in lowered or ("sewer nearby" in lowered and "water nearby" in lowered):
+        score += 7.0
+    else:
+        if "sewer nearby" in lowered:
+            score += 4.0
+        if "water nearby" in lowered:
+            score += 3.0
+
+    if "backbone utilities" in lowered:
+        score += 4.0
+    return min(score, 16.0)
+
+
+def _market_demand_score(lowered: str) -> float:
+    weights = {
+        "adjacent to existing subdivision": 6.0,
+        "existing subdivision": 4.0,
+        "existing rooftops": 5.0,
+        "strong builder interest": 6.0,
+        "builder activity": 5.0,
+        "builder comps": 4.0,
+        "strong school demand": 4.0,
+        "school demand": 3.0,
+        "employment center": 4.0,
+        "growth corridor": 4.0,
+        "collector road": 2.0,
+        "arterial frontage": 3.0,
+        "infill": 4.0,
+        "supply constrained": 3.0,
+        "entry-level builder": 4.0,
+    }
+    score = sum(weight for phrase, weight in weights.items() if phrase in lowered)
+    return min(score, 18.0)
+
+
+def _yield_score(lowered: str, acres: float | None, lots: int | None, density: float | None) -> float:
+    score = 0.0
+    if lots is not None:
+        if lots >= 150:
+            score += 12.0
+        elif lots >= 80:
+            score += 10.0
+        elif lots >= 40:
+            score += 8.0
+        elif lots >= 20:
+            score += 5.0
+        elif lots >= 10:
+            score += 2.0
+        else:
+            score -= 2.0
+
+    if acres is not None:
+        if 4.0 <= acres <= 40.0:
+            score += 4.0
+        elif acres < 2.0:
+            score -= 4.0
+
+    if density is not None:
+        if 1.8 <= density <= 8.5:
+            score += 6.0
+        elif density < 1.0:
+            score -= 6.0
+        elif density > 12.0 and _contains_any(lowered, SINGLE_FAMILY_TERMS):
+            score -= 4.0
+
+    return max(-10.0, min(score, 18.0))
+
+
+def _model_support_score(model_prediction: str, model_confidence: float | None) -> float:
+    baseline = {
+        "high_probability": 65.0,
+        "not_ready": 35.0,
+    }.get(model_prediction, 50.0)
+    if model_confidence is None:
+        return baseline
+    confidence_pct = _clamp(max(0.0, min(model_confidence, 1.0)) * 100.0)
+    return round((baseline * 0.55) + (confidence_pct * 0.45), 1)
+
+
+def _build_homebuilder_rationale(
+    recommendation: str,
+    profile: str,
+    builder_fit_score: float,
+    execution_readiness_score: float,
+    positive_hits: Sequence[str],
+    risk_hits: Sequence[str],
+    acres: float | None,
+    lots: int | None,
+    density: float | None,
+) -> str:
+    fragments: List[str] = [
+        f"Profile: {OPPORTUNITY_PROFILE_LABELS.get(profile, profile.replace('_', ' '))}.",
+        f"Builder fit {builder_fit_score:.1f}/100 and execution readiness {execution_readiness_score:.1f}/100.",
+    ]
+
+    scale_bits: List[str] = []
+    if acres is not None:
+        scale_bits.append(f"{acres} acres")
+    if lots is not None:
+        scale_bits.append(f"{lots} lots")
+    if density is not None:
+        scale_bits.append(f"{density} du/ac")
+    if scale_bits:
+        fragments.append("Scale: " + " | ".join(scale_bits) + ".")
+
+    if positive_hits:
+        fragments.append("Strengths: " + ", ".join(positive_hits[:4]) + ".")
+    if risk_hits:
+        fragments.append("Risks: " + ", ".join(risk_hits[:4]) + ".")
+
+    if recommendation == "prioritize":
+        fragments.append("This looks like a credible near-term homebuilder opportunity.")
+    elif recommendation == "watch":
+        fragments.append("This can work for a homebuilder, but it still needs targeted diligence or timing clarity.")
+    else:
+        fragments.append("This currently reads as too long-dated or too complex for an efficient homebuilder pursuit.")
+    return " ".join(fragments)
+
+
+def _assess_homebuilder_opportunity(
+    text: str,
+    *,
+    model_prediction: str = "",
+    model_confidence: float | None = None,
+    preferred_stage: str | None = None,
+    extracted_acres: float | None = None,
+    extracted_lots: int | None = None,
+) -> OpportunityAssessment:
+    lowered = text.lower()
+    positive_hits = _extract_signal_hits(text, POSITIVE_SIGNALS)
+    risk_hits = _extract_signal_hits(text, RISK_SIGNALS)
+    acres = extracted_acres if extracted_acres is not None else _extract_acres(text)
+    lots = extracted_lots if extracted_lots is not None else _extract_lots(text)
+    density = _extract_density_du_per_acre(acres, lots)
+    profile = _infer_opportunity_profile(lowered, preferred_stage=preferred_stage)
+
+    positive_bonus = min(22.0, sum(POSITIVE_SIGNALS[item] for item in positive_hits[:5]) / 3.3)
+    risk_penalty = min(36.0, sum(RISK_SIGNALS[item] for item in risk_hits[:5]) / 2.7)
+    fatal_penalty = 12.0 if any(term in risk_hits for term in FATAL_RISK_TERMS) else 0.0
+    utility_score = _utility_readiness_score(lowered)
+    demand_score = _market_demand_score(lowered)
+    yield_score = _yield_score(lowered, acres, lots, density)
+    execution_bonus = {
+        "finished_lot_delivery": 28.0,
+        "near_term_entitled_land": 20.0,
+        "active_entitlement_land": 10.0,
+        "subdivision_candidate": 6.0,
+        "early_stage_land": 0.0,
+        "raw_land": -10.0,
+    }.get(profile, 4.0)
+
+    builder_fit_score = round(
+        _clamp(38.0 + utility_score + demand_score + yield_score + positive_bonus - (risk_penalty * 0.8)),
+        1,
+    )
+    execution_readiness_score = round(
+        _clamp(32.0 + execution_bonus + (utility_score * 1.4) + (positive_bonus * 0.35) - risk_penalty - fatal_penalty),
+        1,
+    )
+    model_support = _model_support_score(model_prediction, model_confidence)
+    priority_score = round(
+        _clamp((builder_fit_score * 0.55) + (execution_readiness_score * 0.35) + (model_support * 0.10)),
+        1,
+    )
+    recommendation = _recommendation_from_score(priority_score)
+    rationale = _build_homebuilder_rationale(
+        recommendation=recommendation,
+        profile=profile,
+        builder_fit_score=builder_fit_score,
+        execution_readiness_score=execution_readiness_score,
+        positive_hits=positive_hits,
+        risk_hits=risk_hits,
+        acres=acres,
+        lots=lots,
+        density=density,
+    )
+    return OpportunityAssessment(
+        priority_score=priority_score,
+        builder_fit_score=builder_fit_score,
+        execution_readiness_score=execution_readiness_score,
+        recommendation=recommendation,
+        opportunity_profile=profile,
+        extracted_acres=acres,
+        extracted_lots=lots,
+        density_du_per_acre=density,
+        positive_hits=positive_hits,
+        risk_hits=risk_hits,
+        rationale=rationale,
+    )
 
 
 def _area_tokens_for_prompt(area: str) -> List[str]:
