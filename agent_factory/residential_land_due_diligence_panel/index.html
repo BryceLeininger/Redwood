@@ -3,8 +3,13 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#1f4d4f">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>Residential Land Due Diligence Studio</title>
-  <link rel="stylesheet" href="/diligence/styles.css">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="diligence/assets/icon-180.png">
+  <link rel="stylesheet" href="diligence/styles.css?v=__ASSET_VERSION__">
 </head>
 <body>
   <div class="terrain"></div>
@@ -192,7 +197,7 @@
           <div class="action-stack">
             <button type="button" class="primary-button" id="runAssessment">Assess diligence posture</button>
             <button type="button" class="secondary-button" id="copyBrief">Copy diligence brief</button>
-            <button type="button" class="secondary-button" id="exportJson">Export JSON snapshot</button>
+            <button type="button" class="secondary-button" id="exportJson">Download deal file</button>
             <button type="button" class="ghost-button" id="clearForm">Clear structured draft</button>
           </div>
         </section>
@@ -313,6 +318,6 @@
     </section>
   </div>
 
-  <script src="/diligence/app.js"></script>
+  <script src="diligence/app.js?v=__ASSET_VERSION__"></script>
 </body>
 </html>
