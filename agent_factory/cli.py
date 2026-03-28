@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Sequence
 
+from .building_fee_budgeter import BuildingFeeBudgeter
 from .factory_agent import AgentFactory
 from .integrations.microsoft_graph import GraphAuthConfig, MicrosoftGraphClient
 from .land_underwriter import LandDealUnderwriter
@@ -85,6 +86,20 @@ def _build_parser() -> argparse.ArgumentParser:
     land_underwrite_parser.add_argument(
         "--agent-dir",
         help="Optional LandDealUnderwriter generated agent directory for the text-based pricing signal.",
+    )
+
+    fee_budget_parser = subparsers.add_parser(
+        "fee-budget",
+        help="Build a deterministic building and impact fee budget from structured agency schedules.",
+    )
+    fee_budget_parser.add_argument(
+        "--request-file",
+        required=True,
+        help="Path to a JSON file containing one fee budget request object or a list of request objects.",
+    )
+    fee_budget_parser.add_argument(
+        "--agent-dir",
+        help="Optional BuildingImpactFeeBudgetAdvisor generated agent directory for the readiness signal.",
     )
 
     subdivision_screen_parser = subparsers.add_parser(
@@ -482,6 +497,37 @@ def _handle_land_underwrite(args: argparse.Namespace) -> None:
         result = underwriter.underwrite_many(payload)
     elif isinstance(payload, dict):
         result = underwriter.underwrite(payload)
+    else:
+        raise ValueError("Request JSON must be an object or an array of objects.")
+
+    print(json.dumps(result, indent=2))
+
+
+def _handle_fee_budget(args: argparse.Namespace) -> None:
+    request_path = Path(args.request_file)
+    if not request_path.exists():
+        raise ValueError(f"Request file was not found: {request_path}")
+
+    try:
+        payload = json.loads(request_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as error:
+        raise ValueError(f"Request JSON is invalid: {error.msg}") from error
+
+    specialist = None
+    resolved_agent_dir: Path | None = None
+    if args.agent_dir:
+        resolved_agent_dir = Path(args.agent_dir).resolve()
+    else:
+        resolved_agent_dir = _latest_registered_agent_dir(Path("generated_agents"), "BuildingImpactFeeBudgetAdvisor")
+
+    if resolved_agent_dir is not None and resolved_agent_dir.exists():
+        specialist = AgentFactory().load_specialist_agent(resolved_agent_dir)
+
+    budgeter = BuildingFeeBudgeter(specialist)
+    if isinstance(payload, list):
+        result = budgeter.budget_many(payload)
+    elif isinstance(payload, dict):
+        result = budgeter.budget(payload)
     else:
         raise ValueError("Request JSON must be an object or an array of objects.")
 
@@ -919,6 +965,8 @@ def main(argv: Sequence[str] | None = None) -> None:
             _handle_list(args)
         elif args.command == "land-underwrite":
             _handle_land_underwrite(args)
+        elif args.command == "fee-budget":
+            _handle_fee_budget(args)
         elif args.command == "subdivision-scout-screen":
             _handle_subdivision_scout_screen(args)
         elif args.command == "subdivision-scout-web-watch":

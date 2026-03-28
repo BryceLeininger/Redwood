@@ -1,0 +1,25 @@
+input,target
+"Complete city building fee schedule with effective date, source URL, valuation basis, unit count, square footage, school district confirmation, and utility agency fee tables attached.",ready_to_budget
+"Budget packet includes official permit, traffic, park, sewer, and school fee schedules plus confirmed connection counts and current schedule dates.",ready_to_budget
+"All applicable agencies are identified, formulas are keyed from the latest adopted fee resolutions, and the project valuation and dwelling unit totals are final.",ready_to_budget
+"Impact fee workbook includes city, county, fire, water, sewer, and school district schedules with current effective dates and no missing quantities.",ready_to_budget
+"Building permit budget has valuation, plan check formula, CALGreen fees, meter counts, and agency source references for every line item.",ready_to_budget
+"Jurisdiction memo confirms annexation status, service provider boundaries, and the exact agencies collecting building, utility, and school fees.",ready_to_budget
+"Fee budget package has final land use counts, tract map phase counts, and official fee schedules for each district that applies to the project.",ready_to_budget
+"All source documents are current and the analyst already reconciled city fee tables against agency web postings and adopted resolutions.",ready_to_budget
+"School district is still unknown even though city permit and utility fee schedules are attached.",needs_source_confirmation
+"City schedule is current but the water district serving the parcel has not been confirmed.",needs_source_confirmation
+"Plan check and permit formulas are known, but the team still needs the latest traffic and park impact fee resolution.",needs_source_confirmation
+"Project unit count is settled, yet the fee packet is missing sewer capacity charges and current school fee rates.",needs_source_confirmation
+"The analyst has fee schedules from last year and needs confirmation that no updated ordinance took effect this quarter.",needs_source_confirmation
+"Budget assumptions are mostly complete, but meter size and fire sprinkler fee applicability still need agency confirmation.",needs_source_confirmation
+"County impact fees were captured, although the parcel may actually sit inside city limits and agency jurisdiction needs to be reconciled.",needs_source_confirmation
+"The fee worksheet references old PDFs without an adoption date for building, drainage, and transportation impact charges.",needs_source_confirmation
+"Only the city name was provided with no official fee schedules, no unit counts, and no valuation.",missing_critical_inputs
+"Need a perfect fee budget for a project somewhere in California but no parcel, district, or agency information is available.",missing_critical_inputs
+"Analyst wants permit and impact fees but did not provide building valuation, square footage, or number of units.",missing_critical_inputs
+"No school district, no utility provider, and no source documents were identified for the fee budget request.",missing_critical_inputs
+"The request asks for exact jurisdictional fees but contains only a broker flyer and rough lot count assumptions.",missing_critical_inputs
+"Utility connection fees cannot be priced because connection count, meter size, and provider are all missing.",missing_critical_inputs
+"Building permit budget is blocked because the project scope, valuation basis, and adopted fee schedule are absent.",missing_critical_inputs
+"Impact fee budget request has no agency list, no schedule effective dates, and no formulas from official sources.",missing_critical_inputs

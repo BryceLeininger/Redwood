@@ -79,6 +79,7 @@ You can rename these with `--input-column` and `--target-column`.
 This project includes a helper script that creates:
 - `OutlookEmailManager`
 - `LandDealUnderwriter`
+- `BuildingImpactFeeBudgetAdvisor`
 - `ResidentialLandDueDiligenceAdvisor`
 - `HousingMarketResearcher`
 - `ResidentialSubdivisionScout`
@@ -123,6 +124,34 @@ Desktop shortcut install:
 ```bash
 install_land_underwriter_desktop_shortcut.bat
 ```
+
+## Building And Impact Fee Budgeting
+
+`BuildingImpactFeeBudgetAdvisor` is a specialist agent focused on fee-budget intake quality, source validation, and agency coverage for building permit and impact fee budgets.
+
+Use the deterministic fee workflow when you already have current agency fee schedules or formulas and want a reproducible budget:
+
+```bash
+python -m agent_factory.cli fee-budget \
+  --request-file agent_factory/examples/building_fee_budgeter/sample_request.json
+```
+
+Create the specialist agent:
+
+```bash
+python -m agent_factory.cli create-agent \
+  --name "BuildingImpactFeeBudgetAdvisor" \
+  --description "Validates building and impact fee intake packets, flags missing agency inputs, and supports deterministic fee budget assembly." \
+  --topic "Building and Impact Fee Budgeting" \
+  --task-type classification \
+  --dataset agent_factory/examples/building_fee_budgeter/training.csv \
+  --knowledge agent_factory/examples/building_fee_budgeter/knowledge \
+  --output-dir generated_agents
+```
+
+The fee request schema is documented by example in:
+
+`agent_factory/examples/building_fee_budgeter/sample_request.json`
 
 ## Residential Land Due Diligence Advisor
 

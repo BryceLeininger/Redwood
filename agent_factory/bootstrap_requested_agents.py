@@ -48,6 +48,19 @@ def create_requested_agents(output_dir: Path | str = "generated_agents") -> list
         },
         {
             "blueprint": AgentBlueprint(
+                name="BuildingImpactFeeBudgetAdvisor",
+                description=(
+                    "Validates building and impact fee intake packets, flags missing agency inputs, "
+                    "and supports deterministic fee budget assembly."
+                ),
+                topic="Building and Impact Fee Budgeting",
+                task_type="classification",
+            ),
+            "dataset": root / "examples" / "building_fee_budgeter" / "training.csv",
+            "knowledge": [root / "examples" / "building_fee_budgeter" / "knowledge"],
+        },
+        {
+            "blueprint": AgentBlueprint(
                 name="HousingMarketResearcher",
                 description="Researches housing markets and classifies market momentum conditions.",
                 topic="Housing Market Research",
