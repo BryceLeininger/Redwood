@@ -98,7 +98,14 @@ def _repo_root() -> Path:
 
 
 def _sample_request_path() -> Path:
-    return _repo_root() / "agent_factory" / "examples" / "land_underwriter" / "sample_request.json"
+    return _repo_root() / "agent_factory" / "examples" / "land_underwriter" / "starter_deal.landdeal"
+
+
+def _deal_display_name(path: Path | None) -> str:
+    if path is None:
+        return "Unsaved Deal"
+    stem = path.stem.replace("_", " ").replace("-", " ").strip()
+    return stem.title() or "Deal"
 
 
 def _latest_land_underwriter_agent_dir(output_root: Path) -> Path | None:
@@ -226,7 +233,7 @@ class ScrollableFrame(tk.Frame):
 class LandUnderwriterDesktopApp:
     def __init__(self) -> None:
         self.root = tk.Tk()
-        self.root.title("Land Deal Underwriter")
+        self.root.title("Land Acquisition Studio")
         self.root.geometry("1540x940")
         self.root.minsize(1180, 760)
         self.root.configure(bg=COLORS["bg"])
@@ -238,6 +245,7 @@ class LandUnderwriterDesktopApp:
         self.refresh_job: str | None = None
         self.run_inflight = False
         self.current_result: Any = None
+        self.hidden_payload_cache: Any = None
 
         self.form_vars: dict[str, tk.Variable] = {}
         self.series_rows: list[dict[str, tk.Variable]] = []
@@ -287,15 +295,12 @@ class LandUnderwriterDesktopApp:
 
         self.builder_tab = tk.Frame(self.notebook, bg=COLORS["bg"])
         self.results_tab = tk.Frame(self.notebook, bg=COLORS["bg"])
-        self.json_tab = tk.Frame(self.notebook, bg=COLORS["bg"])
 
-        self.notebook.add(self.builder_tab, text="Deal Builder")
-        self.notebook.add(self.results_tab, text="Results Dashboard")
-        self.notebook.add(self.json_tab, text="Advanced JSON")
+        self.notebook.add(self.builder_tab, text="Deal Workspace")
+        self.notebook.add(self.results_tab, text="Decision Center")
 
         self._build_builder_tab()
         self._build_results_tab()
-        self._build_json_tab()
 
     def _build_header(self, parent: tk.Widget) -> None:
         header = tk.Frame(parent, bg=COLORS["navy"], padx=22, pady=20)
