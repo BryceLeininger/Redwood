@@ -45,10 +45,10 @@ def run_analysis(
         document_analyses.append(analysis)
 
     key_risks = aggregate_risks(document_analyses)
-    missing_items = identify_missing_items(documents)
+    missing_items = identify_missing_items(documents, document_analyses)
     entitlement_status = infer_entitlement_status(documents)
     category_rollup = build_category_rollup(document_analyses)
-    seller_questions = collect_seller_questions(document_analyses, missing_items)
+    seller_questions = collect_seller_questions(document_analyses, missing_items, key_risks)
     executive_summary = build_executive_summary_draft(
         deal_name=deal_name,
         document_analyses=document_analyses,

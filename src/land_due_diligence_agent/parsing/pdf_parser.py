@@ -5,12 +5,18 @@ from __future__ import annotations
 from pathlib import Path
 
 from pypdf import PdfReader
+from pypdf.errors import DependencyError
 
 
 def extract_pdf_text(path: Path) -> tuple[str, dict[str, int], list[str]]:
     """Extract page text from a PDF using text-layer parsing only."""
 
-    reader = PdfReader(str(path))
+    try:
+        reader = PdfReader(str(path))
+    except DependencyError as exc:  # pragma: no cover - dependency/environment issue
+        raise RuntimeError(
+            "PDF requires AES decryption support. Install cryptography>=3.1 to parse encrypted PDFs."
+        ) from exc
     warnings: list[str] = []
     pages: list[str] = []
 

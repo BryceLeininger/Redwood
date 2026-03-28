@@ -32,7 +32,7 @@ def write_markdown_outputs(
     run_summary.output_files_created = planned_output_names
 
     files: list[tuple[Path, str]] = [
-        (output_dir / "00_run_summary.md", _build_run_summary_markdown(run_summary)),
+        (output_dir / "00_run_summary.md", _build_run_summary_markdown(run_summary, synthesis)),
     ]
 
     if synthesis is not None:
@@ -40,7 +40,7 @@ def write_markdown_outputs(
             [
                 (
                     output_dir / "01_executive_summary.md",
-                    _build_executive_summary_markdown(synthesis, run_summary.llm_provider),
+                    _build_executive_summary_markdown(synthesis, run_summary.llm_provider, run_summary),
                 ),
                 (output_dir / "02_key_risks.md", _build_key_risks_markdown(synthesis)),
                 (output_dir / "03_recommended_reading_order.md", _build_reading_order_markdown(synthesis)),
@@ -60,7 +60,10 @@ def write_markdown_outputs(
     return written_paths
 
 
-def _build_run_summary_markdown(run_summary: RunSummary) -> str:
+def _build_run_summary_markdown(
+    run_summary: RunSummary,
+    synthesis: DealSynthesis | None,
+) -> str:
     lines = [
         "# Run Summary",
         "",
@@ -78,9 +81,39 @@ def _build_run_summary_markdown(run_summary: RunSummary) -> str:
         f"- Parsed successfully: {run_summary.files_parsed_successfully}",
         f"- Failed: {run_summary.files_failed}",
         "",
-        "## File Results",
-        "",
     ]
+
+    ocr_results = _ocr_affected_results(run_summary)
+    if ocr_results:
+        lines.extend(
+            [
+                "## OCR / Extraction Watchlist",
+                "",
+                f"- OCR-related warnings affected {len(ocr_results)} file(s).",
+            ]
+        )
+        lines.extend(f"- `{result.relative_path}`" for result in ocr_results)
+        lines.append("")
+
+    if synthesis is not None:
+        confidence_counts = _confidence_counts(synthesis)
+        lines.extend(
+            [
+                "## Confidence Snapshot",
+                "",
+                f"- High confidence documents: {confidence_counts['high']}",
+                f"- Medium confidence documents: {confidence_counts['medium']}",
+                f"- Low confidence documents: {confidence_counts['low']}",
+                "",
+            ]
+        )
+
+    lines.extend(
+        [
+            "## File Results",
+            "",
+        ]
+    )
 
     if not run_summary.file_results:
         lines.append("- No file-level processing results were recorded.")
@@ -103,14 +136,28 @@ def _build_run_summary_markdown(run_summary: RunSummary) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _build_executive_summary_markdown(synthesis: DealSynthesis, provider_name: str) -> str:
-    return (
-        f"# Executive Summary\n\n"
-        f"**Deal:** {synthesis.deal_name}\n\n"
-        f"**Provider:** {provider_name}\n\n"
-        f"**Entitlement Status:** {synthesis.entitlement_status}\n\n"
-        f"{synthesis.executive_summary}\n"
-    )
+def _build_executive_summary_markdown(
+    synthesis: DealSynthesis,
+    provider_name: str,
+    run_summary: RunSummary,
+) -> str:
+    limitations = _build_known_limitations(run_summary, synthesis)
+    lines = [
+        "# Executive Summary",
+        "",
+        f"**Deal:** {synthesis.deal_name}",
+        "",
+        f"**Provider:** {provider_name}",
+        "",
+        f"**Entitlement Status:** {synthesis.entitlement_status}",
+        "",
+        synthesis.executive_summary,
+        "",
+        "## Known Limitations Of This Run",
+        "",
+    ]
+    lines.extend(f"- {item}" for item in limitations)
+    return "\n".join(lines) + "\n"
 
 
 def _build_key_risks_markdown(synthesis: DealSynthesis) -> str:
@@ -136,6 +183,9 @@ def _build_reading_order_markdown(synthesis: DealSynthesis) -> str:
         lines.append(f"{index}. **{recommendation.title}** (`{recommendation.relative_path}`)")
         lines.append(f"   Priority Score: {recommendation.priority}")
         lines.append(f"   Reason: {recommendation.reason}")
+        lines.append(f"   Confidence: {recommendation.confidence}")
+        if recommendation.focus_areas:
+            lines.append(f"   Focus Areas: {', '.join(recommendation.focus_areas)}")
         lines.append("")
     return "\n".join(lines).rstrip() + "\n"
 
@@ -158,6 +208,9 @@ def _build_document_summaries_markdown(synthesis: DealSynthesis) -> str:
         lines.append(f"- File Type: `{analysis.document.extension}`")
         lines.append(f"- Reading Priority: {analysis.reading_priority}")
         lines.append(f"- Reading Rationale: {analysis.reading_reason}")
+        lines.append(f"- Confidence: {analysis.confidence} ({analysis.confidence_reason})")
+        if analysis.focus_areas:
+            lines.append(f"- Focus Areas: {', '.join(analysis.focus_areas)}")
         if analysis.document.warnings:
             lines.append(f"- Extraction Warnings: {'; '.join(analysis.document.warnings)}")
         lines.append("")
@@ -223,7 +276,34 @@ def _build_error_report_markdown(
 
     failed_results = [result for result in run_summary.file_results if result.status == "failed"]
     warning_results = [result for result in run_summary.file_results if result.warnings]
+    ocr_results = _ocr_affected_results(run_summary)
 
+    lines.append("## OCR / Low Confidence Documents")
+    lines.append("")
+    if ocr_results:
+        lines.extend(
+            f"- `{result.relative_path}`: {'; '.join(result.warnings)}"
+            for result in ocr_results
+        )
+    else:
+        lines.append("- No OCR-related warnings were recorded.")
+
+    if synthesis is not None:
+        low_confidence_docs = [
+            analysis
+            for analysis in synthesis.document_analyses
+            if analysis.confidence == "low"
+        ]
+        if low_confidence_docs:
+            lines.append("")
+            lines.append("## Low Confidence Review Targets")
+            lines.append("")
+            lines.extend(
+                f"- `{analysis.document.relative_path.as_posix()}`: {analysis.confidence_reason}"
+                for analysis in low_confidence_docs
+            )
+
+    lines.append("")
     lines.append("## Failed Files")
     lines.append("")
     if failed_results:
@@ -256,3 +336,55 @@ def _build_error_report_markdown(
         lines.append("No run-level errors, parse failures, or parser warnings were recorded.")
 
     return "\n".join(lines) + "\n"
+
+
+def _ocr_affected_results(run_summary: RunSummary) -> list:
+    return [
+        result
+        for result in run_summary.file_results
+        if any(_is_ocr_warning(warning) for warning in result.warnings)
+    ]
+
+
+def _is_ocr_warning(warning: str) -> bool:
+    warning_lower = warning.lower()
+    return (
+        "ocr fallback" in warning_lower
+        or "no pdf text extracted" in warning_lower
+        or "normalized text is empty" in warning_lower
+    )
+
+
+def _confidence_counts(synthesis: DealSynthesis) -> dict[str, int]:
+    counts = {"high": 0, "medium": 0, "low": 0}
+    for analysis in synthesis.document_analyses:
+        counts[analysis.confidence] += 1
+    return counts
+
+
+def _build_known_limitations(
+    run_summary: RunSummary,
+    synthesis: DealSynthesis,
+) -> list[str]:
+    limitations: list[str] = []
+
+    if run_summary.llm_provider == "heuristic":
+        limitations.append("This run used heuristic mode only; no OpenAI refinement was applied.")
+
+    ocr_results = _ocr_affected_results(run_summary)
+    if ocr_results:
+        limitations.append(f"OCR-related extraction warnings affected {len(ocr_results)} document(s).")
+
+    low_confidence_docs = [analysis for analysis in synthesis.document_analyses if analysis.confidence == "low"]
+    if low_confidence_docs:
+        limitations.append(
+            f"{len(low_confidence_docs)} document(s) were assessed at low confidence because extraction was incomplete or empty."
+        )
+
+    if synthesis.extraction_errors:
+        limitations.append(f"{len(synthesis.extraction_errors)} extraction error(s) were carried into analysis.")
+
+    if not limitations:
+        limitations.append("No major extraction limitations were recorded for this run.")
+
+    return limitations

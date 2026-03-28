@@ -35,6 +35,9 @@ class OutputWriterTests(unittest.TestCase):
             seller_questions=["What remediation is still outstanding?"],
             reading_priority=5,
             reading_reason="Contains high-priority environmental indicators.",
+            confidence="high",
+            confidence_reason="Text extraction was strong with no OCR-related warnings.",
+            focus_areas=["Environmental Risks"],
         )
         synthesis = DealSynthesis(
             deal_name="Demo Deal",
@@ -47,6 +50,8 @@ class OutputWriterTests(unittest.TestCase):
                     relative_path="memo.txt",
                     priority=5,
                     reason="Contains high-priority environmental indicators.",
+                    confidence="high",
+                    focus_areas=["Environmental Risks"],
                 )
             ],
             seller_questions=analysis.seller_questions,
@@ -80,6 +85,7 @@ class OutputWriterTests(unittest.TestCase):
             content = (output_dir / "01_executive_summary.md").read_text(encoding="utf-8")
             self.assertIn("Demo Deal", content)
             self.assertIn("heuristic", content)
+            self.assertIn("Known Limitations Of This Run", content)
             summary_content = (output_dir / "00_run_summary.md").read_text(encoding="utf-8")
             self.assertIn("Files found: 1", summary_content)
             self.assertIn("run.log", summary_content)
