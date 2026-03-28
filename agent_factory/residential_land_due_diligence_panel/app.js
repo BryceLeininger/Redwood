@@ -602,7 +602,7 @@ async function initialize() {
   setRunStatus("Loading panel state.");
 
   try {
-    const payload = await fetchJson("/api/start");
+    const payload = await fetchJson(`${API_BASE}/start`);
     state.startPayload = payload;
     populateAgents(payload.agents || [], payload.default_agent_dir);
     if (!questionInput.value) {
@@ -630,7 +630,7 @@ async function runAssessment() {
   setAppState("Working", "warning");
 
   try {
-    state.lastAssessment = await fetchJson("/api/intake", {
+    state.lastAssessment = await fetchJson(`${API_BASE}/intake`, {
       method: "POST",
       body: JSON.stringify(payload),
     });
@@ -655,7 +655,7 @@ async function askQuestion() {
   setAppState("Working", "warning");
 
   try {
-    state.lastQuestion = await fetchJson("/api/ask", {
+    state.lastQuestion = await fetchJson(`${API_BASE}/ask`, {
       method: "POST",
       body: JSON.stringify({
         agent_dir: selectedAgent(),
