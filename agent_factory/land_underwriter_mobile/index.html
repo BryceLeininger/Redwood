@@ -1,0 +1,417 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#153246" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <title>Land Acquisition Studio</title>
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="panel/assets/icon-180.png" />
+    <link rel="stylesheet" href="panel/styles.css?v=__ASSET_VERSION__" />
+  </head>
+  <body>
+    <div class="ambient ambient-one"></div>
+    <div class="ambient ambient-two"></div>
+
+    <div class="app-shell">
+      <header class="hero">
+        <div class="hero-copy">
+          <p class="eyebrow">Land Acquisition Studio</p>
+          <h1>Underwrite a homebuilder land deal from your phone without losing the depth.</h1>
+          <p class="hero-text">
+            Shape the basis, phase the takedown, benchmark the market, and walk into an acquisition meeting with a clean recommendation.
+          </p>
+        </div>
+
+        <div class="hero-actions">
+          <button type="button" class="secondary-button" id="loadStarterBtn">Load starter deal</button>
+          <button type="button" class="secondary-button" id="openDealBtn">Open deal file</button>
+          <button type="button" class="secondary-button" id="saveDealBtn">Save deal file</button>
+          <button type="button" class="ghost-button" id="copyMemoBtn">Copy IC memo</button>
+          <button type="button" class="primary-button" id="runUnderwriteBtn">Run underwrite</button>
+          <input id="dealFileInput" type="file" accept=".landdeal,application/json" hidden />
+        </div>
+
+        <div class="hero-ribbon">
+          <article class="hero-chip">
+            <span class="hero-chip-label">Installable</span>
+            <strong>Add this screen to your home screen</strong>
+          </article>
+          <article class="hero-chip">
+            <span class="hero-chip-label">Best for</span>
+            <strong>Builder land screens, pricing resets, and IC prep</strong>
+          </article>
+          <article class="hero-chip">
+            <span class="hero-chip-label">Outputs</span>
+            <strong>Recommendation, sensitivity, market view, memo</strong>
+          </article>
+        </div>
+      </header>
+
+      <section class="topline-grid">
+        <article class="glass-card">
+          <div class="card-topline">
+            <div>
+              <p class="section-kicker">Session</p>
+              <h2>Model and file</h2>
+            </div>
+            <span class="status-pill" id="appState" data-tone="idle">Loading</span>
+          </div>
+
+          <label>
+            <span class="field-label">Underwriter artifact</span>
+            <select id="agentSelect"></select>
+          </label>
+          <p class="field-hint" id="agentMeta">Checking for the latest LandDealUnderwriter artifact.</p>
+
+          <div class="mini-actions">
+            <button type="button" class="ghost-button" id="refreshAgentsBtn">Refresh model list</button>
+          </div>
+
+          <p class="field-hint" id="fileMeta">Starter deal ready.</p>
+          <p class="field-hint" id="runStatus">Waiting for a deal run.</p>
+        </article>
+
+        <article class="glass-card">
+          <div class="card-topline compact-topline">
+            <div>
+              <p class="section-kicker">Draft pulse</p>
+              <h2>Live snapshot</h2>
+            </div>
+          </div>
+          <div class="snapshot-grid" id="snapshotGrid"></div>
+        </article>
+      </section>
+
+      <section class="builder-stack">
+        <details class="builder-panel" open>
+          <summary>
+            <div>
+              <p class="section-kicker">Deal frame</p>
+              <h3>Identity, basis, and operating assumptions</h3>
+            </div>
+            <span class="summary-tag">Core inputs</span>
+          </summary>
+
+          <div class="panel-content">
+            <div class="form-grid three-up">
+              <label>
+                <span class="field-label">Community name</span>
+                <input data-root-field="community_name" type="text" placeholder="Community name" />
+              </label>
+              <label>
+                <span class="field-label">Division</span>
+                <input data-root-field="division" type="text" placeholder="Bay Area Division" />
+              </label>
+              <label>
+                <span class="field-label">Market</span>
+                <input data-root-field="market" type="text" placeholder="Sacramento, CA" />
+              </label>
+            </div>
+
+            <div class="form-grid three-up">
+              <label>
+                <span class="field-label">Gross acres</span>
+                <input data-root-field="gross_acres" inputmode="decimal" type="text" placeholder="20" />
+              </label>
+              <label>
+                <span class="field-label">Land close date</span>
+                <input data-root-field="land_close_date" type="date" />
+              </label>
+              <label>
+                <span class="field-label">Takedown structure</span>
+                <select data-root-field="takedown_structure">
+                  <option value="bulk">Bulk</option>
+                  <option value="takedown">Takedown</option>
+                  <option value="rolling">Rolling</option>
+                </select>
+              </label>
+            </div>
+
+            <div class="form-grid three-up">
+              <label>
+                <span class="field-label">Land price / lot</span>
+                <input data-root-field="land_purchase_price_per_lot" inputmode="decimal" type="text" placeholder="67500" />
+              </label>
+              <label>
+                <span class="field-label">Broker + closing costs</span>
+                <input data-root-field="land_brokerage_and_closing_costs_total" inputmode="decimal" type="text" placeholder="35000" />
+              </label>
+              <label>
+                <span class="field-label">Earnest deposit</span>
+                <input data-root-field="earnest_money_deposit" inputmode="decimal" type="text" placeholder="500000" />
+              </label>
+            </div>
+
+            <div class="form-grid three-up">
+              <label class="toggle-field">
+                <span class="field-label">Deposit credits at close</span>
+                <input data-root-field="deposit_credit_at_close" type="checkbox" />
+              </label>
+              <label>
+                <span class="field-label">Land development</span>
+                <input data-root-field="land_development_cost_total" inputmode="decimal" type="text" placeholder="10372353" />
+              </label>
+              <label>
+                <span class="field-label">Project management</span>
+                <input data-root-field="project_management_cost_total" inputmode="decimal" type="text" placeholder="114160" />
+              </label>
+            </div>
+
+            <div class="form-grid three-up">
+              <label>
+                <span class="field-label">Other land costs</span>
+                <input data-root-field="other_land_costs_total" inputmode="decimal" type="text" placeholder="244866" />
+              </label>
+              <label>
+                <span class="field-label">Architecture + engineering</span>
+                <input data-root-field="architecture_engineering_total" inputmode="decimal" type="text" placeholder="219375" />
+              </label>
+              <label>
+                <span class="field-label">Indirect field overhead / month</span>
+                <input data-root-field="indirect_field_overhead_per_month" inputmode="decimal" type="text" placeholder="73982.5" />
+              </label>
+            </div>
+
+            <div class="form-grid three-up">
+              <label>
+                <span class="field-label">Capitalized marketing total</span>
+                <input data-root-field="capitalized_marketing_total" inputmode="decimal" type="text" placeholder="414300" />
+              </label>
+              <label>
+                <span class="field-label">Other house costs / unit</span>
+                <input data-root-field="other_house_costs_per_unit" inputmode="decimal" type="text" placeholder="19840" />
+              </label>
+              <label>
+                <span class="field-label">Sales commission %</span>
+                <input data-root-field="sales_commission_pct" inputmode="decimal" type="text" placeholder="2.37" />
+              </label>
+            </div>
+
+            <div class="form-grid three-up">
+              <label>
+                <span class="field-label">Corporate charge %</span>
+                <input data-root-field="corporate_charge_pct" inputmode="decimal" type="text" placeholder="3.77" />
+              </label>
+              <label>
+                <span class="field-label">Home sale excise tax %</span>
+                <input data-root-field="home_sale_excise_tax_pct" inputmode="decimal" type="text" placeholder="0" />
+              </label>
+              <label>
+                <span class="field-label">Monthly absorption</span>
+                <input data-root-field="monthly_absorption" inputmode="decimal" type="text" placeholder="3.1" />
+              </label>
+            </div>
+
+            <div class="form-grid three-up">
+              <label>
+                <span class="field-label">Build cycle months</span>
+                <input data-root-field="build_cycle_months" inputmode="numeric" type="text" placeholder="5" />
+              </label>
+              <label>
+                <span class="field-label">Months to first home start</span>
+                <input data-root-field="months_to_first_home_start" inputmode="numeric" type="text" placeholder="6" />
+              </label>
+              <label>
+                <span class="field-label">Months to sales open</span>
+                <input data-root-field="months_to_sales_open" inputmode="numeric" type="text" placeholder="9" />
+              </label>
+            </div>
+          </div>
+        </details>
+
+        <details class="builder-panel">
+          <summary>
+            <div>
+              <p class="section-kicker">Product mix</p>
+              <h3>Series, pricing, and vertical cost</h3>
+            </div>
+            <span class="summary-tag">Live row builder</span>
+          </summary>
+
+          <div class="panel-content">
+            <div class="section-actions">
+              <button type="button" class="secondary-button" data-add-row="product_series">Add product series</button>
+            </div>
+            <div id="productSeriesList" class="row-list"></div>
+          </div>
+        </details>
+
+        <details class="builder-panel">
+          <summary>
+            <div>
+              <p class="section-kicker">Phasing</p>
+              <h3>Land takedown schedule</h3>
+            </div>
+            <span class="summary-tag">Months from close</span>
+          </summary>
+
+          <div class="panel-content">
+            <div class="section-actions">
+              <button type="button" class="secondary-button" data-add-row="schedule_phases">Add phase</button>
+            </div>
+            <div id="schedulePhaseList" class="row-list"></div>
+          </div>
+        </details>
+
+        <details class="builder-panel">
+          <summary>
+            <div>
+              <p class="section-kicker">Market check</p>
+              <h3>Competitors and resale support</h3>
+            </div>
+            <span class="summary-tag">CMA layer</span>
+          </summary>
+
+          <div class="panel-content">
+            <div class="split-panel">
+              <div>
+                <div class="section-actions">
+                  <h4>Competitor communities</h4>
+                  <button type="button" class="secondary-button" data-add-row="competitor_projects">Add competitor</button>
+                </div>
+                <div id="competitorList" class="row-list"></div>
+              </div>
+
+              <div>
+                <div class="section-actions">
+                  <h4>Resale comps</h4>
+                  <button type="button" class="secondary-button" data-add-row="resale_comps">Add resale comp</button>
+                </div>
+                <div id="resaleList" class="row-list"></div>
+              </div>
+            </div>
+          </div>
+        </details>
+
+        <details class="builder-panel">
+          <summary>
+            <div>
+              <p class="section-kicker">Decision rules</p>
+              <h3>Targets, downside, and notes</h3>
+            </div>
+            <span class="summary-tag">Risk frame</span>
+          </summary>
+
+          <div class="panel-content">
+            <div class="form-grid three-up">
+              <label>
+                <span class="field-label">Target gross margin %</span>
+                <input data-root-field="target_gross_margin_pct" inputmode="decimal" type="text" placeholder="21" />
+              </label>
+              <label>
+                <span class="field-label">Target pre-G&amp;A %</span>
+                <input data-root-field="target_pre_gna_margin_pct" inputmode="decimal" type="text" placeholder="15" />
+              </label>
+              <label>
+                <span class="field-label">Target IRR %</span>
+                <input data-root-field="target_irr_pct" inputmode="decimal" type="text" placeholder="20" />
+              </label>
+            </div>
+
+            <div class="form-grid three-up">
+              <label>
+                <span class="field-label">Downside price delta %</span>
+                <input data-root-field="downside_sales_price_delta_pct" inputmode="decimal" type="text" placeholder="-5" />
+              </label>
+              <label>
+                <span class="field-label">Downside cost delta %</span>
+                <input data-root-field="downside_cost_delta_pct" inputmode="decimal" type="text" placeholder="5" />
+              </label>
+              <label>
+                <span class="field-label">Downside pace delta %</span>
+                <input data-root-field="downside_absorption_delta_pct" inputmode="decimal" type="text" placeholder="-15" />
+              </label>
+            </div>
+
+            <div class="form-grid three-up">
+              <label>
+                <span class="field-label">Severe downside price delta %</span>
+                <input data-root-field="severe_downside_sales_price_delta_pct" inputmode="decimal" type="text" placeholder="-10" />
+              </label>
+              <label>
+                <span class="field-label">Severe downside cost delta %</span>
+                <input data-root-field="severe_downside_cost_delta_pct" inputmode="decimal" type="text" placeholder="10" />
+              </label>
+              <label>
+                <span class="field-label">Severe downside pace delta %</span>
+                <input data-root-field="severe_downside_absorption_delta_pct" inputmode="decimal" type="text" placeholder="-25" />
+              </label>
+            </div>
+
+            <label>
+              <span class="field-label">Deal notes</span>
+              <textarea data-root-field="notes" rows="6" placeholder="Capture entitlement posture, map status, utility context, offsites, grading risk, and why this deal should win or lose."></textarea>
+            </label>
+          </div>
+        </details>
+      </section>
+
+      <section class="decision-shell">
+        <div class="recommendation-banner idle" id="recommendationBanner">
+          <strong>Run the underwrite to build the decision packet.</strong>
+          <span>The banner, scenario view, market read, and memo will populate here.</span>
+        </div>
+
+        <div class="headline-grid" id="headlineGrid"></div>
+
+        <div class="decision-grid">
+          <article class="analysis-card">
+            <div class="card-topline compact-topline">
+              <div>
+                <p class="section-kicker">Scenario deck</p>
+                <h3>Base and downside views</h3>
+              </div>
+            </div>
+            <div id="scenarioGrid"></div>
+          </article>
+
+          <article class="analysis-card">
+            <div class="card-topline compact-topline">
+              <div>
+                <p class="section-kicker">Schedule</p>
+                <h3>Phase map and milestones</h3>
+              </div>
+            </div>
+            <div id="scheduleView"></div>
+          </article>
+
+          <article class="analysis-card wide-card">
+            <div class="card-topline compact-topline">
+              <div>
+                <p class="section-kicker">Market intelligence</p>
+                <h3>Price, pace, revenue velocity, and resale support</h3>
+              </div>
+            </div>
+            <div id="marketView"></div>
+          </article>
+
+          <article class="analysis-card wide-card">
+            <div class="card-topline compact-topline">
+              <div>
+                <p class="section-kicker">Sensitivity</p>
+                <h3>What has to move for the deal to fail or clear</h3>
+              </div>
+            </div>
+            <div id="sensitivityView"></div>
+          </article>
+
+          <article class="analysis-card wide-card">
+            <div class="card-topline compact-topline">
+              <div>
+                <p class="section-kicker">IC memo</p>
+                <h3>Copy-ready recommendation brief</h3>
+              </div>
+              <button type="button" class="inline-button" id="copyMemoInline">Copy</button>
+            </div>
+            <pre class="memo-preview" id="memoPreview">Run the underwrite to generate a decision memo.</pre>
+          </article>
+        </div>
+      </section>
+    </div>
+
+    <script src="panel/app.js?v=__ASSET_VERSION__" defer></script>
+  </body>
+</html>

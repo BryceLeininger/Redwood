@@ -1,0 +1,30 @@
+{
+  "market": "Phoenix-Mesa-Scottsdale, AZ",
+  "period": "2026-Q1",
+  "notes": "Entry-level resale inventory remains tight, buyer traffic improved after rates eased, and builders are limiting deep incentive use to aging specs.",
+  "metrics": {
+    "active_listings_yoy_pct": -14.0,
+    "months_of_supply": 2.4,
+    "median_sale_price_yoy_pct": 6.8,
+    "pending_sales_yoy_pct": 9.1,
+    "closed_sales_yoy_pct": 4.6,
+    "new_listings_yoy_pct": -5.2,
+    "days_on_market": 28.0,
+    "days_on_market_yoy_pct": -18.0,
+    "list_to_sale_ratio_pct": 99.1,
+    "price_reductions_share_pct": 9.5,
+    "seller_concessions_share_pct": 7.0,
+    "mortgage_rate_pct": 6.2,
+    "mortgage_rate_change_bps": -45.0,
+    "unemployment_rate_pct": 4.1,
+    "employment_growth_yoy_pct": 2.4,
+    "permits_yoy_pct": -6.0,
+    "starts_yoy_pct": -4.0,
+    "completions_yoy_pct": 3.0,
+    "rent_growth_yoy_pct": 4.2,
+    "rental_vacancy_rate_pct": 5.1,
+    "migration_trend": "inbound",
+    "builder_sentiment": "strong",
+    "segment_notes": "Luxury communities are still using more incentives than entry-level product, but entry-level communities continue to sell through new releases quickly."
+  }
+}

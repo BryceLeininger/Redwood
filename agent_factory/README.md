@@ -205,6 +205,43 @@ run_due_diligence_desktop.bat
 install_due_diligence_desktop_shortcut.bat
 ```
 
+## Housing Market Researcher
+
+`HousingMarketResearcher` now supports a deterministic market-brief workflow on top of the generated specialist model.
+
+It can:
+- classify a market packet as `hot`, `balanced`, or `cooling`
+- score supply, demand, affordability, pricing, and pipeline conditions
+- generate action recommendations and scenario triggers for acquisition and pricing teams
+
+Create the agent:
+
+```bash
+python -m agent_factory.cli create-agent \
+  --name "HousingMarketResearcher" \
+  --description "Researches housing markets, classifies market momentum, and produces structured market briefings." \
+  --topic "Housing Market Research" \
+  --task-type classification \
+  --dataset agent_factory/examples/housing_market_researcher/training.csv \
+  --knowledge agent_factory/examples/housing_market_researcher/knowledge \
+  --output-dir generated_agents
+```
+
+Run a sample market brief:
+
+```bash
+python -m agent_factory.cli housing-market-research \
+  --request-file agent_factory/examples/housing_market_researcher/sample_request.json
+```
+
+If a generated `HousingMarketResearcher` agent exists, the CLI automatically uses the latest one for the model signal. You can also point to a specific agent:
+
+```bash
+python -m agent_factory.cli housing-market-research \
+  --request-file agent_factory/examples/housing_market_researcher/sample_request.json \
+  --agent-dir generated_agents/housingmarketresearcher_YYYYMMDD_HHMMSS
+```
+
 ## Residential Subdivision Scout
 
 `ResidentialSubdivisionScout` is an operational workflow layered on top of a generated specialist agent.
@@ -294,6 +331,40 @@ Direct launch without installing the shortcut:
 ```bash
 run_subdivision_scout_desktop.bat
 ```
+
+## Phone Apps
+
+The three land workflows now have installable phone-ready web apps:
+- `Land Acquisition Studio`
+- `Residential Subdivision Scout`
+- `Residential Land Due Diligence Studio`
+
+Run the shared mobile suite:
+
+```bash
+run_homebuilder_phone_suite.bat
+```
+
+Or launch the server directly:
+
+```bash
+python -m agent_factory.homebuilder_phone_suite_server --host 0.0.0.0 --port 8790
+```
+
+Then open this from your phone browser on the same network:
+
+`http://YOUR-COMPUTER-IP:8790`
+
+From the suite home page, open each app and add it to your home screen:
+- iPhone: `Share` -> `Add to Home Screen`
+- Android Chrome: `Install App` or `Add to Home Screen`
+
+Mounted app routes:
+- `/underwrite/`
+- `/subdivision/`
+- `/diligence/`
+
+The installed app shells live on the phone, but the Python backend still runs on your computer or server.
 
 ## Outlook Integration Without Admin Access
 
