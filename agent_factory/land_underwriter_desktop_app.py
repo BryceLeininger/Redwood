@@ -312,14 +312,14 @@ class LandUnderwriterDesktopApp:
 
         tk.Label(
             title_col,
-            text="Land Deal Underwriter",
+            text="Land Acquisition Studio",
             bg=COLORS["navy"],
             fg="white",
             font=("Aptos Display", 22, "bold"),
         ).pack(anchor="w")
         tk.Label(
             title_col,
-            text="Build the deal, pressure-test the land basis, and decide whether to pursue, negotiate, or pass.",
+            text="Shape the deal, benchmark the market, and generate a clean acquisition decision packet.",
             bg=COLORS["navy"],
             fg="#D8E6EF",
             font=("Segoe UI", 10),
@@ -328,11 +328,11 @@ class LandUnderwriterDesktopApp:
         actions = tk.Frame(header, bg=COLORS["navy"])
         actions.grid(row=0, column=1, sticky="e")
 
-        self.load_button = self._make_button(actions, "Load Sample", self._load_sample_request, "secondary")
+        self.load_button = self._make_button(actions, "Load Starter Deal", self._load_sample_request, "secondary")
         self.load_button.grid(row=0, column=0, padx=(0, 8))
-        self.open_button = self._make_button(actions, "Open JSON", self._open_request_file, "secondary")
+        self.open_button = self._make_button(actions, "Open Deal", self._open_request_file, "secondary")
         self.open_button.grid(row=0, column=1, padx=(0, 8))
-        self.save_button = self._make_button(actions, "Save Request", self._save_request_file, "secondary")
+        self.save_button = self._make_button(actions, "Save Deal", self._save_request_file, "secondary")
         self.save_button.grid(row=0, column=2, padx=(0, 8))
         self.memo_button = self._make_button(actions, "Copy IC Memo", self._copy_ic_memo, "secondary")
         self.memo_button.grid(row=0, column=3, padx=(0, 8))
@@ -344,8 +344,8 @@ class LandUnderwriterDesktopApp:
         strip.grid(row=1, column=0, sticky="ew")
         strip.grid_columnconfigure(1, weight=1)
 
-        self.file_var = tk.StringVar(value="Request: sample_request.json")
-        self.agent_var = tk.StringVar(value="Agent: detecting latest generated model...")
+        self.file_var = tk.StringVar(value="Deal: Starter Deal")
+        self.agent_var = tk.StringVar(value="Underwriter: detecting latest model...")
         self.status_var = tk.StringVar(value="Ready.")
 
         self._make_info_chip(strip, self.file_var).grid(row=0, column=0, sticky="w", padx=(0, 8))
@@ -646,7 +646,7 @@ class LandUnderwriterDesktopApp:
         body = self._create_section(
             parent,
             title="4. Product Mix Builder",
-            subtitle="Rows with zero lots are ignored. This stays fast for common underwriting, while Advanced JSON handles edge-case overrides.",
+            subtitle="Rows with zero lots are ignored. Keep the mix focused and let the workspace handle the behind-the-scenes structure.",
         )
         body.grid_columnconfigure(0, weight=1)
 
