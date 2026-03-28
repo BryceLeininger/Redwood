@@ -22,6 +22,16 @@ class DocumentRecord:
 
 
 @dataclass(slots=True)
+class FileProcessingResult:
+    """Outcome for a single file discovered during a run."""
+
+    relative_path: str
+    status: str
+    warnings: list[str] = field(default_factory=list)
+    error_message: str | None = None
+
+
+@dataclass(slots=True)
 class RiskFinding:
     """Structured finding for a diligence risk theme."""
 
@@ -68,3 +78,22 @@ class DealSynthesis:
     category_rollup: dict[str, str]
     document_analyses: list[DocumentAnalysis]
     extraction_errors: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class RunSummary:
+    """Operational summary for a diligence CLI run."""
+
+    run_id: str
+    deal_name: str
+    input_folder: str
+    output_folder: str
+    llm_provider: str
+    started_at: str
+    completed_at: str | None = None
+    files_found: int = 0
+    files_parsed_successfully: int = 0
+    files_failed: int = 0
+    output_files_created: list[str] = field(default_factory=list)
+    file_results: list[FileProcessingResult] = field(default_factory=list)
+    run_errors: list[str] = field(default_factory=list)

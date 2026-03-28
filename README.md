@@ -1,42 +1,34 @@
 # Land Due Diligence Agent
 
-Portable Python CLI prototype for reviewing seller-provided land acquisition diligence packages. The MVP keeps document handling local by default, parses supported files, summarizes each document, synthesizes deal-level findings, flags common land risk themes, and writes structured Markdown outputs.
+Portable Python CLI prototype for reviewing seller-provided land acquisition diligence packages. The current priority is first-test reliability: local parsing, visible run reporting, clear output folders, and easy operator inspection.
 
-## MVP Scope
+## First-Test Readiness
 
-- Input a folder of diligence files
-- Support `PDF`, `DOCX`, `XLSX`, `CSV`, `TXT`, and `MD`
-- Extract and normalize text locally
-- Summarize each document
-- Synthesize deal-level findings
-- Flag:
-  - entitlement status
-  - environmental risks
-  - flood / drainage issues
-  - geotechnical risks
-  - offsite obligations
-  - utilities / infrastructure issues
-  - title / access concerns
-  - schedule risks
-  - missing diligence items
-- Save structured Markdown outputs
+The first review pass surfaced a few items that needed to be tightened before using a real diligence package:
+
+- Repeated runs previously wrote into the same deal output folder and could overwrite earlier results. This now writes each run into a timestamped subfolder.
+- There was no standalone operational summary or error report. The CLI now writes both on every run, including partial-failure runs.
+- File-level parse warnings were easy to miss. The run log and run summary now show which files parsed cleanly, parsed with warnings, or failed.
+- The repo did not include an example deal-folder layout. A committed sample structure now lives under `examples/sample_deal_input/`.
+
+This is still an MVP. The main residual risk before a real-world test is scanned PDFs with weak or missing text layers, because OCR fallback is not implemented yet.
 
 ## Architecture
 
 - `src/land_due_diligence_agent/ingestion`
-  - discovers supported files from an input directory
+  discovers supported files from an input directory
 - `src/land_due_diligence_agent/parsing`
-  - handles file-type-specific extraction for PDF, DOCX, XLSX, CSV, TXT, and MD
+  extracts text from PDF, DOCX, XLSX, CSV, TXT, and MD files
 - `src/land_due_diligence_agent/analysis`
-  - runs deterministic risk heuristics, missing-item checks, reading-order scoring, and deal-level synthesis
+  runs deterministic risk heuristics, missing-item checks, reading-order scoring, and deal-level synthesis
 - `src/land_due_diligence_agent/llm`
-  - abstracts summary refinement behind a provider interface
-  - default `heuristic` mode is local-only
-  - optional `openai` mode can refine summaries if credentials are configured
+  abstracts summary refinement behind a provider interface
+  default `heuristic` mode stays local-only
+  optional `openai` mode can refine summaries if configured
 - `src/land_due_diligence_agent/output`
-  - writes the final Markdown deliverables
+  writes Markdown deliverables plus operational reports
 - `src/land_due_diligence_agent/utils`
-  - shared helpers for text normalization, logging, and path handling
+  provides shared helpers for text normalization, logging, and path handling
 
 ## Repo Structure
 
@@ -52,6 +44,17 @@ Portable Python CLI prototype for reviewing seller-provided land acquisition dil
 |   |   `-- .gitkeep
 |   `-- output
 |       `-- .gitkeep
+|-- examples
+|   `-- sample_deal_input
+|       |-- README.md
+|       |-- 01_overview
+|       |-- 02_entitlements
+|       |-- 03_environmental
+|       |-- 04_civil_and_geotech
+|       |-- 05_utilities
+|       |-- 06_title_and_survey
+|       |-- 07_schedule_and_budget
+|       `-- 08_misc_correspondence
 |-- src
 |   `-- land_due_diligence_agent
 |       |-- __init__.py
@@ -60,40 +63,33 @@ Portable Python CLI prototype for reviewing seller-provided land acquisition dil
 |       |-- config.py
 |       |-- models.py
 |       |-- analysis
-|       |   |-- __init__.py
-|       |   |-- heuristics.py
-|       |   |-- risk_rules.py
-|       |   `-- service.py
 |       |-- ingestion
-|       |   |-- __init__.py
-|       |   `-- discovery.py
 |       |-- llm
-|       |   |-- __init__.py
-|       |   |-- base.py
-|       |   |-- factory.py
-|       |   |-- heuristic_provider.py
-|       |   `-- openai_provider.py
 |       |-- output
-|       |   |-- __init__.py
-|       |   `-- markdown_writer.py
 |       |-- parsing
-|       |   |-- __init__.py
-|       |   |-- docx_parser.py
-|       |   |-- pdf_parser.py
-|       |   |-- service.py
-|       |   |-- spreadsheet_parser.py
-|       |   `-- text_parser.py
 |       `-- utils
-|           |-- __init__.py
-|           |-- files.py
-|           |-- logging.py
-|           `-- text.py
 `-- tests
-    |-- __init__.py
-    |-- test_analysis.py
-    |-- test_discovery.py
-    `-- test_output.py
 ```
+
+## Sample Input Organization
+
+Use the sample folder at `examples/sample_deal_input/` as the template for one deal. For a real run, mirror that structure under `data/input/<deal-folder>/`.
+
+Example:
+
+```text
+data/input/acme-ranch/
+|-- 01_overview/
+|-- 02_entitlements/
+|-- 03_environmental/
+|-- 04_civil_and_geotech/
+|-- 05_utilities/
+|-- 06_title_and_survey/
+|-- 07_schedule_and_budget/
+`-- 08_misc_correspondence/
+```
+
+The CLI recursively scans the whole deal folder, so the subfolders are for operator clarity and review discipline, not strict parser requirements.
 
 ## Setup
 
@@ -101,43 +97,118 @@ Portable Python CLI prototype for reviewing seller-provided land acquisition dil
 2. Create and activate a virtual environment.
 3. Install dependencies.
 4. Copy `.env.example` to `.env`.
-5. Update environment variables if needed.
-6. Put diligence files under `data/input/<deal-folder>`.
-7. Run the CLI.
+5. Keep `LLM_PROVIDER=heuristic` for the first live test unless you intentionally want external LLM refinement.
+6. Place one real deal package under `data/input/<deal-folder>/`.
+7. Run the CLI against that one folder.
 
 ### Windows PowerShell
 
 ```powershell
-git clone <your-repo-url> <repo-folder>
-cd <repo-folder>
+git clone <your-repo-url> Redwood
+cd Redwood
 python -m venv .venv
 .venv\Scripts\Activate.ps1
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 Copy-Item .env.example .env
-land-dd --input-folder data/input/sample-deal --deal-name "Sample Deal"
 ```
 
 ### macOS / Linux
 
 ```bash
-git clone <your-repo-url> <repo-folder>
-cd <repo-folder>
+git clone <your-repo-url> Redwood
+cd Redwood
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 cp .env.example .env
-land-dd --input-folder data/input/sample-deal --deal-name "Sample Deal"
 ```
+
+## Run One Deal Folder
+
+Place a single deal under `data/input/acme-ranch/`, then run:
+
+```powershell
+land-dd --input-folder data/input/acme-ranch --deal-name "Acme Ranch"
+```
+
+You can also run the package directly:
+
+```powershell
+python -m land_due_diligence_agent --input-folder data/input/acme-ranch --deal-name "Acme Ranch"
+```
+
+Useful optional flags:
+
+- `--output-folder data/output`
+- `--llm-provider heuristic`
+- `--llm-provider openai`
+- `--log-level DEBUG`
+
+## What Gets Logged
+
+Each run writes `run.log` in the run output folder and logs:
+
+- run ID, input folder, and output folder
+- number of supported files found
+- each file parsed successfully
+- each file parsed with warnings
+- each file that failed
+- final counts for found, parsed successfully, and failed
+
+## Output Layout
+
+Each run now writes to a timestamped folder:
+
+```text
+data/output/<deal-slug>/<YYYYMMDD_HHMMSS>/
+```
+
+Expected outputs:
+
+- `00_run_summary.md`
+- `01_executive_summary.md`
+- `02_key_risks.md`
+- `03_recommended_reading_order.md`
+- `04_seller_questions.md`
+- `05_document_summaries.md`
+- `06_missing_diligence_items.md`
+- `07_deal_synthesis.md`
+- `08_error_report.md`
+- `run.log`
+
+Inspect these in order for the first real test:
+
+1. `00_run_summary.md`
+2. `08_error_report.md`
+3. `01_executive_summary.md`
+4. `05_document_summaries.md`
+
+## Run Summary and Error Report
+
+`00_run_summary.md` includes:
+
+- number of files found
+- number parsed successfully
+- number failed
+- per-file status
+- output files created
+
+`08_error_report.md` includes:
+
+- run-level errors
+- failed files
+- files parsed with warnings
+- extraction issues that were passed into analysis
 
 ## Configuration
 
-The default configuration is local-only:
+Default local-only mode:
 
 ```env
 LLM_PROVIDER=heuristic
 ```
 
-This means extracted document text stays on the machine and summaries are generated with deterministic heuristics. To enable OpenAI summary refinement, update:
+Optional OpenAI refinement:
 
 ```env
 LLM_PROVIDER=openai
@@ -145,45 +216,7 @@ OPENAI_API_KEY=your_key_here
 OPENAI_MODEL=gpt-4.1-mini
 ```
 
-If you later need Azure OpenAI or another provider, the swappable provider layer lives under `src/land_due_diligence_agent/llm`.
-
-## CLI Usage
-
-```powershell
-land-dd --input-folder data/input/acme-ranch --deal-name "Acme Ranch"
-```
-
-Optional flags:
-
-- `--output-folder data/output`
-- `--llm-provider heuristic`
-- `--llm-provider openai`
-- `--log-level DEBUG`
-
-You can also run the package directly:
-
-```powershell
-python -m land_due_diligence_agent --input-folder data/input/acme-ranch
-```
-
-## Output Files
-
-Each run writes a deal-specific folder under `data/output/<deal-slug>/` with:
-
-- `00_executive_summary.md`
-- `01_key_risks.md`
-- `02_recommended_reading_order.md`
-- `03_seller_questions.md`
-- `04_document_summaries.md`
-- `05_missing_diligence_items.md`
-- `06_deal_synthesis.md`
-- `run.log`
-
-## Privacy Notes
-
-- Input documents are handled locally by default.
-- `data/input` and `data/output` are ignored by Git to reduce the risk of committing confidential deal materials.
-- If `LLM_PROVIDER=openai`, extracted text may be sent to the configured provider for summary refinement.
+If you later need Azure OpenAI or another provider, the abstraction point is under `src/land_due_diligence_agent/llm/`.
 
 ## Testing
 
@@ -191,11 +224,13 @@ Each run writes a deal-specific folder under `data/output/<deal-slug>/` with:
 python -m unittest discover -s tests -v
 ```
 
-## TODO
+## Post-First-Test Upgrade Priorities
 
-- Add vector search for semantic retrieval across large diligence packages.
-- Add citations and page references in summaries and risk findings.
-- Add OCR fallback for scanned PDFs.
-- Add local model support through the provider abstraction.
-- Add a web UI.
+- Add OCR fallback so scanned PDFs stop appearing as empty or warning-heavy parses.
+- Add citations and page references to every summary, risk, and question.
+- Tune the heuristic rules against observed false positives and false negatives from the first real deal.
+- Add structured JSON export alongside Markdown for downstream workflows.
+- Add local model support and Azure-compatible provider wiring through the existing abstraction layer.
+- Add vector search for retrieval across larger diligence packages.
 - Add multi-deal comparison workflows.
+- Add a lightweight local UI only after the CLI workflow is stable in real testing.

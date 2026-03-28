@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime
 from pathlib import Path
 
 from land_due_diligence_agent.analysis.service import run_analysis
 from land_due_diligence_agent.config import Settings
 from land_due_diligence_agent.ingestion.discovery import discover_documents
 from land_due_diligence_agent.llm.factory import build_llm_provider
+from land_due_diligence_agent.models import FileProcessingResult, RunSummary
 from land_due_diligence_agent.output.markdown_writer import write_markdown_outputs
 from land_due_diligence_agent.parsing.service import parse_document
 from land_due_diligence_agent.utils.files import ensure_directory, slugify
@@ -50,10 +52,21 @@ def main(argv: list[str] | None = None) -> int:
     input_folder = Path(args.input_folder).expanduser().resolve()
     deal_name = args.deal_name or input_folder.name
     output_root = Path(args.output_folder or settings.default_output_dir).expanduser().resolve()
-    run_output_dir = ensure_directory(output_root / slugify(deal_name))
+    started_at = datetime.now().astimezone()
+    run_id = started_at.strftime("%Y%m%d_%H%M%S")
+    run_output_dir = ensure_directory(output_root / slugify(deal_name) / run_id)
     logger = configure_logging(settings.log_level, run_output_dir / "run.log")
+    run_summary = RunSummary(
+        run_id=run_id,
+        deal_name=deal_name,
+        input_folder=str(input_folder),
+        output_folder=str(run_output_dir),
+        llm_provider=settings.llm_provider,
+        started_at=started_at.isoformat(timespec="seconds"),
+    )
 
     logger.info("Starting diligence review for '%s'.", deal_name)
+    logger.info("Run ID: %s", run_id)
     logger.info("Input folder: %s", input_folder)
     logger.info("Output folder: %s", run_output_dir)
 
@@ -61,10 +74,19 @@ def main(argv: list[str] | None = None) -> int:
         document_paths = discover_documents(input_folder)
     except Exception as exc:
         logger.error("Unable to load input folder: %s", exc)
+        run_summary.run_errors.append(f"Unable to load input folder: {type(exc).__name__}: {exc}")
+        run_summary.completed_at = datetime.now().astimezone().isoformat(timespec="seconds")
+        write_markdown_outputs(run_output_dir, run_summary=run_summary)
         return 1
+
+    run_summary.files_found = len(document_paths)
+    logger.info("Found %d supported file(s) for ingestion.", len(document_paths))
 
     if not document_paths:
         logger.error("No supported documents were found in %s", input_folder)
+        run_summary.run_errors.append("No supported documents were found in the input folder.")
+        run_summary.completed_at = datetime.now().astimezone().isoformat(timespec="seconds")
+        write_markdown_outputs(run_output_dir, run_summary=run_summary)
         return 1
 
     parsed_documents = []
@@ -73,17 +95,50 @@ def main(argv: list[str] | None = None) -> int:
     for path in document_paths:
         relative_path = path.relative_to(input_folder).as_posix()
         try:
-            parsed_documents.append(parse_document(path, input_folder))
-            logger.info("Parsed %s", relative_path)
+            document = parse_document(path, input_folder)
+            parsed_documents.append(document)
+            run_summary.file_results.append(
+                FileProcessingResult(
+                    relative_path=relative_path,
+                    status="parsed",
+                    warnings=document.warnings.copy(),
+                )
+            )
+            if document.warnings:
+                logger.warning("Parsed %s with warnings: %s", relative_path, "; ".join(document.warnings))
+            else:
+                logger.info("Parsed %s successfully.", relative_path)
         except Exception as exc:
             logger.exception("Failed to parse %s", relative_path)
-            extraction_errors.append(f"{relative_path}: {exc}")
+            error_message = f"{type(exc).__name__}: {exc}"
+            extraction_errors.append(f"{relative_path}: {error_message}")
+            run_summary.file_results.append(
+                FileProcessingResult(
+                    relative_path=relative_path,
+                    status="failed",
+                    error_message=error_message,
+                )
+            )
+
+    run_summary.files_parsed_successfully = sum(result.status == "parsed" for result in run_summary.file_results)
+    run_summary.files_failed = sum(result.status == "failed" for result in run_summary.file_results)
+    logger.info(
+        "Parse summary: %d found, %d parsed successfully, %d failed.",
+        run_summary.files_found,
+        run_summary.files_parsed_successfully,
+        run_summary.files_failed,
+    )
 
     if not parsed_documents:
         logger.error("No documents could be parsed successfully.")
+        run_summary.run_errors.append("No documents could be parsed successfully.")
+        run_summary.completed_at = datetime.now().astimezone().isoformat(timespec="seconds")
+        written_paths = write_markdown_outputs(run_output_dir, run_summary=run_summary)
+        logger.info("Wrote %d report file(s).", len(written_paths))
         return 1
 
     llm_provider = build_llm_provider(settings, logger)
+    run_summary.llm_provider = llm_provider.provider_name
     logger.info("Using LLM provider: %s", llm_provider.provider_name)
 
     synthesis = run_analysis(
@@ -94,8 +149,20 @@ def main(argv: list[str] | None = None) -> int:
         extraction_errors=extraction_errors,
     )
 
-    written_paths = write_markdown_outputs(run_output_dir, synthesis, llm_provider.provider_name)
+    run_summary.completed_at = datetime.now().astimezone().isoformat(timespec="seconds")
+    written_paths = write_markdown_outputs(
+        run_output_dir,
+        run_summary=run_summary,
+        synthesis=synthesis,
+    )
     logger.info("Wrote %d markdown files.", len(written_paths))
+    logger.info("Output files created: %s", ", ".join(path.name for path in written_paths + [run_output_dir / "run.log"]))
+    logger.info(
+        "Run summary: %d found, %d parsed successfully, %d failed.",
+        run_summary.files_found,
+        run_summary.files_parsed_successfully,
+        run_summary.files_failed,
+    )
 
     if extraction_errors:
         logger.warning("Completed with %d extraction error(s). See output markdown and run.log for details.", len(extraction_errors))
