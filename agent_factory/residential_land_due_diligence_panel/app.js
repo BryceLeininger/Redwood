@@ -23,6 +23,13 @@ const state = {
   lastAssessment: null,
   lastQuestion: null,
 };
+const API_BASE = "api";
+
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("service-worker.js").catch(() => {});
+  });
+}
 
 const fields = {
   opportunity_name: document.getElementById("opportunityName"),
@@ -175,7 +182,7 @@ function populateAgents(agents, defaultAgentDir) {
   agents.forEach((agent) => {
     const option = document.createElement("option");
     option.value = agent.agent_dir;
-    option.textContent = `${agent.name} · ${agent.created_at_utc || "artifact"}`;
+    option.textContent = `${agent.name} | ${agent.created_at_utc || "artifact"}`;
     if (agent.agent_dir === defaultAgentDir) {
       option.selected = true;
     }
@@ -197,7 +204,7 @@ function updateAgentMeta() {
     ? `${selected.metric_name}: ${Number(selected.metric_value).toFixed(3)}`
     : "Artifact ready";
 
-  agentMeta.textContent = `${selected.topic || "Residential land acquisition due diligence guidance."} • ${metricText}`;
+  agentMeta.textContent = `${selected.topic || "Residential land acquisition due diligence guidance."} | ${metricText}`;
 }
 
 function applySample(sampleName) {
@@ -382,16 +389,16 @@ function exportSnapshot() {
     knowledge: state.lastQuestion,
   };
 
-  const blob = new Blob([JSON.stringify(snapshot, null, 2)], { type: "application/json" });
+  const blob = new Blob([JSON.stringify(snapshot, null, 2)], { type: "application/octet-stream" });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = url;
-  anchor.download = `${slugify(fields.opportunity_name.value || "due-diligence-intake")}.json`;
+  anchor.download = `${slugify(fields.opportunity_name.value || "due-diligence-intake")}.landdue`;
   document.body.appendChild(anchor);
   anchor.click();
   anchor.remove();
   URL.revokeObjectURL(url);
-  setRunStatus("JSON snapshot downloaded.");
+  setRunStatus("Deal file downloaded.");
 }
 
 function renderPromptSuggestions() {
