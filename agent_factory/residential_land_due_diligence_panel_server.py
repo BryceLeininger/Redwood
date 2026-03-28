@@ -8,7 +8,7 @@ from typing import Any, Optional
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -253,10 +253,41 @@ def _panel_asset_version() -> str:
 def _render_panel_index() -> str:
     asset_version = _panel_asset_version()
     index_html = (PANEL_DIR / "index.html").read_text(encoding="utf-8")
-    return (
-        index_html.replace('href="/diligence/styles.css"', f'href="/diligence/styles.css?v={asset_version}"')
-        .replace('src="/diligence/app.js"', f'src="/diligence/app.js?v={asset_version}"')
-    )
+    return index_html.replace("__ASSET_VERSION__", asset_version)
+
+
+def _root_prefix(request: Request) -> str:
+    return str(request.scope.get("root_path") or "").rstrip("/")
+
+
+def _manifest_payload(request: Request) -> dict[str, Any]:
+    prefix = _root_prefix(request)
+    start_url = f"{prefix}/" if prefix else "/"
+    icon_prefix = prefix or ""
+    return {
+        "name": "Residential Land Due Diligence Studio",
+        "short_name": "Diligence",
+        "id": start_url,
+        "start_url": start_url,
+        "scope": start_url,
+        "display": "standalone",
+        "orientation": "portrait",
+        "background_color": "#f7f3eb",
+        "theme_color": "#1f4d4f",
+        "description": "Mobile diligence intake and risk triage for residential land deals.",
+        "icons": [
+            {
+                "src": f"{icon_prefix}/diligence/assets/icon-192.png" or "/diligence/assets/icon-192.png",
+                "sizes": "192x192",
+                "type": "image/png",
+            },
+            {
+                "src": f"{icon_prefix}/diligence/assets/icon-512.png" or "/diligence/assets/icon-512.png",
+                "sizes": "512x512",
+                "type": "image/png",
+            },
+        ],
+    }
 
 
 def _dedupe_preserve_order(items: list[str]) -> list[str]:
@@ -692,6 +723,22 @@ def create_app(*, output_root: Path, agent_dir: Optional[Path]) -> FastAPI:
     @app.get("/")
     def root() -> HTMLResponse:
         return HTMLResponse(content=_render_panel_index(), headers=_panel_cache_headers())
+
+    @app.get("/manifest.webmanifest")
+    def manifest(request: Request) -> Response:
+        return Response(
+            content=json.dumps(_manifest_payload(request)),
+            media_type="application/manifest+json",
+            headers=_panel_cache_headers(),
+        )
+
+    @app.get("/service-worker.js")
+    def service_worker() -> Response:
+        return Response(
+            content=(PANEL_DIR / "service-worker.js").read_text(encoding="utf-8"),
+            media_type="application/javascript",
+            headers=_panel_cache_headers(),
+        )
 
     @app.get("/api/start")
     def start() -> dict[str, Any]:
