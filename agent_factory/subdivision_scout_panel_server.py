@@ -10,7 +10,7 @@ from typing import Any, Optional
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -52,10 +52,41 @@ def _panel_asset_version() -> str:
 def _render_panel_index() -> str:
     asset_version = _panel_asset_version()
     index_html = (PANEL_DIR / "index.html").read_text(encoding="utf-8")
-    return (
-        index_html.replace('href="/scout/styles.css"', f'href="/scout/styles.css?v={asset_version}"')
-        .replace('src="/scout/app.js"', f'src="/scout/app.js?v={asset_version}"')
-    )
+    return index_html.replace("__ASSET_VERSION__", asset_version)
+
+
+def _root_prefix(request: Request) -> str:
+    return str(request.scope.get("root_path") or "").rstrip("/")
+
+
+def _manifest_payload(request: Request) -> dict[str, Any]:
+    prefix = _root_prefix(request)
+    start_url = f"{prefix}/" if prefix else "/"
+    icon_prefix = prefix or ""
+    return {
+        "name": "Residential Subdivision Scout",
+        "short_name": "Subdivision",
+        "id": start_url,
+        "start_url": start_url,
+        "scope": start_url,
+        "display": "standalone",
+        "orientation": "portrait",
+        "background_color": "#f3efe7",
+        "theme_color": "#0f3a46",
+        "description": "Mobile scout for parcel screening, ranking, and planning watch activity.",
+        "icons": [
+            {
+                "src": f"{icon_prefix}/scout/assets/icon-192.png" or "/scout/assets/icon-192.png",
+                "sizes": "192x192",
+                "type": "image/png",
+            },
+            {
+                "src": f"{icon_prefix}/scout/assets/icon-512.png" or "/scout/assets/icon-512.png",
+                "sizes": "512x512",
+                "type": "image/png",
+            },
+        ],
+    }
 
 
 class ScreenTextRequest(BaseModel):
@@ -181,7 +212,10 @@ def _parse_watch_targets(raw_text: str) -> list[Any]:
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except json.JSONDecodeError as exc:
-        raise HTTPException(status_code=400, detail=f"Watchlist JSON is invalid: {exc.msg}") from exc
+        raise HTTPException(
+            status_code=400,
+            detail=f"Watchlist format is invalid: {exc.msg}. Use the sample file or line-separated jurisdictions.",
+        ) from exc
 
 
 def create_app(
@@ -204,6 +238,22 @@ def create_app(
     @app.get("/")
     def root() -> HTMLResponse:
         return HTMLResponse(content=_render_panel_index(), headers=_panel_cache_headers())
+
+    @app.get("/manifest.webmanifest")
+    def manifest(request: Request) -> Response:
+        return Response(
+            content=json.dumps(_manifest_payload(request)),
+            media_type="application/manifest+json",
+            headers=_panel_cache_headers(),
+        )
+
+    @app.get("/service-worker.js")
+    def service_worker() -> Response:
+        return Response(
+            content=(PANEL_DIR / "service-worker.js").read_text(encoding="utf-8"),
+            media_type="application/javascript",
+            headers=_panel_cache_headers(),
+        )
 
     @app.get("/api/start")
     def start() -> dict[str, Any]:

@@ -3,8 +3,13 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#0f3a46" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <title>Residential Subdivision Scout</title>
-    <link rel="stylesheet" href="/scout/styles.css" />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="scout/assets/icon-180.png" />
+    <link rel="stylesheet" href="scout/styles.css?v=__ASSET_VERSION__" />
   </head>
   <body>
     <div class="page-shell">
@@ -271,7 +276,7 @@
               <textarea
                 id="watchlistInput"
                 rows="9"
-                placeholder="Paste a JSON watchlist or a line-separated list of jurisdictions."
+                placeholder="Paste a planning watchlist or a line-separated list of jurisdictions."
               ></textarea>
             </label>
 
@@ -354,6 +359,6 @@
       </main>
     </div>
 
-    <script src="/scout/app.js" defer></script>
+    <script src="scout/app.js?v=__ASSET_VERSION__" defer></script>
   </body>
 </html>

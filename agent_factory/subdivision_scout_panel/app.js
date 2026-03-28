@@ -40,6 +40,13 @@ const state = {
   sampleParcelCsv: "",
   sampleWatchlist: "",
 };
+const API_BASE = "api";
+
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("service-worker.js").catch(() => {});
+  });
+}
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -199,12 +206,7 @@ function renderSummary(cards) {
 }
 
 function renderRawResponse(payload) {
-  return `
-    <details class="raw-response">
-      <summary>View raw response</summary>
-      <pre>${escapeHtml(JSON.stringify(payload, null, 2))}</pre>
-    </details>
-  `;
+  return "";
 }
 
 function recommendationClass(recommendation) {
@@ -498,7 +500,7 @@ function renderFullSweep(payload) {
       ${renderWatchStage("Approved Recently", "stage-approved", approved)}
       ${renderWatchStage("Approaching Approval", "stage-upcoming", upcoming)}
     `
-    : `<article class="empty-state"><p class="empty-title">Planning watch not included.</p><p>Paste a watchlist to bring recent approvals into the sweep.</p></article>`;
+    : `<article class="empty-state"><p class="empty-title">Planning watch not included.</p><p>Paste a planning watchlist to bring recent approvals into the sweep.</p></article>`;
 
   elements.resultBody.innerHTML = `${parcelSection}${planningSection}${renderRawResponse(payload)}`;
 }
@@ -547,7 +549,7 @@ async function loadStartData() {
   setResultsMeta("Loading the scout workspace.");
 
   try {
-    const payload = await fetchJson("/api/start");
+    const payload = await fetchJson(`${API_BASE}/start`);
     state.sampleSearchPrompt = payload.sample_search_prompt || "";
     state.sampleSingleParcelText = payload.sample_single_parcel_text || "";
     state.sampleParcelCsv = payload.sample_parcel_csv || "";
@@ -577,7 +579,7 @@ async function refreshAgents() {
   setResultsMeta("Refreshing the available scout agents.");
 
   try {
-    const payload = await fetchJson("/api/agents");
+    const payload = await fetchJson(`${API_BASE}/agents`);
     populateAgents(payload.agents || [], selectedAgentDir() || state.defaultAgentDir);
     setStatus("Ready", "idle");
     if ((payload.agents || []).length) {
@@ -635,7 +637,7 @@ elements.promptSearchBtn.addEventListener("click", () => {
   runAction(
     "Searching",
     () => ({
-      path: "/api/search-prompt",
+      path: `${API_BASE}/search-prompt`,
       body: {
         agent_dir: selectedAgentDir(),
         query: elements.promptSearchInput.value,
@@ -651,7 +653,7 @@ elements.screenTextBtn.addEventListener("click", () => {
   runAction(
     "Scoring",
     () => ({
-      path: "/api/screen-text",
+      path: `${API_BASE}/screen-text`,
       body: {
         agent_dir: selectedAgentDir(),
         text: elements.singleParcelInput.value,
@@ -667,7 +669,7 @@ elements.screenCsvBtn.addEventListener("click", () => {
   runAction(
     "Ranking",
     () => ({
-      path: "/api/screen-csv",
+      path: `${API_BASE}/screen-csv`,
       body: {
         agent_dir: selectedAgentDir(),
         csv_text: elements.csvInput.value,
@@ -683,7 +685,7 @@ elements.watchBtn.addEventListener("click", () => {
   runAction(
     "Watching",
     () => ({
-      path: "/api/watch",
+      path: `${API_BASE}/watch`,
       body: {
         agent_dir: selectedAgentDir(),
         watchlist_text: elements.watchlistInput.value,
@@ -699,7 +701,7 @@ elements.fullSweepBtn.addEventListener("click", () => {
   runAction(
     "Sweeping",
     () => ({
-      path: "/api/full-sweep",
+      path: `${API_BASE}/full-sweep`,
       body: {
         agent_dir: selectedAgentDir(),
         csv_text: elements.csvInput.value,
