@@ -2476,7 +2476,7 @@ class LandUnderwriterDesktopApp:
                 fg=COLORS["navy"],
             )
             self.recommendation_subtitle.configure(
-                text="The raw JSON tab still shows the full response.",
+                text="Open the Deep Dive tab for the full deal report.",
                 bg=COLORS["card"],
                 fg=COLORS["muted"],
             )
