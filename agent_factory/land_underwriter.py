@@ -5,6 +5,7 @@ import math
 import re
 from dataclasses import dataclass
 from datetime import date, datetime
+from statistics import median
 from typing import Any, Dict, List, Sequence
 
 from .specialist_agent import SpecialistAgent
@@ -415,7 +416,12 @@ class LandDealInput:
             raise ValueError("At least one product series with a positive lot count is required.")
 
         total_lots = sum(item.lots for item in valid_series)
-        raw_events = payload.get("land_purchase_events") or payload.get("takedown_schedule") or []
+        raw_events = (
+            payload.get("land_purchase_events")
+            or payload.get("schedule_phases")
+            or payload.get("takedown_schedule")
+            or []
+        )
         purchase_events = [LandPurchaseEvent.from_dict(item) for item in raw_events]
         purchase_events = [item for item in purchase_events if item.lots > 0 and item.price_per_lot > 0]
 
@@ -604,6 +610,11 @@ class LandDealUnderwriter:
         base_case = scenario_results["base_case"]
         downside_case = scenario_results["downside_case"]
         severe_case = scenario_results["severe_downside_case"]
+        market_intelligence = (
+            self._market_intelligence_summary(payload, request, base_case)
+            if isinstance(payload, dict)
+            else None
+        )
 
         hurdle_results = {
             name: self._scenario_hurdles(request, result)
@@ -619,6 +630,7 @@ class LandDealUnderwriter:
             hurdle_results=hurdle_results,
             note_hits=note_hits,
             model_signal=model_signal,
+            market_intelligence=market_intelligence,
         )
 
         return {
@@ -634,6 +646,7 @@ class LandDealUnderwriter:
             "hurdles": hurdle_results,
             "scenarios": scenario_results,
             "model_signal": model_signal,
+            "market_intelligence": market_intelligence,
             "assumptions": self._assumption_summary(request),
         }
 
@@ -679,6 +692,177 @@ class LandDealUnderwriter:
                 }
                 for item in request.land_purchase_events
             ],
+        }
+
+    def _market_intelligence_summary(
+        self,
+        payload: Dict[str, Any],
+        request: LandDealInput,
+        base_case: Dict[str, Any],
+    ) -> Dict[str, Any] | None:
+        raw_competitors = payload.get("competitor_projects") or []
+        raw_resales = payload.get("resale_comps") or []
+
+        competitors: List[Dict[str, Any]] = []
+        for item in raw_competitors:
+            if not isinstance(item, dict):
+                continue
+            price = _float_from_value(item.get("avg_price"), default=0.0)
+            pace = _float_from_value(item.get("monthly_absorption"), default=0.0)
+            sqft = _float_from_value(item.get("avg_sqft"), default=0.0)
+            if price <= 0 and pace <= 0 and sqft <= 0:
+                continue
+            competitors.append(
+                {
+                    "name": str(item.get("name") or "Comparable Community").strip() or "Comparable Community",
+                    "monthly_absorption": _round_money(pace),
+                    "avg_price": _round_money(price),
+                    "avg_sqft": _round_money(sqft),
+                    "avg_price_psf": _round_money(_safe_div(price, sqft)),
+                    "revenue_per_month": _round_money(price * pace),
+                    "active_listings": _round_money(
+                        _float_from_value(item.get("active_listings"), default=0.0)
+                    ),
+                    "status": str(item.get("status") or "").strip(),
+                }
+            )
+
+        resales: List[Dict[str, Any]] = []
+        for item in raw_resales:
+            if not isinstance(item, dict):
+                continue
+            close_price = _float_from_value(item.get("close_price"), default=0.0)
+            sqft = _float_from_value(item.get("sqft"), default=0.0)
+            if close_price <= 0 and sqft <= 0:
+                continue
+            resales.append(
+                {
+                    "name": str(item.get("name") or "Resale Comp").strip() or "Resale Comp",
+                    "close_price": _round_money(close_price),
+                    "sqft": _round_money(sqft),
+                    "price_psf": _round_money(_safe_div(close_price, sqft)),
+                    "distance_miles": _round_money(
+                        _float_from_value(item.get("distance_miles"), default=0.0)
+                    ),
+                    "close_date": str(item.get("close_date") or "").strip(),
+                }
+            )
+
+        if not competitors and not resales:
+            return None
+
+        subject_avg_sqft = _safe_div(
+            sum(item.avg_sqft * item.lots for item in request.product_series),
+            request.total_lots,
+        )
+        subject_avg_net_price = _float_from_value(
+            base_case["investment_summary"]["average_net_sales_price"],
+            default=0.0,
+        )
+        subject_price_psf = _safe_div(subject_avg_net_price, subject_avg_sqft)
+        subject_revenue_per_month = subject_avg_net_price * request.monthly_absorption
+
+        competitor_avg_price = _safe_div(
+            sum(item["avg_price"] for item in competitors),
+            len(competitors),
+        )
+        competitor_avg_sqft = _safe_div(
+            sum(item["avg_sqft"] for item in competitors),
+            len(competitors),
+        )
+        competitor_avg_price_psf = _safe_div(
+            sum(item["avg_price_psf"] for item in competitors),
+            len(competitors),
+        )
+        competitor_avg_absorption = _safe_div(
+            sum(item["monthly_absorption"] for item in competitors),
+            len(competitors),
+        )
+        competitor_avg_revenue_per_month = _safe_div(
+            sum(item["revenue_per_month"] for item in competitors),
+            len(competitors),
+        )
+
+        resale_prices = [item["close_price"] for item in resales if item["close_price"] > 0]
+        resale_price_psf = [item["price_psf"] for item in resales if item["price_psf"] > 0]
+        resale_avg_price = _safe_div(sum(resale_prices), len(resale_prices))
+        resale_avg_price_psf = _safe_div(sum(resale_price_psf), len(resale_price_psf))
+        resale_median_price = median(resale_prices) if resale_prices else 0.0
+
+        positioning = {
+            "subject_vs_competitor_price_pct": _round_ratio(
+                _safe_div(subject_avg_net_price - competitor_avg_price, competitor_avg_price)
+            ),
+            "subject_vs_competitor_psf_pct": _round_ratio(
+                _safe_div(subject_price_psf - competitor_avg_price_psf, competitor_avg_price_psf)
+            ),
+            "subject_vs_competitor_absorption_pct": _round_ratio(
+                _safe_div(request.monthly_absorption - competitor_avg_absorption, competitor_avg_absorption)
+            ),
+            "subject_vs_competitor_revenue_velocity_pct": _round_ratio(
+                _safe_div(
+                    subject_revenue_per_month - competitor_avg_revenue_per_month,
+                    competitor_avg_revenue_per_month,
+                )
+            ),
+            "subject_vs_resale_price_pct": _round_ratio(
+                _safe_div(subject_avg_net_price - resale_avg_price, resale_avg_price)
+            ),
+            "subject_vs_resale_psf_pct": _round_ratio(
+                _safe_div(subject_price_psf - resale_avg_price_psf, resale_avg_price_psf)
+            ),
+        }
+
+        risk_flags: List[str] = []
+        upside_flags: List[str] = []
+        risk_score = 0
+
+        if competitor_avg_price > 0 and subject_avg_net_price > competitor_avg_price * 1.1:
+            risk_flags.append("Subject net price is more than 10% above competitor average.")
+            risk_score += 4
+        elif competitor_avg_price > 0 and subject_avg_net_price < competitor_avg_price * 0.94:
+            upside_flags.append("Subject net price is at least 6% below competitor average.")
+
+        if resale_avg_price_psf > 0 and subject_price_psf > resale_avg_price_psf * 1.12:
+            risk_flags.append("Subject price per foot is more than 12% above resale comps.")
+            risk_score += 3
+        elif resale_avg_price_psf > 0 and subject_price_psf < resale_avg_price_psf * 0.97:
+            upside_flags.append("Subject price per foot is below the resale comp set.")
+
+        if competitor_avg_absorption > 0 and request.monthly_absorption > competitor_avg_absorption * 1.2:
+            risk_flags.append("Planned absorption is more than 20% ahead of competitor pace.")
+            risk_score += 3
+        elif competitor_avg_absorption > 0 and request.monthly_absorption <= competitor_avg_absorption * 0.95:
+            upside_flags.append("Planned absorption is at or below current competitor pace.")
+
+        return {
+            "subject": {
+                "average_net_price": _round_money(subject_avg_net_price),
+                "average_sqft": _round_money(subject_avg_sqft),
+                "price_psf": _round_money(subject_price_psf),
+                "monthly_absorption": _round_money(request.monthly_absorption),
+                "revenue_per_month": _round_money(subject_revenue_per_month),
+            },
+            "competitors": {
+                "count": len(competitors),
+                "average_price": _round_money(competitor_avg_price),
+                "average_sqft": _round_money(competitor_avg_sqft),
+                "average_price_psf": _round_money(competitor_avg_price_psf),
+                "average_absorption": _round_money(competitor_avg_absorption),
+                "average_revenue_per_month": _round_money(competitor_avg_revenue_per_month),
+                "rows": competitors,
+            },
+            "resales": {
+                "count": len(resales),
+                "average_price": _round_money(resale_avg_price),
+                "median_price": _round_money(resale_median_price),
+                "average_price_psf": _round_money(resale_avg_price_psf),
+                "rows": resales,
+            },
+            "positioning": positioning,
+            "risk_flags": risk_flags,
+            "upside_flags": upside_flags,
+            "risk_score": risk_score,
         }
 
     def _note_signals(self, notes: str) -> Dict[str, Any]:
@@ -755,6 +939,7 @@ class LandDealUnderwriter:
         hurdle_results: Dict[str, Dict[str, bool]],
         note_hits: Dict[str, Any],
         model_signal: Dict[str, Any] | None,
+        market_intelligence: Dict[str, Any] | None,
     ) -> tuple[str, List[str]]:
         reasons: List[str] = []
         base_hurdles = hurdle_results["base_case"]
@@ -792,7 +977,26 @@ class LandDealUnderwriter:
             else:
                 reasons.append("The text-based pricing model is at or below the residual land value.")
 
-        if all(base_hurdles.values()) and all(downside_hurdles.values()) and note_hits["risk_score"] <= 12:
+        market_risk_score = 0
+        if market_intelligence is not None:
+            market_risk_score = int(market_intelligence.get("risk_score", 0) or 0)
+            competitor_count = int(market_intelligence["competitors"].get("count", 0) or 0)
+            resale_count = int(market_intelligence["resales"].get("count", 0) or 0)
+            if competitor_count or resale_count:
+                reasons.append(
+                    f"Market check includes {competitor_count} competitor communities and {resale_count} resale comps."
+                )
+            for item in market_intelligence.get("risk_flags", []):
+                reasons.append(item)
+            for item in market_intelligence.get("upside_flags", []):
+                reasons.append(item)
+
+        if (
+            all(base_hurdles.values())
+            and all(downside_hurdles.values())
+            and note_hits["risk_score"] <= 12
+            and market_risk_score <= 4
+        ):
             return "pursue", reasons
 
         if (
@@ -802,6 +1006,7 @@ class LandDealUnderwriter:
             and base_hurdles["irr"]
             and actual_land_cost <= residual_land_value * 1.1
             and severe_pre_gna > -0.03
+            and market_risk_score <= 8
         ):
             return "negotiate", reasons
 

@@ -50,5 +50,71 @@
       "move_up": false
     }
   ],
+  "schedule_phases": [
+    {
+      "name": "Phase 1",
+      "month": 0,
+      "lots": 25,
+      "price_per_lot": 66000
+    },
+    {
+      "name": "Phase 2",
+      "month": 6,
+      "lots": 25,
+      "price_per_lot": 67500
+    },
+    {
+      "name": "Phase 3",
+      "month": 12,
+      "lots": 25,
+      "price_per_lot": 69000
+    }
+  ],
+  "competitor_projects": [
+    {
+      "name": "Ridgeview",
+      "monthly_absorption": 2.9,
+      "avg_price": 742000,
+      "avg_sqft": 2210,
+      "status": "Actively selling"
+    },
+    {
+      "name": "Fox Hollow",
+      "monthly_absorption": 3.1,
+      "avg_price": 758000,
+      "avg_sqft": 2285,
+      "status": "Model open"
+    },
+    {
+      "name": "The Bluffs",
+      "monthly_absorption": 2.7,
+      "avg_price": 735000,
+      "avg_sqft": 2195,
+      "status": "Late-stage release"
+    }
+  ],
+  "resale_comps": [
+    {
+      "name": "2211 Cedar Ridge Dr",
+      "close_price": 748000,
+      "sqft": 2255,
+      "distance_miles": 1.8,
+      "close_date": "2026-02-10"
+    },
+    {
+      "name": "1140 Hollow Creek Ln",
+      "close_price": 731500,
+      "sqft": 2178,
+      "distance_miles": 2.4,
+      "close_date": "2026-01-22"
+    },
+    {
+      "name": "905 Summit Oak Ct",
+      "close_price": 762000,
+      "sqft": 2294,
+      "distance_miles": 3.1,
+      "close_date": "2025-12-18"
+    }
+  ],
   "notes": "75-lot single-family community with tentative map in place, utilities available, and conventional bulk closing economics. Verify entitlement timing, final map readiness, and any offsite utility or grading exposure before pricing."
 }

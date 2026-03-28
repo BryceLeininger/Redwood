@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import math
 import queue
 import threading
 import tkinter as tk
@@ -34,6 +35,9 @@ COLORS = {
 }
 
 SERIES_ROW_COUNT = 5
+PHASE_ROW_COUNT = 6
+COMPETITOR_ROW_COUNT = 6
+RESALE_ROW_COUNT = 8
 
 SERIES_FIELDS = (
     ("name", "Series"),
@@ -44,6 +48,29 @@ SERIES_FIELDS = (
     ("direct_cost_psf", "Direct $/SF"),
     ("permit_fees_per_unit", "Permit"),
     ("tap_fees_per_unit", "Tap"),
+)
+
+PHASE_FIELDS = (
+    ("name", "Phase"),
+    ("month", "Close Mo"),
+    ("lots", "Lots"),
+    ("price_per_lot", "Price / Lot"),
+)
+
+COMPETITOR_FIELDS = (
+    ("name", "Community"),
+    ("monthly_absorption", "Pace / Mo"),
+    ("avg_price", "Net Price"),
+    ("avg_sqft", "Avg Sqft"),
+    ("status", "Status"),
+)
+
+RESALE_FIELDS = (
+    ("name", "Resale / Address"),
+    ("close_price", "Close Price"),
+    ("sqft", "Sqft"),
+    ("distance_miles", "Miles"),
+    ("close_date", "Close Date"),
 )
 
 PERCENT_KEYS = {
@@ -214,6 +241,9 @@ class LandUnderwriterDesktopApp:
 
         self.form_vars: dict[str, tk.Variable] = {}
         self.series_rows: list[dict[str, tk.Variable]] = []
+        self.phase_rows: list[dict[str, tk.Variable]] = []
+        self.competitor_rows: list[dict[str, tk.Variable]] = []
+        self.resale_rows: list[dict[str, tk.Variable]] = []
 
         self._configure_theme()
         self._build_ui()
@@ -338,9 +368,11 @@ class LandUnderwriterDesktopApp:
 
         self._build_identity_section(body)
         self._build_land_section(body)
+        self._build_schedule_section(body)
         self._build_series_section(body)
         self._build_operations_section(body)
         self._build_targets_section(body)
+        self._build_market_section(body)
         self._build_notes_section(body)
 
         self._build_sidebar(right_host)
@@ -373,7 +405,7 @@ class LandUnderwriterDesktopApp:
         body = self._create_section(
             parent,
             title="2. Land Basis And Horizontal Spend",
-            subtitle="Use the simple fields for most deals. If you have a staged takedown, enter one line per event.",
+            subtitle="Use a flat land price for quick screening, or let the phase plan below build the staged takedown automatically.",
         )
         body.grid_columnconfigure((0, 1, 2), weight=1)
 
@@ -392,26 +424,97 @@ class LandUnderwriterDesktopApp:
         self._labeled_entry(body, "Project Management", "project_management_cost_total", 1, 2, width=14)
         self._labeled_entry(body, "Other Land Costs", "other_land_costs_total", 2, 0, width=14)
 
-        events_frame = tk.Frame(body, bg=COLORS["card"])
-        events_frame.grid(row=3, column=0, columnspan=3, sticky="ew", pady=(12, 0))
-        events_frame.grid_columnconfigure(0, weight=1)
+    def _build_schedule_section(self, parent: tk.Widget) -> None:
+        body = self._create_section(
+            parent,
+            title="3. Phase Schedule Builder",
+            subtitle="Use phases to plan lot takedowns and see the timeline before you underwrite. Month 0 is the land close.",
+        )
+        body.grid_columnconfigure(0, weight=1)
+
+        grid = tk.Frame(
+            body,
+            bg=COLORS["card_alt"],
+            padx=12,
+            pady=12,
+            highlightbackground=COLORS["line"],
+            highlightthickness=1,
+        )
+        grid.grid(row=0, column=0, sticky="ew")
+        for col in range(len(PHASE_FIELDS)):
+            grid.grid_columnconfigure(col, weight=1)
+
+        for col, (_, label) in enumerate(PHASE_FIELDS):
+            tk.Label(
+                grid,
+                text=label,
+                bg=COLORS["card_alt"],
+                fg=COLORS["navy"],
+                font=("Segoe UI", 9, "bold"),
+                padx=4,
+                pady=6,
+            ).grid(row=0, column=col, sticky="ew")
+
+        for row_index in range(PHASE_ROW_COUNT):
+            row_vars: dict[str, tk.Variable] = {}
+            for col_index, (field_name, _) in enumerate(PHASE_FIELDS):
+                default = f"Phase {row_index + 1}" if field_name == "name" else ""
+                var = tk.StringVar(value=default)
+                row_vars[field_name] = var
+                entry = tk.Entry(
+                    grid,
+                    textvariable=var,
+                    font=("Segoe UI", 10),
+                    bg="#FFFDFC",
+                    fg=COLORS["ink"],
+                    relief="flat",
+                    highlightthickness=1,
+                    highlightbackground=COLORS["line"],
+                    highlightcolor=COLORS["accent"],
+                    width=18 if field_name == "name" else 10,
+                )
+                entry.grid(row=row_index + 1, column=col_index, sticky="ew", padx=3, pady=3, ipady=5)
+            self.phase_rows.append(row_vars)
+
+        chart_frame = tk.Frame(body, bg=COLORS["card"])
+        chart_frame.grid(row=1, column=0, sticky="ew", pady=(12, 0))
+        chart_frame.grid_columnconfigure(0, weight=1)
         tk.Label(
-            events_frame,
-            text="Takedown Events",
+            chart_frame,
+            text="Schedule Preview",
+            bg=COLORS["card"],
+            fg=COLORS["navy"],
+            font=("Segoe UI", 10, "bold"),
+        ).grid(row=0, column=0, sticky="w")
+        self.builder_schedule_canvas = tk.Canvas(
+            chart_frame,
+            bg=COLORS["card"],
+            height=170,
+            highlightthickness=1,
+            highlightbackground=COLORS["line"],
+        )
+        self.builder_schedule_canvas.grid(row=1, column=0, sticky="ew", pady=(6, 0))
+
+        raw_frame = tk.Frame(body, bg=COLORS["card"])
+        raw_frame.grid(row=2, column=0, sticky="ew", pady=(12, 0))
+        raw_frame.grid_columnconfigure(0, weight=1)
+        tk.Label(
+            raw_frame,
+            text="Raw Takedown Override",
             bg=COLORS["card"],
             fg=COLORS["ink"],
             font=("Segoe UI", 10, "bold"),
         ).grid(row=0, column=0, sticky="w")
         tk.Label(
-            events_frame,
-            text="One event per line: month,lots,price_per_lot  Example: 0,25,67500",
+            raw_frame,
+            text="Optional. Use only when you need a quick paste or a one-off override: month,lots,price_per_lot",
             bg=COLORS["card"],
             fg=COLORS["muted"],
             font=("Segoe UI", 9),
         ).grid(row=1, column=0, sticky="w", pady=(2, 6))
         self.events_text = ScrolledText(
-            events_frame,
-            height=4,
+            raw_frame,
+            height=3,
             wrap="none",
             font=("Consolas", 10),
             bg="#FFFDFC",
@@ -422,10 +525,120 @@ class LandUnderwriterDesktopApp:
         )
         self.events_text.grid(row=2, column=0, sticky="ew")
 
+    def _build_market_section(self, parent: tk.Widget) -> None:
+        body = self._create_section(
+            parent,
+            title="7. Market Intelligence And CMA",
+            subtitle="Benchmark price, pace, and resale support. This becomes part of the recommendation, not just a side note.",
+        )
+        body.grid_columnconfigure((0, 1), weight=1)
+
+        competitor_frame = tk.Frame(
+            body,
+            bg=COLORS["card_alt"],
+            padx=12,
+            pady=12,
+            highlightbackground=COLORS["line"],
+            highlightthickness=1,
+        )
+        competitor_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
+        competitor_frame.grid_columnconfigure(0, weight=1)
+        for col in range(len(COMPETITOR_FIELDS)):
+            competitor_frame.grid_columnconfigure(col, weight=1)
+        tk.Label(
+            competitor_frame,
+            text="Competitor Communities",
+            bg=COLORS["card_alt"],
+            fg=COLORS["navy"],
+            font=("Segoe UI", 10, "bold"),
+        ).grid(row=0, column=0, sticky="w", columnspan=len(COMPETITOR_FIELDS))
+
+        for col, (_, label) in enumerate(COMPETITOR_FIELDS):
+            tk.Label(
+                competitor_frame,
+                text=label,
+                bg=COLORS["card_alt"],
+                fg=COLORS["navy"],
+                font=("Segoe UI", 9, "bold"),
+                padx=3,
+                pady=6,
+            ).grid(row=1, column=col, sticky="ew")
+
+        for row_index in range(COMPETITOR_ROW_COUNT):
+            row_vars: dict[str, tk.Variable] = {}
+            for col_index, (field_name, _) in enumerate(COMPETITOR_FIELDS):
+                var = tk.StringVar()
+                row_vars[field_name] = var
+                entry = tk.Entry(
+                    competitor_frame,
+                    textvariable=var,
+                    font=("Segoe UI", 9),
+                    bg="#FFFDFC",
+                    fg=COLORS["ink"],
+                    relief="flat",
+                    highlightthickness=1,
+                    highlightbackground=COLORS["line"],
+                    highlightcolor=COLORS["accent"],
+                    width=16 if field_name in {"name", "status"} else 10,
+                )
+                entry.grid(row=row_index + 2, column=col_index, sticky="ew", padx=3, pady=3, ipady=4)
+            self.competitor_rows.append(row_vars)
+
+        resale_frame = tk.Frame(
+            body,
+            bg=COLORS["card_alt"],
+            padx=12,
+            pady=12,
+            highlightbackground=COLORS["line"],
+            highlightthickness=1,
+        )
+        resale_frame.grid(row=0, column=1, sticky="nsew", padx=(8, 0))
+        resale_frame.grid_columnconfigure(0, weight=1)
+        for col in range(len(RESALE_FIELDS)):
+            resale_frame.grid_columnconfigure(col, weight=1)
+        tk.Label(
+            resale_frame,
+            text="Resale Comps",
+            bg=COLORS["card_alt"],
+            fg=COLORS["navy"],
+            font=("Segoe UI", 10, "bold"),
+        ).grid(row=0, column=0, sticky="w", columnspan=len(RESALE_FIELDS))
+
+        for col, (_, label) in enumerate(RESALE_FIELDS):
+            tk.Label(
+                resale_frame,
+                text=label,
+                bg=COLORS["card_alt"],
+                fg=COLORS["navy"],
+                font=("Segoe UI", 9, "bold"),
+                padx=3,
+                pady=6,
+            ).grid(row=1, column=col, sticky="ew")
+
+        for row_index in range(RESALE_ROW_COUNT):
+            row_vars = {}
+            for col_index, (field_name, _) in enumerate(RESALE_FIELDS):
+                var = tk.StringVar()
+                row_vars[field_name] = var
+                entry = tk.Entry(
+                    resale_frame,
+                    textvariable=var,
+                    font=("Segoe UI", 9),
+                    bg="#FFFDFC",
+                    fg=COLORS["ink"],
+                    relief="flat",
+                    highlightthickness=1,
+                    highlightbackground=COLORS["line"],
+                    highlightcolor=COLORS["accent"],
+                    width=16 if field_name in {"name", "close_date"} else 10,
+                )
+                entry.grid(row=row_index + 2, column=col_index, sticky="ew", padx=3, pady=3, ipady=4)
+            self.resale_rows.append(row_vars)
+
     def _build_series_section(self, parent: tk.Widget) -> None:
         body = self._create_section(
             parent,
-            title="3. Product Mix Builder",
+            title="4. Product Mix Builder",
             subtitle="Rows with zero lots are ignored. This stays fast for common underwriting, while Advanced JSON handles edge-case overrides.",
         )
         body.grid_columnconfigure(0, weight=1)
@@ -519,7 +732,7 @@ class LandUnderwriterDesktopApp:
     def _build_operations_section(self, parent: tk.Widget) -> None:
         body = self._create_section(
             parent,
-            title="4. Operating Plan",
+            title="5. Operating Plan",
             subtitle="These timing assumptions drive the schedule, cash curve, and stress-case velocity.",
         )
         body.grid_columnconfigure((0, 1, 2), weight=1)
@@ -537,7 +750,7 @@ class LandUnderwriterDesktopApp:
     def _build_targets_section(self, parent: tk.Widget) -> None:
         body = self._create_section(
             parent,
-            title="5. Returns And Stress Cases",
+            title="6. Returns And Stress Cases",
             subtitle="Set the decision hurdles and the downside assumptions you want the agent to pressure-test.",
         )
         body.grid_columnconfigure((0, 1, 2), weight=1)
@@ -574,7 +787,7 @@ class LandUnderwriterDesktopApp:
     def _build_notes_section(self, parent: tk.Widget) -> None:
         body = self._create_section(
             parent,
-            title="6. Notes And Diligence Signals",
+            title="8. Notes And Diligence Signals",
             subtitle="Paste the deal narrative, red flags, or broker notes. The agent scans this text for risk and upside cues.",
         )
         body.grid_columnconfigure(0, weight=1)
@@ -621,6 +834,8 @@ class LandUnderwriterDesktopApp:
             ("land_basis", "Land Basis"),
             ("site_spend", "Horizontal Spend"),
             ("absorption", "Absorption"),
+            ("market_price", "Price Position"),
+            ("market_pace", "Pace Position"),
         ):
             card = tk.Frame(panel, bg=COLORS["card_alt"], padx=12, pady=10, highlightbackground=COLORS["line"], highlightthickness=1)
             card.pack(fill="x", pady=(0, 10))
@@ -739,13 +954,16 @@ class LandUnderwriterDesktopApp:
 
         decision_tab = tk.Frame(right_tabs, bg=COLORS["bg"])
         series_tab = tk.Frame(right_tabs, bg=COLORS["bg"])
+        market_tab = tk.Frame(right_tabs, bg=COLORS["bg"])
         raw_tab = tk.Frame(right_tabs, bg=COLORS["bg"])
         right_tabs.add(decision_tab, text="Decision")
         right_tabs.add(series_tab, text="Series + Schedule")
+        right_tabs.add(market_tab, text="Market / CMA")
         right_tabs.add(raw_tab, text="Raw JSON")
 
         self._build_decision_tab(decision_tab)
         self._build_series_tab(series_tab)
+        self._build_market_tab(market_tab)
         self._build_raw_result_tab(raw_tab)
 
     def _build_decision_tab(self, parent: tk.Widget) -> None:
@@ -788,7 +1006,8 @@ class LandUnderwriterDesktopApp:
     def _build_series_tab(self, parent: tk.Widget) -> None:
         parent.grid_columnconfigure(0, weight=1)
         parent.grid_rowconfigure(1, weight=1)
-        parent.grid_rowconfigure(3, weight=1)
+        parent.grid_rowconfigure(3, weight=0)
+        parent.grid_rowconfigure(5, weight=1)
 
         tk.Label(parent, text="Base-Case Series Mix", bg=COLORS["bg"], fg=COLORS["navy"], font=("Segoe UI", 10, "bold")).grid(row=0, column=0, sticky="w", pady=(6, 4))
         self.series_tree = ttk.Treeview(
@@ -809,7 +1028,17 @@ class LandUnderwriterDesktopApp:
             self.series_tree.column(key, width=width, anchor="center")
         self.series_tree.grid(row=1, column=0, sticky="nsew")
 
-        tk.Label(parent, text="Base-Case Schedule", bg=COLORS["bg"], fg=COLORS["navy"], font=("Segoe UI", 10, "bold")).grid(row=2, column=0, sticky="w", pady=(12, 4))
+        tk.Label(parent, text="Schedule Timeline", bg=COLORS["bg"], fg=COLORS["navy"], font=("Segoe UI", 10, "bold")).grid(row=2, column=0, sticky="w", pady=(12, 4))
+        self.result_schedule_canvas = tk.Canvas(
+            parent,
+            bg=COLORS["card"],
+            height=170,
+            highlightthickness=1,
+            highlightbackground=COLORS["line"],
+        )
+        self.result_schedule_canvas.grid(row=3, column=0, sticky="ew")
+
+        tk.Label(parent, text="Base-Case Schedule Summary", bg=COLORS["bg"], fg=COLORS["navy"], font=("Segoe UI", 10, "bold")).grid(row=4, column=0, sticky="w", pady=(12, 4))
         self.schedule_text = ScrolledText(
             parent,
             height=10,
@@ -820,8 +1049,66 @@ class LandUnderwriterDesktopApp:
             relief="flat",
             borderwidth=1,
         )
-        self.schedule_text.grid(row=3, column=0, sticky="nsew")
+        self.schedule_text.grid(row=5, column=0, sticky="nsew")
         self.schedule_text.configure(state="disabled")
+
+    def _build_market_tab(self, parent: tk.Widget) -> None:
+        parent.grid_columnconfigure(0, weight=1)
+        parent.grid_rowconfigure(1, weight=0)
+        parent.grid_rowconfigure(3, weight=1)
+        parent.grid_rowconfigure(5, weight=1)
+
+        tk.Label(
+            parent,
+            text="Market Readout",
+            bg=COLORS["bg"],
+            fg=COLORS["navy"],
+            font=("Segoe UI", 10, "bold"),
+        ).grid(row=0, column=0, sticky="w", pady=(6, 4))
+        self.market_text = ScrolledText(
+            parent,
+            height=8,
+            wrap="word",
+            font=("Segoe UI", 10),
+            bg=COLORS["card"],
+            fg=COLORS["ink"],
+            relief="flat",
+            borderwidth=1,
+        )
+        self.market_text.grid(row=1, column=0, sticky="ew")
+        self.market_text.configure(state="disabled")
+
+        tk.Label(
+            parent,
+            text="Revenue Velocity",
+            bg=COLORS["bg"],
+            fg=COLORS["navy"],
+            font=("Segoe UI", 10, "bold"),
+        ).grid(row=2, column=0, sticky="w", pady=(12, 4))
+        self.market_revenue_canvas = tk.Canvas(
+            parent,
+            bg=COLORS["card"],
+            height=190,
+            highlightthickness=1,
+            highlightbackground=COLORS["line"],
+        )
+        self.market_revenue_canvas.grid(row=3, column=0, sticky="nsew")
+
+        tk.Label(
+            parent,
+            text="Resale Price / Sqft",
+            bg=COLORS["bg"],
+            fg=COLORS["navy"],
+            font=("Segoe UI", 10, "bold"),
+        ).grid(row=4, column=0, sticky="w", pady=(12, 4))
+        self.market_resale_canvas = tk.Canvas(
+            parent,
+            bg=COLORS["card"],
+            height=210,
+            highlightthickness=1,
+            highlightbackground=COLORS["line"],
+        )
+        self.market_resale_canvas.grid(row=5, column=0, sticky="nsew")
 
     def _build_raw_result_tab(self, parent: tk.Widget) -> None:
         parent.grid_columnconfigure(0, weight=1)
@@ -979,6 +1266,11 @@ class LandUnderwriterDesktopApp:
             for variable in row.values():
                 variable.trace_add("write", lambda *_: self._schedule_refresh())
 
+        for row_group in (self.phase_rows, self.competitor_rows, self.resale_rows):
+            for row in row_group:
+                for variable in row.values():
+                    variable.trace_add("write", lambda *_: self._schedule_refresh())
+
         for widget in (self.notes_text, self.events_text):
             widget.bind("<KeyRelease>", lambda event: self._schedule_refresh())
             widget.bind("<FocusOut>", lambda event: self._schedule_refresh())
@@ -1029,6 +1321,11 @@ class LandUnderwriterDesktopApp:
         density = (total_lots / gross_acres) if gross_acres > 0 else None
         avg_net_price = (rough_revenue / total_lots) if total_lots > 0 else None
         land_per_lot = (land_basis / total_lots) if total_lots > 0 else None
+        subject_sqft_total = sum(
+            float(item.get("avg_sqft", 0) or 0) * float(item.get("lots", 0) or 0)
+            for item in series
+        )
+        subject_avg_sqft = (subject_sqft_total / total_lots) if total_lots > 0 else None
 
         def set_card(key: str, value: str, note: str) -> None:
             value_label, note_label = self.overview_cards[key]
@@ -1062,6 +1359,47 @@ class LandUnderwriterDesktopApp:
             _format_number(monthly_absorption, 2),
             f"Approx. sellout {_format_number(sellout_months, 1)} months",
         )
+
+        competitors = payload.get("competitor_projects", [])
+        competitor_avg_price = (
+            sum(float(item.get("avg_price", 0) or 0) for item in competitors) / len(competitors)
+            if competitors
+            else None
+        )
+        competitor_avg_pace = (
+            sum(float(item.get("monthly_absorption", 0) or 0) for item in competitors) / len(competitors)
+            if competitors
+            else None
+        )
+        resales = payload.get("resale_comps", [])
+        resale_avg_psf = None
+        if resales:
+            resale_psf_values = []
+            for item in resales:
+                close_price = float(item.get("close_price", 0) or 0)
+                sqft = float(item.get("sqft", 0) or 0)
+                if close_price > 0 and sqft > 0:
+                    resale_psf_values.append(close_price / sqft)
+            if resale_psf_values:
+                resale_avg_psf = sum(resale_psf_values) / len(resale_psf_values)
+
+        avg_net_psf = (avg_net_price / subject_avg_sqft) if avg_net_price and subject_avg_sqft else None
+
+        if competitor_avg_price:
+            price_note = f"Vs comps {_format_pct((avg_net_price - competitor_avg_price) / competitor_avg_price) if avg_net_price else '-'}"
+        elif resale_avg_psf and avg_net_psf:
+            price_note = f"Vs resale PPSF {_format_pct((avg_net_psf - resale_avg_psf) / resale_avg_psf)}"
+        else:
+            price_note = "Add competitor or resale data"
+        set_card("market_price", _format_currency(competitor_avg_price or avg_net_price), price_note)
+
+        if competitor_avg_pace:
+            pace_note = f"Target delta {_format_pct((monthly_absorption - competitor_avg_pace) / competitor_avg_pace) if monthly_absorption else 0}"
+            set_card("market_pace", _format_number(competitor_avg_pace, 2), pace_note)
+        else:
+            set_card("market_pace", _format_number(monthly_absorption, 2), "Add competitor pace to benchmark")
+
+        self._draw_builder_schedule_preview(payload)
 
     def _request_from_form(self, strict: bool = True) -> dict[str, Any]:
         def text_value(key: str) -> str:
@@ -1229,8 +1567,55 @@ class LandUnderwriterDesktopApp:
         payload["product_series"] = series_payload
 
         events_payload: list[dict[str, Any]] = []
+        phase_payload: list[dict[str, Any]] = []
+        for index, row in enumerate(self.phase_rows, start=1):
+            row_text = {key: str(value.get()).strip() for key, value in row.items()}
+            default_name = f"Phase {index}"
+            has_content = any(value for key, value in row_text.items() if key != "name") or (
+                row_text.get("name") not in ("", default_name)
+            )
+            if not has_content:
+                continue
+
+            try:
+                month = _parse_optional_int(row_text.get("month", "")) if row_text.get("month") else None
+                lots = _parse_optional_float(row_text.get("lots", "")) if row_text.get("lots") else None
+                price_per_lot = (
+                    _parse_optional_float(row_text.get("price_per_lot", ""))
+                    if row_text.get("price_per_lot")
+                    else None
+                )
+            except ValueError as error:
+                if strict:
+                    raise ValueError(f"Phase row {index} has an invalid number.") from error
+                continue
+
+            if strict and month is None:
+                raise ValueError(f"Phase row {index} needs a Close Month.")
+            if strict and (lots is None or lots <= 0):
+                raise ValueError(f"Phase row {index} needs positive Lots.")
+            if strict and (price_per_lot is None or price_per_lot <= 0):
+                raise ValueError(f"Phase row {index} needs a positive Price / Lot.")
+            if month is None or lots is None or lots <= 0 or price_per_lot is None or price_per_lot <= 0:
+                continue
+
+            phase_item = {
+                "name": row_text.get("name") or default_name,
+                "month": max(0, month),
+                "lots": lots,
+                "price_per_lot": price_per_lot,
+            }
+            phase_payload.append(phase_item)
+            events_payload.append(
+                {
+                    "month": phase_item["month"],
+                    "lots": phase_item["lots"],
+                    "price_per_lot": phase_item["price_per_lot"],
+                }
+            )
+
         raw_events = self.events_text.get("1.0", "end").strip()
-        if raw_events:
+        if raw_events and not events_payload:
             for line_number, raw_line in enumerate(raw_events.splitlines(), start=1):
                 line = raw_line.strip()
                 if not line:
@@ -1264,11 +1649,75 @@ class LandUnderwriterDesktopApp:
                     }
                 )
 
+        if phase_payload:
+            payload["schedule_phases"] = phase_payload
         if events_payload:
             payload["land_purchase_events"] = events_payload
 
         if strict and not events_payload and (payload.get("land_purchase_price_per_lot") or 0) <= 0:
             raise ValueError("Enter Land Price / Lot or at least one Takedown Event.")
+
+        competitor_payload: list[dict[str, Any]] = []
+        for row in self.competitor_rows:
+            item = {key: str(value.get()).strip() for key, value in row.items()}
+            if not any(item.values()):
+                continue
+            try:
+                monthly_absorption = (
+                    _parse_optional_float(item.get("monthly_absorption", ""))
+                    if item.get("monthly_absorption")
+                    else None
+                )
+                avg_price = _parse_optional_float(item.get("avg_price", "")) if item.get("avg_price") else None
+                avg_sqft = _parse_optional_float(item.get("avg_sqft", "")) if item.get("avg_sqft") else None
+            except ValueError as error:
+                if strict:
+                    raise ValueError("Competitor rows must contain valid numbers.") from error
+                continue
+
+            competitor_item: dict[str, Any] = {
+                "name": item.get("name") or "Comparable Community",
+                "status": item.get("status") or "",
+            }
+            assign_if_present(competitor_item, "monthly_absorption", monthly_absorption)
+            assign_if_present(competitor_item, "avg_price", avg_price)
+            assign_if_present(competitor_item, "avg_sqft", avg_sqft)
+            if any(key in competitor_item for key in ("monthly_absorption", "avg_price", "avg_sqft")):
+                competitor_payload.append(competitor_item)
+
+        if competitor_payload:
+            payload["competitor_projects"] = competitor_payload
+
+        resale_payload: list[dict[str, Any]] = []
+        for row in self.resale_rows:
+            item = {key: str(value.get()).strip() for key, value in row.items()}
+            if not any(item.values()):
+                continue
+            try:
+                close_price = _parse_optional_float(item.get("close_price", "")) if item.get("close_price") else None
+                sqft = _parse_optional_float(item.get("sqft", "")) if item.get("sqft") else None
+                distance_miles = (
+                    _parse_optional_float(item.get("distance_miles", ""))
+                    if item.get("distance_miles")
+                    else None
+                )
+            except ValueError as error:
+                if strict:
+                    raise ValueError("Resale rows must contain valid numbers.") from error
+                continue
+
+            resale_item: dict[str, Any] = {
+                "name": item.get("name") or "Resale Comp",
+                "close_date": item.get("close_date") or "",
+            }
+            assign_if_present(resale_item, "close_price", close_price)
+            assign_if_present(resale_item, "sqft", sqft)
+            assign_if_present(resale_item, "distance_miles", distance_miles)
+            if "close_price" in resale_item or "sqft" in resale_item:
+                resale_payload.append(resale_item)
+
+        if resale_payload:
+            payload["resale_comps"] = resale_payload
 
         return payload
 
@@ -1394,13 +1843,53 @@ class LandUnderwriterDesktopApp:
                 row["tap_fees_per_unit"].set("")
                 row["move_up"].set(False)
 
-        raw_events = payload.get("land_purchase_events") or payload.get("takedown_schedule") or []
+        raw_events = payload.get("schedule_phases") or payload.get("land_purchase_events") or payload.get("takedown_schedule") or []
+        for index, row in enumerate(self.phase_rows):
+            default_name = f"Phase {index + 1}"
+            if index < len(raw_events):
+                item = raw_events[index]
+                row["name"].set(str(item.get("name") or default_name))
+                row["month"].set(_format_input_number(item.get("month"), 0))
+                row["lots"].set(_format_input_number(item.get("lots")))
+                row["price_per_lot"].set(_format_input_number(item.get("price_per_lot")))
+            else:
+                row["name"].set(default_name)
+                row["month"].set("")
+                row["lots"].set("")
+                row["price_per_lot"].set("")
+
         event_lines = [
             f"{int(item.get('month', 0))},{_format_input_number(item.get('lots'))},{_format_input_number(item.get('price_per_lot'))}"
             for item in raw_events
         ]
         self.events_text.delete("1.0", "end")
         self.events_text.insert("1.0", "\n".join(event_lines))
+
+        competitors = list(payload.get("competitor_projects") or [])
+        for index, row in enumerate(self.competitor_rows):
+            if index < len(competitors):
+                item = competitors[index]
+                row["name"].set(str(item.get("name") or ""))
+                row["monthly_absorption"].set(_format_input_number(item.get("monthly_absorption")))
+                row["avg_price"].set(_format_input_number(item.get("avg_price")))
+                row["avg_sqft"].set(_format_input_number(item.get("avg_sqft")))
+                row["status"].set(str(item.get("status") or ""))
+            else:
+                for variable in row.values():
+                    variable.set("")
+
+        resales = list(payload.get("resale_comps") or [])
+        for index, row in enumerate(self.resale_rows):
+            if index < len(resales):
+                item = resales[index]
+                row["name"].set(str(item.get("name") or ""))
+                row["close_price"].set(_format_input_number(item.get("close_price")))
+                row["sqft"].set(_format_input_number(item.get("sqft")))
+                row["distance_miles"].set(_format_input_number(item.get("distance_miles")))
+                row["close_date"].set(str(item.get("close_date") or ""))
+            else:
+                for variable in row.values():
+                    variable.set("")
 
         self.notes_text.delete("1.0", "end")
         self.notes_text.insert("1.0", str(payload.get("notes") or ""))
@@ -1687,6 +2176,7 @@ class LandUnderwriterDesktopApp:
         self._draw_chart(display_result)
         self._populate_decision_tab(display_result)
         self._populate_series_tab(display_result)
+        self._populate_market_tab(display_result)
         self._render_raw_result(result)
 
     def _update_banner(self, result: dict[str, Any] | None) -> None:
@@ -1893,6 +2383,136 @@ class LandUnderwriterDesktopApp:
                 font=("Segoe UI", 9, "bold"),
             )
 
+    def _draw_schedule_canvas(
+        self,
+        canvas: tk.Canvas,
+        *,
+        phases: list[dict[str, Any]],
+        milestones: list[tuple[str, int, str]],
+        horizon: int,
+    ) -> None:
+        canvas.delete("all")
+        width = max(canvas.winfo_width(), 560)
+        height = max(canvas.winfo_height(), 170)
+        left = 70
+        right = width - 18
+        top = 20
+        axis_y = height - 34
+        plot_width = max(120, right - left)
+        horizon = max(1, horizon)
+
+        def x_for(month: int) -> float:
+            return left + (max(0, month) / horizon) * plot_width
+
+        canvas.create_line(left, axis_y, right, axis_y, fill=COLORS["line"], width=2)
+        tick_step = max(1, horizon // 6)
+        for month in range(0, horizon + 1, tick_step):
+            x = x_for(month)
+            canvas.create_line(x, axis_y - 6, x, axis_y + 6, fill=COLORS["line"])
+            canvas.create_text(x, axis_y + 18, text=str(month), fill=COLORS["muted"], font=("Segoe UI", 8))
+
+        phase_y = top + 72
+        canvas.create_text(left, top - 4, text="Milestones", anchor="w", fill=COLORS["navy"], font=("Segoe UI", 9, "bold"))
+        for index, (label, month, detail) in enumerate(milestones):
+            x = x_for(month)
+            color = COLORS["accent"] if "Close" in label else COLORS["navy"]
+            canvas.create_line(x, top + 12, x, axis_y - 10, fill=color, dash=(3, 4))
+            canvas.create_oval(x - 5, top + 18, x + 5, top + 28, fill=color, outline="")
+            canvas.create_text(
+                x,
+                top + 2 if index % 2 == 0 else top + 44,
+                text=f"{label}\nM{month}",
+                fill=COLORS["ink"],
+                font=("Segoe UI", 8, "bold"),
+                justify="center",
+            )
+            if detail:
+                canvas.create_text(
+                    x,
+                    top + 56 if index % 2 == 0 else top + 30,
+                    text=detail,
+                    fill=COLORS["muted"],
+                    font=("Segoe UI", 8),
+                    justify="center",
+                )
+
+        for index, phase in enumerate(phases):
+            month = int(float(phase.get("month", 0) or 0))
+            x = x_for(month)
+            y = phase_y + index * 18
+            lots = _format_number(phase.get("lots"), 0)
+            price = _format_currency(phase.get("price_per_lot"))
+            fill = COLORS["green_soft"] if index % 2 == 0 else COLORS["accent_soft"]
+            outline = COLORS["green"] if index % 2 == 0 else COLORS["accent"]
+            canvas.create_rectangle(x - 10, y - 6, x + 10, y + 6, fill=fill, outline=outline)
+            canvas.create_text(
+                left - 8,
+                y,
+                text=str(phase.get("name") or f"Phase {index + 1}"),
+                anchor="e",
+                fill=COLORS["ink"],
+                font=("Segoe UI", 8, "bold"),
+            )
+            canvas.create_text(
+                x + 18,
+                y,
+                text=f"{lots} lots | {price}",
+                anchor="w",
+                fill=COLORS["muted"],
+                font=("Segoe UI", 8),
+            )
+
+    def _draw_builder_schedule_preview(self, payload: dict[str, Any]) -> None:
+        phases = list(payload.get("schedule_phases") or payload.get("land_purchase_events") or [])
+        total_lots = sum(float(item.get("lots", 0) or 0) for item in payload.get("product_series", []))
+        monthly_absorption = float(payload.get("monthly_absorption", 0) or 0)
+        months_to_first_home_start = int(payload.get("months_to_first_home_start", 0) or 0)
+        months_to_sales_open = int(payload.get("months_to_sales_open", 0) or 0)
+        build_cycle_months = int(payload.get("build_cycle_months", 0) or 0)
+        months_to_first_close = payload.get("months_to_first_close")
+        first_close_month = (
+            int(months_to_first_close)
+            if months_to_first_close not in (None, "")
+            else months_to_first_home_start + build_cycle_months
+        )
+        sellout_months = int(math.ceil(total_lots / monthly_absorption)) if total_lots and monthly_absorption else 0
+        last_close_month = first_close_month + max(0, sellout_months - 1)
+        milestones = [
+            ("Land Close", 0, str(payload.get("land_close_date") or "")),
+            ("First Start", months_to_first_home_start, ""),
+            ("Sales Open", months_to_sales_open, ""),
+            ("First Close", first_close_month, ""),
+            ("Sellout", last_close_month, ""),
+        ]
+        horizon = max([item[1] for item in milestones] + [int(float(item.get("month", 0) or 0)) for item in phases] + [1]) + 2
+        self._draw_schedule_canvas(
+            self.builder_schedule_canvas,
+            phases=phases,
+            milestones=milestones,
+            horizon=horizon,
+        )
+
+    def _draw_result_schedule(self, result: dict[str, Any]) -> None:
+        assumptions = result.get("assumptions", {})
+        base_case = result.get("scenarios", {}).get("base_case", {})
+        schedule = base_case.get("schedule", {})
+        dates = schedule.get("date_summary") or {}
+        phases = list(assumptions.get("land_purchase_events") or [])
+        milestones = [
+            ("Land Close", 0, str(dates.get("land_close_date") or "")),
+            ("First Start", int(schedule.get("months_to_first_home_start", 0) or 0), str(dates.get("first_home_start_date") or "")),
+            ("Sales Open", int(schedule.get("months_to_sales_open", 0) or 0), str(dates.get("sales_open_date") or "")),
+            ("First Close", int(schedule.get("months_to_first_close", 0) or 0), str(dates.get("first_close_date") or "")),
+            ("Last Close", int(schedule.get("months_to_last_close", 0) or 0), str(dates.get("last_close_date") or "")),
+        ]
+        horizon = max([item[1] for item in milestones] + [int(float(item.get("month", 0) or 0)) for item in phases] + [1]) + 2
+        self._draw_schedule_canvas(
+            self.result_schedule_canvas,
+            phases=phases,
+            milestones=milestones,
+            horizon=horizon,
+        )
+
     def _populate_decision_tab(self, result: dict[str, Any]) -> None:
         lines = [f"Recommendation: {str(result.get('recommendation') or '').upper()}", ""]
 
@@ -2005,6 +2625,152 @@ class LandUnderwriterDesktopApp:
         self.schedule_text.delete("1.0", "end")
         self.schedule_text.insert("1.0", "\n".join(schedule_lines))
         self.schedule_text.configure(state="disabled")
+        self._draw_result_schedule(result)
+
+    def _populate_market_tab(self, result: dict[str, Any]) -> None:
+        market = result.get("market_intelligence")
+        if not market:
+            self.market_text.configure(state="normal")
+            self.market_text.delete("1.0", "end")
+            self.market_text.insert(
+                "1.0",
+                "No competitor or resale data was supplied. Add market rows in the builder to benchmark price and pace.",
+            )
+            self.market_text.configure(state="disabled")
+            self.market_revenue_canvas.delete("all")
+            self.market_resale_canvas.delete("all")
+            return
+
+        subject = market.get("subject", {})
+        competitors = market.get("competitors", {})
+        resales = market.get("resales", {})
+        positioning = market.get("positioning", {})
+
+        lines = [
+            f"Subject net price: {_format_currency(subject.get('average_net_price'))}",
+            f"Subject price / sqft: {_format_currency(subject.get('price_psf'))}",
+            f"Subject monthly revenue velocity: {_format_currency(subject.get('revenue_per_month'))}",
+            "",
+            f"Competitor average price: {_format_currency(competitors.get('average_price'))}",
+            f"Competitor average pace: {_format_number(competitors.get('average_absorption'), 2)} / month",
+            f"Resale average price / sqft: {_format_currency(resales.get('average_price_psf'))}",
+            "",
+            f"Price vs competitors: {_format_pct(positioning.get('subject_vs_competitor_price_pct'))}",
+            f"Pace vs competitors: {_format_pct(positioning.get('subject_vs_competitor_absorption_pct'))}",
+            f"PPSF vs resale: {_format_pct(positioning.get('subject_vs_resale_psf_pct'))}",
+        ]
+        if market.get("risk_flags"):
+            lines.extend(["", "Market Risks:"])
+            for item in market["risk_flags"]:
+                lines.append(f"- {item}")
+        if market.get("upside_flags"):
+            lines.extend(["", "Market Support:"])
+            for item in market["upside_flags"]:
+                lines.append(f"- {item}")
+
+        self.market_text.configure(state="normal")
+        self.market_text.delete("1.0", "end")
+        self.market_text.insert("1.0", "\n".join(lines))
+        self.market_text.configure(state="disabled")
+
+        self._draw_market_revenue_chart(market)
+        self._draw_market_resale_chart(market)
+
+    def _draw_market_revenue_chart(self, market: dict[str, Any]) -> None:
+        canvas = self.market_revenue_canvas
+        canvas.delete("all")
+        width = max(canvas.winfo_width(), 520)
+        height = max(canvas.winfo_height(), 190)
+        left = 44
+        bottom = height - 26
+        bar_width = 72
+        gap = 24
+
+        data = [("Subject", float(market["subject"].get("revenue_per_month", 0) or 0))]
+        for item in list(market.get("competitors", {}).get("rows") or [])[:4]:
+            data.append((str(item.get("name") or "Comp"), float(item.get("revenue_per_month", 0) or 0)))
+        if not data:
+            return
+
+        max_value = max(value for _, value in data) or 1.0
+        start_x = left + max(0, (width - left - 18 - (len(data) * bar_width + (len(data) - 1) * gap)) / 2)
+        colors = [COLORS["accent"], COLORS["navy"], COLORS["navy_soft"], COLORS["green"], COLORS["amber"]]
+
+        canvas.create_line(left, bottom, width - 18, bottom, fill=COLORS["line"], width=2)
+        for index, (label, value) in enumerate(data):
+            x1 = start_x + index * (bar_width + gap)
+            x2 = x1 + bar_width
+            bar_height = 0 if max_value <= 0 else (value / max_value) * (height - 60)
+            y1 = bottom - bar_height
+            canvas.create_rectangle(x1, y1, x2, bottom, fill=colors[index % len(colors)], outline="")
+            canvas.create_text((x1 + x2) / 2, y1 - 12, text=_format_currency(value), fill=COLORS["ink"], font=("Segoe UI", 8, "bold"))
+            canvas.create_text((x1 + x2) / 2, bottom + 14, text=label[:14], fill=COLORS["muted"], font=("Segoe UI", 8))
+
+    def _draw_market_resale_chart(self, market: dict[str, Any]) -> None:
+        canvas = self.market_resale_canvas
+        canvas.delete("all")
+        width = max(canvas.winfo_width(), 520)
+        height = max(canvas.winfo_height(), 210)
+        left = 54
+        right = width - 20
+        top = 16
+        bottom = height - 34
+
+        rows = list(market.get("resales", {}).get("rows") or [])
+        if not rows:
+            canvas.create_text(
+                width / 2,
+                height / 2,
+                text="Add resale comps to plot price / sqft support.",
+                fill=COLORS["muted"],
+                font=("Segoe UI", 10),
+            )
+            return
+
+        sqft_values = [float(item.get("sqft", 0) or 0) for item in rows if float(item.get("sqft", 0) or 0) > 0]
+        ppsf_values = [float(item.get("price_psf", 0) or 0) for item in rows if float(item.get("price_psf", 0) or 0) > 0]
+        if not sqft_values or not ppsf_values:
+            return
+
+        min_sqft = min(sqft_values)
+        max_sqft = max(sqft_values)
+        min_ppsf = min(ppsf_values)
+        max_ppsf = max(ppsf_values)
+        if max_sqft == min_sqft:
+            max_sqft += 1
+        if max_ppsf == min_ppsf:
+            max_ppsf += 1
+
+        canvas.create_line(left, bottom, right, bottom, fill=COLORS["line"], width=2)
+        canvas.create_line(left, top, left, bottom, fill=COLORS["line"], width=2)
+
+        def x_for(value: float) -> float:
+            return left + ((value - min_sqft) / (max_sqft - min_sqft)) * (right - left)
+
+        def y_for(value: float) -> float:
+            return bottom - ((value - min_ppsf) / (max_ppsf - min_ppsf)) * (bottom - top)
+
+        canvas.create_text(left, top - 4, text=f"${min_ppsf:,.0f}/sf", anchor="w", fill=COLORS["muted"], font=("Segoe UI", 8))
+        canvas.create_text(left, bottom + 16, text=f"{min_sqft:,.0f} sf", anchor="w", fill=COLORS["muted"], font=("Segoe UI", 8))
+        canvas.create_text(right, bottom + 16, text=f"{max_sqft:,.0f} sf", anchor="e", fill=COLORS["muted"], font=("Segoe UI", 8))
+
+        subject_sqft = float(market["subject"].get("average_sqft", 0) or 0)
+        subject_ppsf = float(market["subject"].get("price_psf", 0) or 0)
+
+        for item in rows:
+            sqft = float(item.get("sqft", 0) or 0)
+            ppsf = float(item.get("price_psf", 0) or 0)
+            if sqft <= 0 or ppsf <= 0:
+                continue
+            x = x_for(sqft)
+            y = y_for(ppsf)
+            canvas.create_oval(x - 4, y - 4, x + 4, y + 4, fill=COLORS["navy"], outline="")
+
+        if subject_sqft > 0 and subject_ppsf > 0:
+            x = x_for(subject_sqft)
+            y = y_for(subject_ppsf)
+            canvas.create_oval(x - 7, y - 7, x + 7, y + 7, fill=COLORS["accent"], outline="")
+            canvas.create_text(x + 10, y - 10, text="Subject", anchor="w", fill=COLORS["accent"], font=("Segoe UI", 8, "bold"))
 
     def _render_raw_result(self, result: Any) -> None:
         rendered = json.dumps(result, indent=2)
