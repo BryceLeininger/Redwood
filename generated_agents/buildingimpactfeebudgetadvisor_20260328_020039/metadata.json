@@ -1,0 +1,30 @@
+{
+  "created_at_utc": "2026-03-28T02:00:39.268615+00:00",
+  "artifact_paths": {
+    "model": "generated_agents\\buildingimpactfeebudgetadvisor_20260328_020039\\model.joblib",
+    "knowledge_index": "generated_agents\\buildingimpactfeebudgetadvisor_20260328_020039\\knowledge.joblib"
+  },
+  "training_dataset": "C:\\Users\\Bryce Leininger\\Documents\\GitHub\\Redwood\\agent_factory\\examples\\building_fee_budgeter\\training.csv",
+  "knowledge_files": [
+    "C:\\Users\\Bryce Leininger\\Documents\\GitHub\\Redwood\\agent_factory\\examples\\building_fee_budgeter\\knowledge\\agency_coverage_checklist.md",
+    "C:\\Users\\Bryce Leininger\\Documents\\GitHub\\Redwood\\agent_factory\\examples\\building_fee_budgeter\\knowledge\\official_fee_budgeting_playbook.md",
+    "C:\\Users\\Bryce Leininger\\Documents\\GitHub\\Redwood\\agent_factory\\examples\\building_fee_budgeter\\knowledge\\quality_control_checklist.md"
+  ],
+  "blueprint": {
+    "name": "BuildingImpactFeeBudgetAdvisor",
+    "description": "Validates building and impact fee intake packets, flags missing agency inputs, and supports deterministic fee budget assembly.",
+    "topic": "Building and Impact Fee Budgeting",
+    "task_type": "classification",
+    "input_column": "input",
+    "target_column": "target"
+  },
+  "training": {
+    "total_rows": 24,
+    "train_rows": 19,
+    "evaluation_rows": 5,
+    "used_holdout_split": true,
+    "metric_name": "accuracy",
+    "metric_value": 0.2,
+    "task_type": "classification"
+  }
+}
