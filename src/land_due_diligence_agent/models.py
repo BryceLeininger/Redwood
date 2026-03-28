@@ -49,6 +49,8 @@ class ReadingRecommendation:
     relative_path: str
     priority: int
     reason: str
+    confidence: str
+    focus_areas: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -61,6 +63,9 @@ class DocumentAnalysis:
     seller_questions: list[str]
     reading_priority: int
     reading_reason: str
+    confidence: str
+    confidence_reason: str
+    focus_areas: list[str] = field(default_factory=list)
     missing_items: list[str] = field(default_factory=list)
 
 
