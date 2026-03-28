@@ -620,6 +620,7 @@ class LandDealUnderwriter:
             name: self._scenario_hurdles(request, result)
             for name, result in scenario_results.items()
         }
+        sensitivity_matrix = self._sensitivity_matrix(request)
 
         model_signal = self._model_signal(request, base_case)
         recommendation, reasons = self._recommendation(
@@ -630,6 +631,21 @@ class LandDealUnderwriter:
             hurdle_results=hurdle_results,
             note_hits=note_hits,
             model_signal=model_signal,
+            market_intelligence=market_intelligence,
+        )
+        deal_score = self._deal_score(
+            hurdle_results=hurdle_results,
+            note_hits=note_hits,
+            market_intelligence=market_intelligence,
+            base_case=base_case,
+        )
+        investment_committee_memo = self._investment_committee_memo(
+            request=request,
+            base_case=base_case,
+            hurdle_results=hurdle_results,
+            recommendation=recommendation,
+            reasons=reasons,
+            note_hits=note_hits,
             market_intelligence=market_intelligence,
         )
 
@@ -647,6 +663,9 @@ class LandDealUnderwriter:
             "scenarios": scenario_results,
             "model_signal": model_signal,
             "market_intelligence": market_intelligence,
+            "sensitivity_matrix": sensitivity_matrix,
+            "deal_score": deal_score,
+            "investment_committee_memo": investment_committee_memo,
             "assumptions": self._assumption_summary(request),
         }
 
