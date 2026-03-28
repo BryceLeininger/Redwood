@@ -1,0 +1,120 @@
+{
+  "community_name": "Community Name",
+  "division": "Bay Area Division",
+  "market": "Bay Area Division",
+  "gross_acres": 20,
+  "takedown_structure": "bulk",
+  "land_purchase_price_per_lot": 67500,
+  "land_brokerage_and_closing_costs_total": 35000,
+  "earnest_money_deposit": 500000,
+  "deposit_credit_at_close": true,
+  "land_development_cost_total": 10372353.13,
+  "project_management_cost_total": 114160.5,
+  "other_land_costs_total": 244865.63,
+  "architecture_engineering_total": 219375,
+  "indirect_field_overhead_per_month": 73982.5,
+  "capitalized_marketing_total": 414300,
+  "sales_commission_pct": 0.0237340426,
+  "corporate_charge_pct": 0.0376509438,
+  "home_sale_excise_tax_pct": 0,
+  "other_house_costs_per_unit": 19840.32,
+  "monthly_absorption": 3.125,
+  "build_cycle_months": 5,
+  "months_to_first_home_start": 6,
+  "months_to_sales_open": 9,
+  "land_close_date": "2027-04-30",
+  "target_gross_margin_pct": 0.21,
+  "target_pre_gna_margin_pct": 0.15,
+  "target_irr_pct": 0.2,
+  "downside_sales_price_delta_pct": -0.05,
+  "downside_cost_delta_pct": 0.05,
+  "downside_absorption_delta_pct": -0.15,
+  "severe_downside_sales_price_delta_pct": -0.1,
+  "severe_downside_cost_delta_pct": 0.1,
+  "severe_downside_absorption_delta_pct": -0.25,
+  "product_series": [
+    {
+      "name": "Product Series A",
+      "lots": 75,
+      "avg_sqft": 2300,
+      "base_house_price": 775000,
+      "lot_premium": 0,
+      "options_pct": 0,
+      "price_incentives_pct": 0.03,
+      "mortgage_incentives_pct": 0.03,
+      "direct_cost_psf": 90,
+      "direct_cost_contingency_pct": 0.02,
+      "permit_fees_per_unit": 75000,
+      "tap_fees_per_unit": 20000,
+      "other_vertical_costs_per_unit": 0,
+      "move_up": false
+    }
+  ],
+  "schedule_phases": [
+    {
+      "name": "Phase 1",
+      "month": 0,
+      "lots": 25,
+      "price_per_lot": 66000
+    },
+    {
+      "name": "Phase 2",
+      "month": 6,
+      "lots": 25,
+      "price_per_lot": 67500
+    },
+    {
+      "name": "Phase 3",
+      "month": 12,
+      "lots": 25,
+      "price_per_lot": 69000
+    }
+  ],
+  "competitor_projects": [
+    {
+      "name": "Ridgeview",
+      "monthly_absorption": 2.9,
+      "avg_price": 742000,
+      "avg_sqft": 2210,
+      "status": "Actively selling"
+    },
+    {
+      "name": "Fox Hollow",
+      "monthly_absorption": 3.1,
+      "avg_price": 758000,
+      "avg_sqft": 2285,
+      "status": "Model open"
+    },
+    {
+      "name": "The Bluffs",
+      "monthly_absorption": 2.7,
+      "avg_price": 735000,
+      "avg_sqft": 2195,
+      "status": "Late-stage release"
+    }
+  ],
+  "resale_comps": [
+    {
+      "name": "2211 Cedar Ridge Dr",
+      "close_price": 748000,
+      "sqft": 2255,
+      "distance_miles": 1.8,
+      "close_date": "2026-02-10"
+    },
+    {
+      "name": "1140 Hollow Creek Ln",
+      "close_price": 731500,
+      "sqft": 2178,
+      "distance_miles": 2.4,
+      "close_date": "2026-01-22"
+    },
+    {
+      "name": "905 Summit Oak Ct",
+      "close_price": 762000,
+      "sqft": 2294,
+      "distance_miles": 3.1,
+      "close_date": "2025-12-18"
+    }
+  ],
+  "notes": "75-lot single-family community with tentative map in place, utilities available, and conventional bulk closing economics. Verify entitlement timing, final map readiness, and any offsite utility or grading exposure before pricing."
+}

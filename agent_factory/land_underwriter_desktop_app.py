@@ -3185,11 +3185,59 @@ class LandUnderwriterDesktopApp:
         self._set_scrolled_text(self.memo_text, "\n".join(lines))
 
     def _render_raw_result(self, result: Any) -> None:
-        rendered = json.dumps(result, indent=2)
-        self.raw_result_text.configure(state="normal")
-        self.raw_result_text.delete("1.0", "end")
-        self.raw_result_text.insert("1.0", rendered)
-        self.raw_result_text.configure(state="disabled")
+        display_result = result[0] if isinstance(result, list) and result and isinstance(result[0], dict) else result
+        if not isinstance(display_result, dict):
+            self._set_scrolled_text(self.raw_result_text, "No readable deal report is available.")
+            return
+
+        base_case = display_result.get("scenarios", {}).get("base_case", {})
+        investment = base_case.get("investment_summary", {})
+        income = base_case.get("income_statement", {})
+        cash = base_case.get("cash_flow_metrics", {})
+        market = display_result.get("market_intelligence") or {}
+        memo = display_result.get("investment_committee_memo") or {}
+        assumptions = display_result.get("assumptions") or {}
+
+        lines = [
+            str(memo.get("headline") or f"{display_result.get('community_name', 'Deal')} Deep Dive"),
+            "",
+            str(memo.get("summary") or ""),
+            "",
+            "Investment Summary",
+            f"- Gross acres: {_format_number(investment.get('gross_acres'), 1)}",
+            f"- Total lots: {_format_number(investment.get('total_lots'), 0)}",
+            f"- Land cost / lot: {_format_currency(investment.get('land_cost_per_lot'))}",
+            f"- Finished lot cost / lot: {_format_currency(investment.get('finished_lot_cost_per_lot'))}",
+            f"- Residual support / lot: {_format_currency(investment.get('residual_max_land_cost_per_lot'))}",
+            f"- Land gap to residual: {_format_currency(investment.get('land_value_gap_to_residual'))}",
+            "",
+            "Operating Results",
+            f"- Revenue: {_format_currency(income.get('revenue_total'))}",
+            f"- Gross margin: {_format_pct(income.get('gross_margin_pct'))}",
+            f"- Pre-G&A margin: {_format_pct(income.get('pre_gna_margin_pct'))}",
+            f"- Peak investment: {_format_currency(cash.get('peak_investment'))}",
+            f"- IRR: {_format_pct(cash.get('irr_pre_gna_pct'))}",
+            "",
+            "Market Position",
+            f"- Competitor communities: {_format_number((market.get('competitors') or {}).get('count'), 0)}",
+            f"- Resale comps: {_format_number((market.get('resales') or {}).get('count'), 0)}",
+            f"- Subject vs competitor price: {_format_pct((market.get('positioning') or {}).get('subject_vs_competitor_price_pct'))}",
+            f"- Subject vs competitor pace: {_format_pct((market.get('positioning') or {}).get('subject_vs_competitor_absorption_pct'))}",
+            f"- Subject vs resale PPSF: {_format_pct((market.get('positioning') or {}).get('subject_vs_resale_psf_pct'))}",
+            "",
+            "Assumptions Snapshot",
+            f"- Monthly absorption: {_format_number(assumptions.get('monthly_absorption'), 2)}",
+            f"- Build cycle: {_format_number(assumptions.get('build_cycle_months'), 0)} months",
+            f"- First start: month {_format_number(assumptions.get('months_to_first_home_start'), 0)}",
+            f"- Sales open: month {_format_number(assumptions.get('months_to_sales_open'), 0)}",
+            f"- First close: month {_format_number(assumptions.get('months_to_first_close'), 0)}",
+            "",
+            "Recommendation Drivers",
+        ]
+        for item in display_result.get("recommendation_reasons", [])[:10]:
+            lines.append(f"- {item}")
+
+        self._set_scrolled_text(self.raw_result_text, "\n".join(lines))
 
     def _on_close(self) -> None:
         if self.refresh_job is not None:

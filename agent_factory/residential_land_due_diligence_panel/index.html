@@ -3,44 +3,52 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Residential Land Due Diligence Intake</title>
+  <title>Residential Land Due Diligence Studio</title>
   <link rel="stylesheet" href="/diligence/styles.css">
 </head>
 <body>
+  <div class="terrain"></div>
   <div class="page-shell">
-    <header class="hero">
+    <header class="hero-panel reveal">
       <div class="hero-copy">
-        <p class="eyebrow">Residential Land Due Diligence</p>
-        <h1>Capture the deal story, then pressure-test the risk posture fast.</h1>
+        <p class="eyebrow">Residential Land Due Diligence Studio</p>
+        <h1>Turn messy land notes into an acquisition read the team can actually act on.</h1>
         <p class="hero-text">
-          Use a structured intake for entitlement, utilities, title, environmental, and contract notes.
-          The panel will classify the opportunity as advance, targeted follow-up, or fatal flaw risk,
-          then let you ask the diligence agent follow-up questions against its playbook.
+          Capture raw broker notes, structure the deal by diligence bucket, then pressure-test posture,
+          risk stack, missing backup, and next questions without leaving the local panel.
         </p>
       </div>
-      <div class="hero-band">
-        <div class="hero-stat">
-          <span class="hero-stat-label">Primary use</span>
-          <strong>Acquisition screen</strong>
+      <div class="hero-board">
+        <div class="hero-chipboard">
+          <article class="hero-chip">
+            <span class="hero-chip-label">Studio mode</span>
+            <strong>Rapid intake + decision support</strong>
+          </article>
+          <article class="hero-chip">
+            <span class="hero-chip-label">Best for</span>
+            <strong>Homebuilder land screens</strong>
+          </article>
+          <article class="hero-chip">
+            <span class="hero-chip-label">Outputs</span>
+            <strong>Posture, risk map, brief, prompts</strong>
+          </article>
         </div>
-        <div class="hero-stat">
-          <span class="hero-stat-label">Output</span>
-          <strong>Posture + follow-up</strong>
-        </div>
-        <div class="hero-stat">
-          <span class="hero-stat-label">Mode</span>
-          <strong>Browser or desktop</strong>
+        <div class="hero-rhythm">
+          <span>1. Ingest notes</span>
+          <span>2. Structure risk</span>
+          <span>3. Assess posture</span>
+          <span>4. Ask smarter questions</span>
         </div>
       </div>
     </header>
 
-    <section class="workspace">
-      <aside class="intake-column">
-        <section class="panel-card compact-card">
-          <div class="card-header">
+    <section class="workbench">
+      <aside class="command-rail">
+        <section class="glass-card reveal delay-1">
+          <div class="card-topline">
             <div>
               <p class="section-kicker">Session</p>
-              <h2>Agent</h2>
+              <h2>Agent and samples</h2>
             </div>
             <span class="status-pill" id="appState" data-tone="idle">Loading</span>
           </div>
@@ -48,31 +56,74 @@
           <label class="field-label" for="agentSelect">Due diligence specialist</label>
           <select id="agentSelect"></select>
           <p class="field-hint" id="agentMeta">Looking for ResidentialLandDueDiligenceAdvisor artifacts.</p>
-        </section>
 
-        <section class="panel-card compact-card">
-          <div class="card-header">
-            <div>
-              <p class="section-kicker">Samples</p>
-              <h2>Load a starting point</h2>
-            </div>
-          </div>
-
-          <div class="sample-grid">
+          <div class="sample-row">
             <button type="button" class="secondary-button" data-sample="advance">Advance</button>
             <button type="button" class="secondary-button" data-sample="follow_up">Follow-Up</button>
             <button type="button" class="secondary-button" data-sample="fatal">Fatal Risk</button>
           </div>
-          <p class="field-hint">Samples populate the form so you can test the posture logic immediately.</p>
         </section>
 
-        <section class="panel-card form-card">
-          <div class="card-header">
+        <section class="glass-card health-card reveal delay-2">
+          <div class="card-topline compact-topline">
             <div>
-              <p class="section-kicker">Intake</p>
-              <h2>Opportunity notes</h2>
+              <p class="section-kicker">Draft health</p>
+              <h2>Coverage before you run</h2>
             </div>
-            <span class="status-line" id="runStatus">Waiting for input.</span>
+          </div>
+
+          <div class="health-layout">
+            <div class="health-dial" id="healthDial">
+              <div class="health-dial-core">
+                <strong id="healthPercent">0%</strong>
+                <span>Coverage</span>
+              </div>
+            </div>
+            <div class="health-stats">
+              <article>
+                <span class="stat-label">Filled sections</span>
+                <strong id="filledCount">0 / 7</strong>
+              </article>
+              <article>
+                <span class="stat-label">Detailed sections</span>
+                <strong id="detailedCount">0</strong>
+              </article>
+              <article>
+                <span class="stat-label">Draft signal</span>
+                <strong id="draftSignal">Thin</strong>
+              </article>
+            </div>
+          </div>
+
+          <div class="pill-tray" id="missingTrail"></div>
+          <p class="field-hint" id="runStatus">Waiting for input.</p>
+        </section>
+
+        <section class="glass-card reveal delay-3">
+          <div class="card-topline compact-topline">
+            <div>
+              <p class="section-kicker">Rapid ingest</p>
+              <h2>Paste raw notes</h2>
+            </div>
+          </div>
+
+          <label>
+            <span class="field-label">Broker email, seller memo, meeting notes</span>
+            <textarea id="scratchpadInput" rows="6" placeholder="Paste a rough land summary here, then route it into the structured fields below."></textarea>
+          </label>
+
+          <div class="action-row">
+            <button type="button" class="secondary-button" id="distributeNotes">Distribute notes</button>
+            <button type="button" class="ghost-button" id="clearScratchpad">Clear notes</button>
+          </div>
+        </section>
+
+        <section class="glass-card form-card reveal delay-4">
+          <div class="card-topline">
+            <div>
+              <p class="section-kicker">Structured intake</p>
+              <h2>Opportunity canvas</h2>
+            </div>
           </div>
 
           <div class="form-grid two-up">
@@ -93,7 +144,7 @@
 
           <label>
             <span class="field-label">Opportunity summary</span>
-            <textarea id="opportunitySummary" rows="4" placeholder="What is the seller offering, what product seems plausible, and why is the team looking at it?"></textarea>
+            <textarea id="opportunitySummary" rows="4" placeholder="What is the seller offering, why is this site interesting, and what product seems most realistic?"></textarea>
           </label>
 
           <div class="form-grid two-up">
@@ -128,15 +179,26 @@
               <textarea id="keyOpenItems" rows="5" placeholder="What still has to be proven before the team should spend more time or capital?"></textarea>
             </label>
           </div>
+        </section>
 
-          <div class="action-row">
+        <section class="glass-card reveal delay-5">
+          <div class="card-topline compact-topline">
+            <div>
+              <p class="section-kicker">Actions</p>
+              <h2>Run and export</h2>
+            </div>
+          </div>
+
+          <div class="action-stack">
             <button type="button" class="primary-button" id="runAssessment">Assess diligence posture</button>
-            <button type="button" class="ghost-button" id="clearForm">Clear</button>
+            <button type="button" class="secondary-button" id="copyBrief">Copy diligence brief</button>
+            <button type="button" class="secondary-button" id="exportJson">Export JSON snapshot</button>
+            <button type="button" class="ghost-button" id="clearForm">Clear structured draft</button>
           </div>
         </section>
 
-        <section class="panel-card compact-card">
-          <div class="card-header">
+        <section class="glass-card reveal delay-6">
+          <div class="card-topline compact-topline">
             <div>
               <p class="section-kicker">Follow-up</p>
               <h2>Ask the playbook</h2>
@@ -145,50 +207,107 @@
 
           <label>
             <span class="field-label">Question</span>
-            <textarea id="questionInput" rows="4" placeholder="Ask what to verify next, how to frame a contract issue, or where a diligence gap usually breaks the deal."></textarea>
+            <textarea id="questionInput" rows="4" placeholder="Ask what to verify next, how to frame a contract issue, or which missing document matters most."></textarea>
           </label>
 
           <div class="action-row">
             <button type="button" class="secondary-button" id="loadQuestion">Load sample question</button>
             <button type="button" class="primary-button subtle-button" id="askQuestion">Ask agent</button>
           </div>
+
+          <div class="prompt-cloud" id="promptSuggestions"></div>
         </section>
       </aside>
 
-      <main class="results-column">
-        <section class="summary-strip">
-          <article class="summary-card">
-            <span class="summary-label">Current posture</span>
-            <strong id="postureSummary">No assessment yet</strong>
+      <main class="insight-stage">
+        <section class="scoreboard reveal delay-2">
+          <article class="metric-card">
+            <span class="metric-label">Posture</span>
+            <strong id="postureSummary">Drafting</strong>
           </article>
-          <article class="summary-card">
-            <span class="summary-label">Confidence</span>
+          <article class="metric-card">
+            <span class="metric-label">Readiness</span>
+            <strong id="readinessSummary">--</strong>
+          </article>
+          <article class="metric-card">
+            <span class="metric-label">Completeness</span>
+            <strong id="completenessSummary">0%</strong>
+          </article>
+          <article class="metric-card">
+            <span class="metric-label">Confidence</span>
             <strong id="confidenceSummary">--</strong>
           </article>
-          <article class="summary-card">
-            <span class="summary-label">Active agent</span>
+          <article class="metric-card wide-card">
+            <span class="metric-label">Active agent</span>
             <strong id="agentSummary">--</strong>
           </article>
         </section>
 
-        <section class="panel-card results-card">
-          <div class="card-header results-header">
-            <div>
-              <p class="section-kicker">Output</p>
-              <h2>Diligence readout</h2>
-            </div>
-          </div>
+        <section class="spotlight-panel reveal delay-3" id="decisionPanel"></section>
 
-          <div id="resultsBody" class="results-body">
-            <div class="empty-state">
-              <p class="empty-kicker">No result yet</p>
-              <h3>Run an assessment or ask a diligence question.</h3>
-              <p>
-                The panel will summarize the recommended posture, show class confidence, and surface the
-                knowledge excerpts the agent used for follow-up questions.
-              </p>
+        <section class="triad-grid reveal delay-4">
+          <article class="analysis-card">
+            <div class="card-topline compact-topline">
+              <div>
+                <p class="section-kicker">Risk stack</p>
+                <h3>Critical issues</h3>
+              </div>
+            </div>
+            <div id="criticalList"></div>
+          </article>
+
+          <article class="analysis-card">
+            <div class="card-topline compact-topline">
+              <div>
+                <p class="section-kicker">De-risking</p>
+                <h3>Strengths</h3>
+              </div>
+            </div>
+            <div id="strengthList"></div>
+          </article>
+
+          <article class="analysis-card">
+            <div class="card-topline compact-topline">
+              <div>
+                <p class="section-kicker">Requests</p>
+                <h3>Documents and backup</h3>
+              </div>
+            </div>
+            <div id="documentList"></div>
+          </article>
+        </section>
+
+        <section class="analysis-card reveal delay-5">
+          <div class="card-topline compact-topline">
+            <div>
+              <p class="section-kicker">Section review</p>
+              <h3>Bucket-by-bucket analysis</h3>
             </div>
           </div>
+          <div class="section-review-grid" id="sectionReviewGrid"></div>
+        </section>
+
+        <section class="dual-grid reveal delay-6">
+          <article class="analysis-card">
+            <div class="card-topline compact-topline">
+              <div>
+                <p class="section-kicker">Brief</p>
+                <h3>Diligence memo</h3>
+              </div>
+              <button type="button" class="inline-button" id="copyBriefInline">Copy</button>
+            </div>
+            <pre class="brief-preview" id="briefPreview">Run an assessment to build a copy-ready diligence brief.</pre>
+          </article>
+
+          <article class="analysis-card">
+            <div class="card-topline compact-topline">
+              <div>
+                <p class="section-kicker">Knowledge</p>
+                <h3>Playbook response</h3>
+              </div>
+            </div>
+            <div id="knowledgeResponse"></div>
+          </article>
         </section>
       </main>
     </section>

@@ -17,7 +17,8 @@ from .factory_agent import AgentFactory
 from .specialist_agent import SpecialistAgent
 
 PANEL_DIR = Path(__file__).resolve().parent / "residential_land_due_diligence_panel"
-PANEL_API_VERSION = 1
+PANEL_API_VERSION = 2
+NEGATION_MARKERS = ("no ", "not ", "without ", "free of ", "clear of ")
 
 SAMPLE_QUESTION = "What should we verify first if title looks clean but sewer capacity and offsite obligations are still uncertain?"
 SAMPLE_INTAKES: dict[str, dict[str, str]] = {
@@ -58,6 +59,160 @@ SAMPLE_INTAKES: dict[str, dict[str, str]] = {
         "key_open_items": "Annexation, sewer, title, wetlands, and lot yield each remain major diligence concerns.",
     },
 }
+
+SECTION_CONFIGS: list[dict[str, Any]] = [
+    {
+        "key": "opportunity_summary",
+        "label": "Opportunity summary",
+        "healthy": [
+            ("Near-term lot delivery", ("approved lot", "lot opportunity", "near-term", "near term", "finished lot")),
+            ("Builder demand evidence", ("builder demand", "adjacent to active builder", "active builder phases", "speed to market")),
+        ],
+        "warning": [
+            ("Long-dated land play", ("raw land", "long-dated", "speculative", "early marketing", "future play")),
+            ("Unclear execution timing", ("uncertain timing", "execution path", "still being pitched")),
+        ],
+        "blocker": [("No defined residential path", ("no residential path", "unclear product strategy"))],
+        "request_items": [
+            "One-page deal brief with product, lot yield, basis, and schedule assumptions",
+            "Clear statement of why this site fits the intended builder or buyer profile",
+        ],
+        "follow_up_prompt": "What deal facts still need to be proven before this opportunity should stay on the acquisition board?",
+    },
+    {
+        "key": "entitlement_and_zoning",
+        "label": "Entitlement and zoning",
+        "healthy": [
+            ("By-right zoning", ("by-right", "by right", "single-family zoning")),
+            ("Map approvals already in hand", ("tentative map approved", "vesting tentative map", "final map", "entitled")),
+        ],
+        "warning": [
+            ("Density still needs confirmation", ("density assumptions", "agency confirmation", "processing path")),
+            ("Political or timing uncertainty", ("political support", "timing uncertainty", "approval timing")),
+        ],
+        "blocker": [
+            ("Annexation risk", ("annexation", "annex")),
+            ("Rezone or general plan risk", ("rezone", "general plan amendment", "gpa")),
+            ("Moratorium or queue exposure", ("moratoria", "moratorium", "allocation queue")),
+            ("Outside city processing risk", ("outside city limits", "county island")),
+        ],
+        "request_items": [
+            "Zoning letter, entitlement schedule, and written agency feedback",
+            "Map status, conditions of approval, and any political process notes",
+        ],
+        "follow_up_prompt": "What written agency evidence should we require before trusting the entitlement path and density assumptions on this site?",
+    },
+    {
+        "key": "utilities_and_agencies",
+        "label": "Utilities and agencies",
+        "healthy": [
+            ("Sewer capacity confirmed", ("sewer capacity confirmed", "sewer confirmed", "will-serve")),
+            ("Water capacity confirmed", ("water capacity confirmed", "water service available", "utilities at site")),
+        ],
+        "warning": [
+            ("Nearby-but-unproven utilities", ("utilities are nearby", "not yet documented", "agency comments remain verbal")),
+            ("Offsite scope still unclear", ("offsite improvement scope", "offsite obligations", "impact fee underwriting")),
+        ],
+        "blocker": [
+            ("No sewer path confirmed", ("no sewer path", "sewer is not confirmed", "sewer uncertain")),
+            ("Backbone or regional dependency", ("future backbone", "future regional project", "backbone improvements")),
+            ("Major lift station or booster exposure", ("lift station", "booster", "oversized backbone")),
+            ("No capacity confirmation", ("no capacity", "capacity is not confirmed")),
+        ],
+        "request_items": [
+            "Will-serve letters, utility studies, and written agency correspondence",
+            "Offsite scope, reimbursement obligations, and timing assumptions in writing",
+        ],
+        "follow_up_prompt": "What utility evidence would actually prove sewer, water, drainage, and offsite timing instead of relying on seller language?",
+    },
+    {
+        "key": "title_and_access",
+        "label": "Title and access",
+        "healthy": [
+            ("Clean title posture", ("clean title", "title review is clean", "clean preliminary title")),
+            ("Legal access appears straightforward", ("legal access", "straightforward access", "frontage")),
+        ],
+        "warning": [
+            ("Easement review still open", ("easement language", "title exceptions", "alta exceptions")),
+            ("Access still needs confirmation", ("access appears workable", "frontage dedication")),
+        ],
+        "blocker": [
+            ("Unclear legal access", ("unclear legal access", "access still depends", "no legal access")),
+            ("Title defect or lien exposure", ("title defect", "liens", "ownership issues")),
+            ("Litigation or unresolved easement conflict", ("litigation", "unresolved easement", "boundary dispute")),
+        ],
+        "request_items": [
+            "Preliminary title, ALTA or survey exhibits, and legal access backup",
+            "Written cure path for title objections, easements, and frontage issues",
+        ],
+        "follow_up_prompt": "Which title or access issues would be a real stop sign here, and what cure evidence should we ask for immediately?",
+    },
+    {
+        "key": "environmental_and_site",
+        "label": "Environmental and site",
+        "healthy": [
+            ("No obvious environmental fatal flaw", ("no wetlands", "no floodplain", "no remediation")),
+            ("Routine grading posture", ("routine grading", "no unusual grading")),
+        ],
+        "warning": [
+            ("Screening still incomplete", ("wetlands screening", "geotech assumptions", "still need validation")),
+            ("Civil cost or yield pressure", ("drainage burden", "grading issues", "lot yield assumptions")),
+        ],
+        "blocker": [
+            ("Wetlands exposure", ("wetland", "wetlands pockets", "waters of the u.s")),
+            ("Floodplain exposure", ("floodplain",)),
+            ("Remediation or contamination risk", ("remediation", "brownfield", "contamination")),
+            ("Species or habitat risk", ("endangered species", "protected habitat")),
+            ("Material grading or retaining exposure", ("steep grading", "retaining wall", "major drainage")),
+        ],
+        "request_items": [
+            "Phase I, wetlands or floodplain screens, and geotech or topo support",
+            "Civil backup on grading, drainage, pad yield, and offsite scope",
+        ],
+        "follow_up_prompt": "What site or environmental issue is most likely to break lot yield, timing, or cost, and what third-party backup would settle it fastest?",
+    },
+    {
+        "key": "contract_and_seller_items",
+        "label": "Contract and seller items",
+        "healthy": [
+            ("Enough diligence time", ("enough diligence time", "diligence period", "extension rights")),
+            ("Seller deliverables are identified", ("seller is delivering", "seller cooperation", "topo, phase i, soils")),
+            ("Hard money held back", ("before deposits go hard", "hard money only after", "deposits go hard later")),
+        ],
+        "warning": [
+            ("Contract structure still needs work", ("contract needs better extension rights", "seller package is helpful", "diligence time is tight")),
+            ("Deliverables still incomplete", ("file completeness", "seller package", "deliver utility information")),
+        ],
+        "blocker": [
+            ("Hard money too early", ("hard money early", "quick hard money", "deposits go hard early")),
+            ("No extension or consultant protection", ("no extension rights", "limited access for consultants", "limited access for third-party consultants")),
+            ("Heavy reliance on seller statements", ("verbal seller statements", "seller wants hard money early")),
+        ],
+        "request_items": [
+            "PSA draft with deposit schedule, extension rights, and closing conditions tied to key risks",
+            "Seller deliverables checklist covering title, studies, approvals, and utility backup",
+        ],
+        "follow_up_prompt": "How should the PSA protect the buyer if utility, title, or entitlement assumptions still fail during diligence?",
+    },
+    {
+        "key": "key_open_items",
+        "label": "Key open items",
+        "healthy": [
+            ("Mostly routine close-out items", ("confirm final utility will-serve", "update impact fee underwriting", "final approval to proceed")),
+        ],
+        "warning": [
+            ("Material diligence still open", ("utility will-serve", "title exceptions", "geotech", "lot yield assumptions", "wetlands screening")),
+        ],
+        "blocker": [
+            ("Stacked fatal-risk items still unresolved", ("annexation", "sewer", "title", "wetlands", "remediation", "floodplain")),
+        ],
+        "request_items": [
+            "Open-item tracker with owner, deadline, and explicit kill criteria",
+            "Prioritized diligence sequence showing which unresolved item gets answered first",
+        ],
+        "follow_up_prompt": "What is the highest-leverage open item to clear first if the team wants to decide quickly whether this site is still financeable?",
+    },
+]
 
 
 class DiligenceIntakeRequest(BaseModel):
@@ -102,6 +257,18 @@ def _render_panel_index() -> str:
         index_html.replace('href="/diligence/styles.css"', f'href="/diligence/styles.css?v={asset_version}"')
         .replace('src="/diligence/app.js"', f'src="/diligence/app.js?v={asset_version}"')
     )
+
+
+def _dedupe_preserve_order(items: list[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for item in items:
+        normalized = item.strip()
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        result.append(normalized)
+    return result
 
 
 def _list_due_diligence_agents(output_root: Path) -> list[dict[str, Any]]:
@@ -205,6 +372,16 @@ def _prediction_confidence(result: dict[str, Any]) -> float | None:
         return None
 
 
+def _confidence_band(confidence_pct: float | None) -> str:
+    if confidence_pct is None:
+        return "Unscored"
+    if confidence_pct >= 75.0:
+        return "High conviction"
+    if confidence_pct >= 55.0:
+        return "Moderate conviction"
+    return "Low conviction"
+
+
 def _posture_details(prediction: str) -> dict[str, str]:
     mapping = {
         "advance": {
@@ -237,6 +414,268 @@ def _posture_details(prediction: str) -> dict[str, str]:
     )
 
 
+def _normalized_text(value: str) -> str:
+    return " ".join(value.lower().split())
+
+
+def _term_present(text: str, term: str) -> bool:
+    start = text.find(term)
+    while start != -1:
+        prefix = text[max(0, start - 18):start]
+        if not any(marker in prefix for marker in NEGATION_MARKERS):
+            return True
+        start = text.find(term, start + len(term))
+    return False
+
+
+def _find_hits(text: str, patterns: list[tuple[str, tuple[str, ...]]]) -> list[str]:
+    normalized = _normalized_text(text)
+    hits: list[str] = []
+    for label, phrases in patterns:
+        if any(_term_present(normalized, phrase) for phrase in phrases):
+            hits.append(label)
+    return hits
+
+
+def _coverage_band(text: str) -> str:
+    word_count = len(text.strip().split())
+    if word_count == 0:
+        return "Missing"
+    if word_count < 10:
+        return "Thin"
+    if word_count < 22:
+        return "Usable"
+    return "Detailed"
+
+
+def _status_label(status: str) -> str:
+    return {
+        "success": "De-risked",
+        "warning": "Follow up",
+        "danger": "Material risk",
+        "missing": "Missing",
+        "idle": "Thin signal",
+    }.get(status, "Unknown")
+
+
+def _analyze_section(config: dict[str, Any], text: str) -> dict[str, Any]:
+    stripped = text.strip()
+    positive_hits = _find_hits(stripped, config["healthy"])
+    warning_hits = _find_hits(stripped, config["warning"])
+    blocker_hits = _find_hits(stripped, config["blocker"])
+    coverage = _coverage_band(stripped)
+
+    if not stripped:
+        status = "missing"
+        headline = f"No {config['label'].lower()} notes captured yet."
+        detail = "Confidence stays lower until someone records concrete facts, documents, or agency backup here."
+    elif blocker_hits or (len(warning_hits) >= 2 and not positive_hits):
+        status = "danger"
+        focus_hits = blocker_hits or warning_hits
+        headline = f"Material diligence risk is visible in {config['label'].lower()}."
+        detail = f"Current notes point to {', '.join(focus_hits[:3])}. Request stronger backup before treating this section as financeable."
+    elif warning_hits:
+        status = "warning"
+        headline = f"{config['label']} still needs targeted follow-up."
+        detail = f"The notes reference {', '.join(warning_hits[:3])}. This looks workable only if the supporting evidence closes quickly."
+    elif positive_hits:
+        status = "success"
+        headline = f"{config['label']} looks comparatively de-risked."
+        detail = f"The notes reference {', '.join(positive_hits[:3])}, which usually supports a cleaner execution path."
+    else:
+        status = "idle"
+        headline = f"{config['label']} has some notes, but they are not decision-grade yet."
+        detail = "Add more specifics, dates, agency sources, and document references so the team can lean on this section."
+
+    return {
+        "key": config["key"],
+        "label": config["label"],
+        "status": status,
+        "status_label": _status_label(status),
+        "coverage_band": coverage,
+        "headline": headline,
+        "detail": detail,
+        "positive_hits": positive_hits,
+        "warning_hits": warning_hits,
+        "blocker_hits": blocker_hits,
+        "request_items": config["request_items"],
+        "follow_up_prompt": config["follow_up_prompt"],
+    }
+
+
+def _coverage_summary(section_reviews: list[dict[str, Any]]) -> dict[str, Any]:
+    total = len(section_reviews)
+    filled = sum(1 for review in section_reviews if review["status"] != "missing")
+    detailed = sum(1 for review in section_reviews if review["coverage_band"] == "Detailed")
+    missing_labels = [review["label"] for review in section_reviews if review["status"] == "missing"]
+    return {
+        "filled_sections": filled,
+        "total_sections": total,
+        "coverage_pct": round((filled / total) * 100.0, 1) if total else 0.0,
+        "detailed_sections": detailed,
+        "missing_sections": missing_labels,
+    }
+
+
+def _signal_summary(section_reviews: list[dict[str, Any]]) -> dict[str, Any]:
+    strengths: list[str] = []
+    watch_items: list[str] = []
+    critical_risks: list[str] = []
+
+    for review in section_reviews:
+        strengths.extend(review["positive_hits"])
+        if review["status"] == "warning":
+            watch_items.extend(review["warning_hits"] or [review["label"]])
+        if review["status"] == "danger":
+            critical_risks.extend(review["blocker_hits"] or review["warning_hits"] or [review["label"]])
+
+    for review in section_reviews:
+        if review["status"] == "missing":
+            watch_items.append(f"Missing notes for {review['label'].lower()}")
+
+    return {
+        "strengths": _dedupe_preserve_order(strengths)[:6],
+        "watch_items": _dedupe_preserve_order(watch_items)[:6],
+        "critical_risks": _dedupe_preserve_order(critical_risks)[:6],
+    }
+
+
+def _document_requests(section_reviews: list[dict[str, Any]]) -> list[str]:
+    requested: list[str] = []
+    for review in section_reviews:
+        if review["status"] in {"missing", "warning", "danger", "idle"}:
+            requested.extend(review["request_items"])
+    return _dedupe_preserve_order(requested)[:8]
+
+
+def _follow_up_prompts(section_reviews: list[dict[str, Any]], prediction: str) -> list[str]:
+    prompts: list[str] = []
+    for review in section_reviews:
+        if review["status"] in {"danger", "warning", "missing"}:
+            prompts.append(review["follow_up_prompt"])
+
+    if prediction == "fatal_flaw_risk":
+        prompts.append("Which issue would have to be disproven first before this site deserves more acquisition time?")
+    elif prediction == "targeted_follow_up":
+        prompts.append("What is the single highest-leverage diligence item to close before advancing the deal again?")
+    else:
+        prompts.append("What third-party reports or written agency backup should we confirm before releasing more deposits?")
+
+    return _dedupe_preserve_order(prompts)[:5]
+
+
+def _readiness_score(
+    *,
+    prediction: str,
+    confidence_pct: float | None,
+    coverage_pct: float,
+    section_reviews: list[dict[str, Any]],
+) -> dict[str, Any]:
+    posture_base = {
+        "advance": 48,
+        "targeted_follow_up": 30,
+        "fatal_flaw_risk": 8,
+    }.get(prediction, 20)
+    score = posture_base
+    score += int(coverage_pct * 0.22)
+    score += sum(6 for review in section_reviews if review["status"] == "success")
+    score -= sum(5 for review in section_reviews if review["status"] == "warning")
+    score -= sum(11 for review in section_reviews if review["status"] == "danger")
+    score -= sum(4 for review in section_reviews if review["status"] == "missing")
+    if confidence_pct is not None:
+        score += int(confidence_pct / 14.0)
+    score = max(0, min(100, score))
+
+    if score >= 80:
+        band = "Strong"
+    elif score >= 60:
+        band = "Workable"
+    elif score >= 40:
+        band = "Fragile"
+    else:
+        band = "Red flag"
+
+    return {"score": score, "band": band}
+
+
+def _build_diligence_brief(
+    *,
+    payload: DiligenceIntakeRequest,
+    posture_label: str,
+    confidence_pct: float | None,
+    readiness: dict[str, Any],
+    details: dict[str, str],
+    coverage: dict[str, Any],
+    signal_summary: dict[str, Any],
+    document_requests: list[str],
+) -> str:
+    confidence_text = f"{confidence_pct:.1f}%" if confidence_pct is not None else "unscored"
+    lines = [
+        f"{payload.opportunity_name} | {payload.market} | {payload.transaction_stage}",
+        f"Posture: {posture_label} | Model confidence: {confidence_text} | Readiness: {readiness['score']}/100 ({readiness['band']})",
+        "",
+        details["summary"],
+        "",
+        f"Coverage: {coverage['filled_sections']}/{coverage['total_sections']} sections filled ({coverage['coverage_pct']:.1f}%).",
+    ]
+
+    if signal_summary["critical_risks"]:
+        lines.extend(["", "Critical risks:"])
+        lines.extend(f"- {item}" for item in signal_summary["critical_risks"])
+
+    if signal_summary["watch_items"]:
+        lines.extend(["", "Targeted follow-up:"])
+        lines.extend(f"- {item}" for item in signal_summary["watch_items"])
+
+    if signal_summary["strengths"]:
+        lines.extend(["", "De-risking signals:"])
+        lines.extend(f"- {item}" for item in signal_summary["strengths"])
+
+    lines.extend(["", "Immediate next step:", f"- {details['next_step']}"])
+
+    if document_requests:
+        lines.extend(["", "Documents or backup to request:"])
+        lines.extend(f"- {item}" for item in document_requests[:6])
+
+    return "\n".join(lines)
+
+
+def _analyze_intake(payload: DiligenceIntakeRequest, prediction: str, confidence_pct: float | None) -> dict[str, Any]:
+    section_reviews = [_analyze_section(config, getattr(payload, config["key"])) for config in SECTION_CONFIGS]
+    coverage = _coverage_summary(section_reviews)
+    signal_summary = _signal_summary(section_reviews)
+    document_requests = _document_requests(section_reviews)
+    follow_up_prompts = _follow_up_prompts(section_reviews, prediction)
+    readiness = _readiness_score(
+        prediction=prediction,
+        confidence_pct=confidence_pct,
+        coverage_pct=float(coverage["coverage_pct"]),
+        section_reviews=section_reviews,
+    )
+    details = _posture_details(prediction)
+    brief = _build_diligence_brief(
+        payload=payload,
+        posture_label=details["label"],
+        confidence_pct=confidence_pct,
+        readiness=readiness,
+        details=details,
+        coverage=coverage,
+        signal_summary=signal_summary,
+        document_requests=document_requests,
+    )
+
+    return {
+        "coverage": coverage,
+        "signal_summary": signal_summary,
+        "section_reviews": section_reviews,
+        "document_requests": document_requests,
+        "follow_up_prompts": follow_up_prompts,
+        "readiness": readiness,
+        "brief": brief,
+        "confidence_band": _confidence_band(confidence_pct),
+    }
+
+
 def create_app(*, output_root: Path, agent_dir: Optional[Path]) -> FastAPI:
     app = FastAPI(title="Residential Land Due Diligence Intake")
 
@@ -265,6 +704,7 @@ def create_app(*, output_root: Path, agent_dir: Optional[Path]) -> FastAPI:
             "agents": agents,
             "sample_intakes": SAMPLE_INTAKES,
             "sample_question": SAMPLE_QUESTION,
+            "follow_up_starters": [config["follow_up_prompt"] for config in SECTION_CONFIGS[:4]],
         }
 
     @app.get("/api/agents")
@@ -281,6 +721,8 @@ def create_app(*, output_root: Path, agent_dir: Optional[Path]) -> FastAPI:
         result = agent.predict(intake_text)
         prediction = str(result.get("prediction", "")).strip()
         details = _posture_details(prediction)
+        confidence_pct = _prediction_confidence(result)
+        analysis = _analyze_intake(payload, prediction, confidence_pct)
 
         return {
             "agent": agent.metadata["blueprint"]["name"],
@@ -291,7 +733,8 @@ def create_app(*, output_root: Path, agent_dir: Optional[Path]) -> FastAPI:
             "tone": details["tone"],
             "summary": details["summary"],
             "next_step": details["next_step"],
-            "confidence_pct": _prediction_confidence(result),
+            "confidence_pct": confidence_pct,
+            **analysis,
         }
 
     @app.post("/api/ask")
