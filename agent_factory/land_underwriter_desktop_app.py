@@ -507,7 +507,7 @@ class LandUnderwriterDesktopApp:
         raw_frame.grid_columnconfigure(0, weight=1)
         tk.Label(
             raw_frame,
-            text="Raw Takedown Override",
+            text="Paste-In Schedule",
             bg=COLORS["card"],
             fg=COLORS["ink"],
             font=("Segoe UI", 10, "bold"),
@@ -1272,8 +1272,8 @@ class LandUnderwriterDesktopApp:
         parent.grid_rowconfigure(0, weight=1)
         self.raw_result_text = ScrolledText(
             parent,
-            wrap="none",
-            font=("Consolas", 10),
+            wrap="word",
+            font=("Segoe UI", 10),
             bg=COLORS["card"],
             fg=COLORS["ink"],
             insertbackground=COLORS["ink"],
@@ -1282,28 +1282,6 @@ class LandUnderwriterDesktopApp:
         )
         self.raw_result_text.grid(row=0, column=0, sticky="nsew")
         self.raw_result_text.configure(state="disabled")
-
-    def _build_json_tab(self) -> None:
-        self.json_tab.grid_columnconfigure(0, weight=1)
-        self.json_tab.grid_rowconfigure(1, weight=1)
-
-        toolbar = tk.Frame(self.json_tab, bg=COLORS["bg"])
-        toolbar.grid(row=0, column=0, sticky="ew", pady=(0, 10))
-        self._make_button(toolbar, "Builder -> JSON", self._sync_builder_to_json, "secondary").grid(row=0, column=0, padx=(0, 8))
-        self._make_button(toolbar, "JSON -> Builder", self._apply_json_to_builder, "secondary").grid(row=0, column=1, padx=(0, 8))
-        self._make_button(toolbar, "Run JSON", self._run_json_request, "primary").grid(row=0, column=2)
-
-        self.json_text = ScrolledText(
-            self.json_tab,
-            wrap="none",
-            font=("Consolas", 10),
-            bg="#FFFDFC",
-            fg=COLORS["ink"],
-            insertbackground=COLORS["ink"],
-            relief="flat",
-            borderwidth=1,
-        )
-        self.json_text.grid(row=1, column=0, sticky="nsew")
 
     def _create_section(self, parent: tk.Widget, *, title: str, subtitle: str) -> tk.Frame:
         card = tk.Frame(parent, bg=COLORS["card"], padx=16, pady=14, highlightbackground=COLORS["line"], highlightthickness=1)
@@ -2074,9 +2052,7 @@ class LandUnderwriterDesktopApp:
         return payload
 
     def _render_json_text(self, payload: Any) -> None:
-        rendered = json.dumps(payload, indent=2)
-        self.json_text.delete("1.0", "end")
-        self.json_text.insert("1.0", rendered)
+        self.hidden_payload_cache = payload
 
     def _sync_builder_to_json(self) -> None:
         try:
@@ -2086,8 +2062,7 @@ class LandUnderwriterDesktopApp:
             messagebox.showerror("Builder Error", str(error), parent=self.root)
             return
         self._render_json_text(payload)
-        self.notebook.select(self.json_tab)
-        self._set_status("Builder assumptions copied into Advanced JSON.")
+        self._set_status("Deal assumptions refreshed in the background.")
 
     def _apply_request_to_builder(self, payload: dict[str, Any]) -> None:
         self.form_vars["community_name"].set(str(payload.get("community_name") or ""))
@@ -2164,9 +2139,7 @@ class LandUnderwriterDesktopApp:
             first_value = globals_source.get(global_key)
             for item in series[1:]:
                 if item.get(global_key) != first_value:
-                    warnings.append(
-                        "Advanced JSON contained mixed per-series overrides; builder normalized them."
-                    )
+                    warnings.append("Some series-level overrides were simplified to fit the workspace view.")
                     break
             if len(warnings) > 1:
                 break
@@ -2255,77 +2228,59 @@ class LandUnderwriterDesktopApp:
             self._set_status(" ".join(dict.fromkeys(warnings)))
 
     def _apply_json_to_builder(self) -> None:
-        try:
-            payload = json.loads(self.json_text.get("1.0", "end").strip() or "{}")
-        except json.JSONDecodeError as error:
-            messagebox.showerror("Invalid JSON", error.msg, parent=self.root)
-            self._set_status(f"JSON error: {error.msg}")
+        payload = self.hidden_payload_cache
+        if payload is None:
+            self._set_status("No hidden deal payload is available.")
             return
-
-        display_payload = payload
-        if isinstance(payload, list):
-            if not payload or not isinstance(payload[0], dict):
-                messagebox.showerror(
-                    "Unsupported JSON",
-                    "Advanced JSON must contain a request object or an array of request objects.",
-                    parent=self.root,
-                )
-                return
-            display_payload = payload[0]
-            self._set_status("Applied the first request from the JSON array into the builder.")
-        elif not isinstance(payload, dict):
-            messagebox.showerror(
-                "Unsupported JSON",
-                "Advanced JSON must contain a request object.",
-                parent=self.root,
-            )
+        display_payload = payload[0] if isinstance(payload, list) and payload else payload
+        if not isinstance(display_payload, dict):
+            self._set_status("The hidden deal payload is not usable.")
             return
-
         self._apply_request_to_builder(display_payload)
         self.notebook.select(self.builder_tab)
-        self._set_status("Advanced JSON copied into the Deal Builder.")
+        self._set_status("Background deal payload restored into the workspace.")
 
     def _load_request_payload(self, payload: Any, file_path: Path | None = None) -> None:
         display_payload = payload
         if isinstance(payload, list):
             if not payload or not isinstance(payload[0], dict):
-                raise ValueError("Request JSON array must contain at least one object.")
+                raise ValueError("Deal file must contain at least one valid deal.")
             display_payload = payload[0]
         elif not isinstance(payload, dict):
-            raise ValueError("Request JSON must be an object or an array of objects.")
+            raise ValueError("Deal file could not be read.")
 
         self.current_file = file_path.resolve() if file_path else None
         self.file_var.set(
-            f"Request: {self.current_file.name}" if self.current_file else "Request: unsaved builder request"
+            f"Deal: {_deal_display_name(self.current_file)}" if self.current_file else "Deal: Unsaved Deal"
         )
 
         generated_root = _repo_root() / "generated_agents"
         self.latest_agent_dir = _latest_land_underwriter_agent_dir(generated_root)
         if self.latest_agent_dir is not None:
-            self.agent_var.set(f"Agent: {self.latest_agent_dir.name}")
+            self.agent_var.set(f"Underwriter: {self.latest_agent_dir.name}")
         else:
-            self.agent_var.set("Agent: rules engine only (no trained specialist found)")
+            self.agent_var.set("Underwriter: rules engine only")
 
         self._apply_request_to_builder(display_payload)
         self._render_json_text(payload)
         self.notebook.select(self.builder_tab)
 
         if isinstance(payload, list):
-            self._set_status(f"Loaded {len(payload)} requests; builder is showing the first deal.")
+            self._set_status(f"Loaded {len(payload)} deals; the workspace is showing the first one.")
         else:
-            self._set_status("Request loaded into the Deal Builder.")
+            self._set_status("Deal loaded into the workspace.")
 
     def _load_sample_request(self) -> None:
         sample_path = _sample_request_path()
         try:
             payload = json.loads(sample_path.read_text(encoding="utf-8"))
         except FileNotFoundError:
-            messagebox.showerror("Missing Sample", f"Sample request was not found:\n{sample_path}", parent=self.root)
-            self._set_status("Sample request is missing.")
+            messagebox.showerror("Missing Starter Deal", f"Starter deal was not found:\n{sample_path}", parent=self.root)
+            self._set_status("Starter deal is missing.")
             return
         except json.JSONDecodeError as error:
-            messagebox.showerror("Invalid Sample JSON", error.msg, parent=self.root)
-            self._set_status(f"Sample request JSON is invalid: {error.msg}")
+            messagebox.showerror("Invalid Starter Deal", error.msg, parent=self.root)
+            self._set_status(f"Starter deal could not be read: {error.msg}")
             return
 
         self._load_request_payload(payload, sample_path)
@@ -2334,9 +2289,9 @@ class LandUnderwriterDesktopApp:
         initial_dir = str(self.current_file.parent) if self.current_file else str(_sample_request_path().parent)
         selected = filedialog.askopenfilename(
             parent=self.root,
-            title="Open Underwrite Request",
+            title="Open Deal",
             initialdir=initial_dir,
-            filetypes=[("JSON Files", "*.json"), ("All Files", "*.*")],
+            filetypes=[("Land Deal Files", "*.landdeal"), ("All Files", "*.*")],
         )
         if not selected:
             return
@@ -2345,36 +2300,29 @@ class LandUnderwriterDesktopApp:
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
         except json.JSONDecodeError as error:
-            messagebox.showerror("Invalid JSON", error.msg, parent=self.root)
-            self._set_status(f"Could not open request: {error.msg}")
+            messagebox.showerror("Invalid Deal File", error.msg, parent=self.root)
+            self._set_status(f"Could not open deal: {error.msg}")
             return
 
         self._load_request_payload(payload, path)
 
     def _save_request_file(self) -> None:
         try:
-            if self.notebook.select() == str(self.json_tab):
-                payload = json.loads(self.json_text.get("1.0", "end").strip() or "{}")
-            else:
-                payload = self._request_from_form(strict=True)
-                self._render_json_text(payload)
+            payload = self._request_from_form(strict=True)
+            self._render_json_text(payload)
         except ValueError as error:
             messagebox.showerror("Builder Error", str(error), parent=self.root)
             self._set_status(str(error))
-            return
-        except json.JSONDecodeError as error:
-            messagebox.showerror("Invalid JSON", error.msg, parent=self.root)
-            self._set_status(f"JSON error: {error.msg}")
             return
 
         destination = self.current_file
         if destination is None or destination == _sample_request_path():
             selected = filedialog.asksaveasfilename(
                 parent=self.root,
-                title="Save Underwrite Request",
-                defaultextension=".json",
-                initialfile="land_deal_request.json",
-                filetypes=[("JSON Files", "*.json"), ("All Files", "*.*")],
+                title="Save Deal",
+                defaultextension=".landdeal",
+                initialfile="new_land_deal.landdeal",
+                filetypes=[("Land Deal Files", "*.landdeal"), ("All Files", "*.*")],
             )
             if not selected:
                 return
@@ -2382,14 +2330,11 @@ class LandUnderwriterDesktopApp:
 
         destination.write_text(json.dumps(payload, indent=2), encoding="utf-8")
         self.current_file = destination.resolve()
-        self.file_var.set(f"Request: {self.current_file.name}")
-        self._set_status(f"Saved request to {self.current_file.name}.")
+        self.file_var.set(f"Deal: {_deal_display_name(self.current_file)}")
+        self._set_status(f"Saved deal to {_deal_display_name(self.current_file)}.")
 
     def _run_active_request(self) -> None:
         if self.run_inflight:
-            return
-        if self.notebook.select() == str(self.json_tab):
-            self._run_json_request()
             return
         self._run_builder_request()
 
@@ -2405,30 +2350,19 @@ class LandUnderwriterDesktopApp:
         self._enqueue_underwrite(payload)
 
     def _run_json_request(self) -> None:
-        try:
-            payload = json.loads(self.json_text.get("1.0", "end").strip() or "{}")
-        except json.JSONDecodeError as error:
-            messagebox.showerror("Invalid JSON", error.msg, parent=self.root)
-            self._set_status(f"JSON error: {error.msg}")
-            return
-
+        payload = self.hidden_payload_cache
         if not isinstance(payload, (dict, list)):
-            messagebox.showerror(
-                "Unsupported JSON",
-                "Advanced JSON must contain a request object or an array of request objects.",
-                parent=self.root,
-            )
+            self._set_status("No background deal payload is available to run.")
             return
-
         self._enqueue_underwrite(payload)
 
     def _enqueue_underwrite(self, payload: Any) -> None:
         generated_root = _repo_root() / "generated_agents"
         self.latest_agent_dir = _latest_land_underwriter_agent_dir(generated_root)
         if self.latest_agent_dir is not None:
-            self.agent_var.set(f"Agent: {self.latest_agent_dir.name}")
+            self.agent_var.set(f"Underwriter: {self.latest_agent_dir.name}")
         else:
-            self.agent_var.set("Agent: rules engine only (no trained specialist found)")
+            self.agent_var.set("Underwriter: rules engine only")
 
         self._set_busy(True)
         self._set_status("Running land deal underwrite...")
