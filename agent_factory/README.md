@@ -153,6 +153,18 @@ The fee request schema is documented by example in:
 
 `agent_factory/examples/building_fee_budgeter/sample_request.json`
 
+Desktop launch:
+
+```bash
+run_building_fee_budget_desktop.bat
+```
+
+Desktop shortcut install:
+
+```bash
+install_building_fee_budget_desktop_shortcut.bat
+```
+
 ## Residential Land Due Diligence Advisor
 
 `ResidentialLandDueDiligenceAdvisor` is a specialist agent focused on residential land acquisition diligence for homebuilders and land teams.
