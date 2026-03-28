@@ -254,6 +254,18 @@ python -m agent_factory.cli housing-market-research \
   --agent-dir generated_agents/housingmarketresearcher_YYYYMMDD_HHMMSS
 ```
 
+Desktop launch:
+
+```bash
+run_housing_market_research_desktop.bat
+```
+
+Desktop shortcut install:
+
+```bash
+install_housing_market_research_desktop_shortcut.bat
+```
+
 ## Residential Subdivision Scout
 
 `ResidentialSubdivisionScout` is an operational workflow layered on top of a generated specialist agent.
@@ -377,6 +389,38 @@ Mounted app routes:
 - `/diligence/`
 
 The installed app shells live on the phone, but the Python backend still runs on your computer or server.
+
+### Native Mobile Shell
+
+A native Capacitor wrapper now lives at:
+
+`native_apps/homebuilder_phone_suite_native`
+
+It packages the suite into a native mobile container and lets you enter the backend URL from inside the app.
+
+Setup:
+
+```bash
+cd native_apps/homebuilder_phone_suite_native
+npm install
+npm run sync
+```
+
+Platform projects:
+- Android project: `native_apps/homebuilder_phone_suite_native/android`
+- iOS project: `native_apps/homebuilder_phone_suite_native/ios`
+
+Useful commands:
+
+```bash
+npm run open:android
+npm run open:ios
+```
+
+Notes:
+- The native shell expects the backend suite to be running, for example at `http://192.168.1.25:8790`
+- iOS builds still require a Mac with Xcode
+- Android builds require Java and Android Studio on the machine opening the project
 
 ## Outlook Integration Without Admin Access
 

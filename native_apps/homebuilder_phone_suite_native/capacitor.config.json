@@ -1,0 +1,18 @@
+{
+  "appId": "com.redwood.homebuildersuite",
+  "appName": "Homebuilder Suite",
+  "webDir": "web",
+  "bundledWebRuntime": false,
+  "server": {
+    "cleartext": true,
+    "allowNavigation": [
+      "*"
+    ]
+  },
+  "android": {
+    "allowMixedContent": true
+  },
+  "ios": {
+    "limitsNavigationsToAppBoundDomains": false
+  }
+}

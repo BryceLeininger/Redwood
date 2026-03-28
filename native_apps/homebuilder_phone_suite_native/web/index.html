@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Homebuilder Suite</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <header class="hero">
+        <p class="eyebrow">Native Homebuilder Suite</p>
+        <h1>Carry the land platform in one app.</h1>
+        <p class="hero-text">
+          Connect this app to your running backend, then switch between underwriting, subdivision sourcing, and due diligence without leaving the native shell.
+        </p>
+      </header>
+
+      <section class="connection-card">
+        <div class="section-head">
+          <div>
+            <p class="section-kicker">Connection</p>
+            <h2>Backend suite address</h2>
+          </div>
+          <span class="status-pill" id="statusPill">Not connected</span>
+        </div>
+
+        <label class="field">
+          <span>Suite URL</span>
+          <input id="backendUrlInput" type="text" placeholder="http://192.168.1.25:8790" />
+        </label>
+
+        <div class="button-row">
+          <button id="connectBtn" class="primary-button" type="button">Connect</button>
+          <button id="resetBtn" class="secondary-button" type="button">Clear</button>
+        </div>
+
+        <p class="helper-text" id="connectionHint">
+          Start the backend on your computer first, then paste the phone-suite URL here.
+        </p>
+      </section>
+
+      <section class="workspace-card">
+        <div class="section-head">
+          <div>
+            <p class="section-kicker">Workspaces</p>
+            <h2>Choose an app</h2>
+          </div>
+        </div>
+
+        <div class="tab-row">
+          <button class="tab-button active" data-route="/underwrite/" type="button">Underwrite</button>
+          <button class="tab-button" data-route="/subdivision/" type="button">Scout</button>
+          <button class="tab-button" data-route="/diligence/" type="button">Diligence</button>
+        </div>
+
+        <div class="workspace-meta">
+          <span id="activeRouteLabel">/underwrite/</span>
+          <button id="openExternalBtn" class="ghost-button" type="button">Open externally</button>
+        </div>
+
+        <div class="frame-shell">
+          <iframe id="workspaceFrame" title="Homebuilder workspace"></iframe>
+          <div class="frame-placeholder" id="framePlaceholder">
+            <strong>Connect to your backend to load the workspace.</strong>
+            <span>The selected app will appear here inside the native shell.</span>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>

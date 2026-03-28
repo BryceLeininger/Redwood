@@ -1,0 +1,154 @@
+{
+  "agent": "HousingMarketResearcher",
+  "market": "Phoenix-Mesa-Scottsdale, AZ",
+  "period": "2026-Q1",
+  "classification": "hot",
+  "classification_confidence": 0.7968,
+  "classification_basis": "ensemble",
+  "executive_summary": "Phoenix-Mesa-Scottsdale, AZ reads as hot based on ensemble analysis. Supportive signals: Inventory is tightening with listings down 14.0% year over year; Months of supply is tight at 2.4.",
+  "data_coverage": {
+    "available_metrics": 23,
+    "notes_provided": true
+  },
+  "pillar_scores": {
+    "supply": {
+      "pillar": "supply",
+      "score": 3.5,
+      "positive": [
+        "Inventory is tightening with listings down 14.0% year over year.",
+        "Months of supply is tight at 2.4.",
+        "Days on market improved 18.0% from last year."
+      ],
+      "risk": [],
+      "watch": []
+    },
+    "demand": {
+      "pillar": "demand",
+      "score": 2.75,
+      "positive": [
+        "Pending sales are improving by 9.1% year over year.",
+        "Migration trends are supportive.",
+        "Builder sentiment is positive."
+      ],
+      "risk": [],
+      "watch": []
+    },
+    "affordability": {
+      "pillar": "affordability",
+      "score": 1.25,
+      "positive": [
+        "Employment growth is healthy at 2.4% year over year.",
+        "Unemployment is low at 4.1%."
+      ],
+      "risk": [],
+      "watch": []
+    },
+    "pricing": {
+      "pillar": "pricing",
+      "score": 3.25,
+      "positive": [
+        "Price growth remains constructive at 6.8% year over year.",
+        "List to sale ratios remain strong at 99.1%.",
+        "Price reductions are contained at 9.5% of listings.",
+        "Seller concessions remain limited at 7.0% of deals."
+      ],
+      "risk": [],
+      "watch": []
+    },
+    "pipeline": {
+      "pillar": "pipeline",
+      "score": 1.0,
+      "positive": [
+        "Demand is absorbing deliveries faster than completions are growing.",
+        "Rent growth remains supportive at 4.2% year over year."
+      ],
+      "risk": [],
+      "watch": []
+    }
+  },
+  "signals": {
+    "positive": [
+      "Inventory is tightening with listings down 14.0% year over year.",
+      "Months of supply is tight at 2.4.",
+      "Days on market improved 18.0% from last year.",
+      "Pending sales are improving by 9.1% year over year.",
+      "Migration trends are supportive.",
+      "Builder sentiment is positive.",
+      "Employment growth is healthy at 2.4% year over year.",
+      "Unemployment is low at 4.1%.",
+      "Price growth remains constructive at 6.8% year over year.",
+      "List to sale ratios remain strong at 99.1%.",
+      "Price reductions are contained at 9.5% of listings.",
+      "Seller concessions remain limited at 7.0% of deals.",
+      "Demand is absorbing deliveries faster than completions are growing.",
+      "Rent growth remains supportive at 4.2% year over year."
+    ],
+    "risk": [],
+    "watch": []
+  },
+  "actions": {
+    "acquisition": "Stay active in constrained submarkets, but underwrite to slower absorption where new supply is ramping.",
+    "pricing": "Push price cautiously before leaning on incentives; protect net pricing while list-to-sale ratios stay firm.",
+    "product_mix": "Favor entry-level and move-up formats with proven turnover and keep quick-move-in inventory disciplined.",
+    "risk_management": "Monitor mortgage-rate volatility and signs of delivery volumes outrunning absorption."
+  },
+  "scenario_outlook": {
+    "base_case": "Base case is continued seller leverage with selective inventory pressure concentrated in the most affordable segments.",
+    "upside_trigger": "Inventory is tightening with listings down 14.0% year over year.",
+    "downside_trigger": "Affordability worsens or delivery volumes outrun demand.",
+    "notes": "Luxury communities are still using more incentives than entry-level product, but entry-level communities continue to sell through new releases quickly."
+  },
+  "analysis_text": "Phoenix-Mesa-Scottsdale, AZ 2026-Q1. active listings yoy -14.0%. months of supply 2.4. median sale price yoy 6.8%. pending sales yoy 9.1%. days on market 28.0. days on market yoy -18.0%. list to sale ratio 99.1%. price reductions share 9.5%. seller concessions share 7.0%. mortgage rate 6.2%. mortgage rate change -45.0 bps. employment growth yoy 2.4%. permits yoy -6.0%. completions yoy 3.0%. rent growth yoy 4.2%. rental vacancy rate 5.1%. migration trend inbound. builder sentiment strong. segment notes Luxury communities are still using more incentives than entry-level product, but entry-level communities continue to sell through new releases quickly. notes Entry-level resale inventory remains tight, buyer traffic improved after rates eased, and builders are limiting deep incentive use to aging specs. key signals Inventory is tightening with listings down 14.0% year over year; Months of supply is tight at 2.4.",
+  "heuristic_signal": {
+    "prediction": "hot",
+    "confidence": 0.93,
+    "score": 11.75
+  },
+  "model_signal": {
+    "prediction": "hot",
+    "confidence": 0.5036,
+    "top_classes": [
+      {
+        "label": "hot",
+        "confidence": 0.5036453109900804
+      },
+      {
+        "label": "balanced",
+        "confidence": 0.27152036590940226
+      },
+      {
+        "label": "cooling",
+        "confidence": 0.22483432310051735
+      }
+    ]
+  },
+  "request": {
+    "market": "Phoenix-Mesa-Scottsdale, AZ",
+    "period": "2026-Q1",
+    "notes": "Entry-level resale inventory remains tight, buyer traffic improved after rates eased, and builders are limiting deep incentive use to aging specs.",
+    "active_listings_yoy_pct": -14.0,
+    "months_of_supply": 2.4,
+    "months_of_supply_yoy_pct": null,
+    "median_sale_price_yoy_pct": 6.8,
+    "pending_sales_yoy_pct": 9.1,
+    "closed_sales_yoy_pct": 4.6,
+    "new_listings_yoy_pct": -5.2,
+    "days_on_market": 28.0,
+    "days_on_market_yoy_pct": -18.0,
+    "list_to_sale_ratio_pct": 99.1,
+    "price_reductions_share_pct": 9.5,
+    "seller_concessions_share_pct": 7.0,
+    "mortgage_rate_pct": 6.2,
+    "mortgage_rate_change_bps": -45.0,
+    "unemployment_rate_pct": 4.1,
+    "employment_growth_yoy_pct": 2.4,
+    "permits_yoy_pct": -6.0,
+    "starts_yoy_pct": -4.0,
+    "completions_yoy_pct": 3.0,
+    "rent_growth_yoy_pct": 4.2,
+    "rental_vacancy_rate_pct": 5.1,
+    "migration_trend": "inbound",
+    "builder_sentiment": "strong",
+    "segment_notes": "Luxury communities are still using more incentives than entry-level product, but entry-level communities continue to sell through new releases quickly."
+  }
+}
