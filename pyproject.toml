@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "land-due-diligence-agent"
+version = "0.1.0"
+description = "Portable CLI prototype for land acquisition due diligence review."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "openai>=1.30.0",
+  "openpyxl>=3.1.0",
+  "pypdf>=4.2.0",
+  "python-docx>=1.1.0",
+  "python-dotenv>=1.0.0",
+]
+
+[project.scripts]
+land-dd = "land_due_diligence_agent.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

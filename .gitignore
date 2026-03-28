@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.coverage
+.mypy_cache/
+
+# Virtual environments
+.venv/
+venv/
+
+# Local environment
+.env
+.vscode/
+
+# Confidential diligence data
+data/input/*
+!data/input/.gitkeep
+data/output/*
+!data/output/.gitkeep
+
+# OS files
+Thumbs.db
+.DS_Store

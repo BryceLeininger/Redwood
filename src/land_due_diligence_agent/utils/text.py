@@ -1,0 +1,74 @@
+"""Text cleanup and lightweight summarization helpers."""
+
+from __future__ import annotations
+
+import re
+from collections.abc import Iterable
+
+
+_SPACE_RE = re.compile(r"[ \t]+")
+_SENTENCE_RE = re.compile(r"(?<=[.!?])\s+")
+
+
+def normalize_text(text: str) -> str:
+    """Collapse noisy whitespace while keeping paragraph boundaries."""
+
+    if not text:
+        return ""
+
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    lines = [_SPACE_RE.sub(" ", line).strip() for line in text.split("\n")]
+
+    normalized_lines: list[str] = []
+    previous_blank = False
+    for line in lines:
+        if not line:
+            if not previous_blank:
+                normalized_lines.append("")
+            previous_blank = True
+            continue
+        normalized_lines.append(line)
+        previous_blank = False
+
+    return "\n".join(normalized_lines).strip()
+
+
+def split_sentences(text: str) -> list[str]:
+    """Split normalized text into sentence-like chunks."""
+
+    if not text:
+        return []
+
+    compact = text.replace("\n", " ")
+    parts = _SENTENCE_RE.split(compact)
+    return [part.strip() for part in parts if part.strip()]
+
+
+def clip_text(text: str, max_chars: int) -> str:
+    """Trim text at a character boundary for prompts or concise output."""
+
+    if len(text) <= max_chars:
+        return text
+    return text[: max_chars - 3].rstrip() + "..."
+
+
+def extractive_summary(text: str, *, max_sentences: int = 4) -> str:
+    """Build a deterministic summary from the first substantive sentences."""
+
+    sentences = [sentence for sentence in split_sentences(text) if len(sentence) >= 40]
+    if sentences:
+        return " ".join(sentences[:max_sentences])
+    return clip_text(text.strip(), 400) or "No substantive text extracted."
+
+
+def unique_preserve_order(values: Iterable[str]) -> list[str]:
+    """Deduplicate items without changing their original order."""
+
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        ordered.append(value)
+    return ordered
