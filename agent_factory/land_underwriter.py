@@ -884,6 +884,182 @@ class LandDealUnderwriter:
             "risk_score": risk_score,
         }
 
+    def _sensitivity_matrix(self, request: LandDealInput) -> Dict[str, Any]:
+        price_deltas = [-0.10, -0.05, 0.0, 0.05]
+        cost_deltas = [0.10, 0.05, 0.0, -0.05]
+        rows: List[Dict[str, Any]] = []
+
+        for cost_delta in cost_deltas:
+            row_cells: List[Dict[str, Any]] = []
+            for price_delta in price_deltas:
+                scenario = DealScenario(
+                    name=f"sensitivity_{price_delta}_{cost_delta}",
+                    sales_price_delta_pct=price_delta,
+                    cost_delta_pct=cost_delta,
+                    absorption_delta_pct=0.0,
+                )
+                result = self._compute_scenario(request, scenario)
+                hurdles = self._scenario_hurdles(request, result)
+                pass_count = sum(1 for value in hurdles.values() if value)
+                status = "clear" if pass_count == 4 else "watch" if pass_count >= 2 else "fail"
+                row_cells.append(
+                    {
+                        "sales_price_delta_pct": _round_ratio(price_delta),
+                        "cost_delta_pct": _round_ratio(cost_delta),
+                        "pre_gna_margin_pct": result["income_statement"]["pre_gna_margin_pct"],
+                        "irr_pre_gna_pct": result["cash_flow_metrics"]["irr_pre_gna_pct"],
+                        "land_value_gap_to_residual": result["investment_summary"]["land_value_gap_to_residual"],
+                        "status": status,
+                    }
+                )
+            rows.append(
+                {
+                    "cost_delta_pct": _round_ratio(cost_delta),
+                    "cells": row_cells,
+                }
+            )
+
+        return {
+            "price_deltas_pct": [_round_ratio(item) for item in price_deltas],
+            "cost_deltas_pct": [_round_ratio(item) for item in cost_deltas],
+            "rows": rows,
+        }
+
+    def _deal_score(
+        self,
+        *,
+        hurdle_results: Dict[str, Dict[str, bool]],
+        note_hits: Dict[str, Any],
+        market_intelligence: Dict[str, Any] | None,
+        base_case: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        score = 50
+        base_passes = sum(1 for value in hurdle_results["base_case"].values() if value)
+        downside_passes = sum(1 for value in hurdle_results["downside_case"].values() if value)
+        severe_passes = sum(1 for value in hurdle_results["severe_downside_case"].values() if value)
+        score += base_passes * 8
+        score += downside_passes * 4
+        score += severe_passes * 2
+        score -= min(20, int(note_hits.get("risk_score", 0) or 0))
+        score += min(10, int(note_hits.get("positive_score", 0) or 0) // 2)
+
+        if market_intelligence is not None:
+            score -= min(16, int(market_intelligence.get("risk_score", 0) or 0) * 2)
+            score += min(8, len(market_intelligence.get("upside_flags", [])) * 2)
+
+        residual_gap = _float_from_value(
+            base_case["investment_summary"]["land_value_gap_to_residual"],
+            default=0.0,
+        )
+        if residual_gap <= 0:
+            score += 8
+        else:
+            score -= min(14, int(abs(residual_gap) / 250000))
+
+        score = max(0, min(100, score))
+        if score >= 80:
+            band = "strong"
+        elif score >= 65:
+            band = "workable"
+        elif score >= 50:
+            band = "fragile"
+        else:
+            band = "high_risk"
+
+        return {
+            "score": score,
+            "band": band,
+            "base_hurdles_passed": base_passes,
+            "downside_hurdles_passed": downside_passes,
+            "severe_hurdles_passed": severe_passes,
+        }
+
+    def _investment_committee_memo(
+        self,
+        *,
+        request: LandDealInput,
+        base_case: Dict[str, Any],
+        hurdle_results: Dict[str, Dict[str, bool]],
+        recommendation: str,
+        reasons: Sequence[str],
+        note_hits: Dict[str, Any],
+        market_intelligence: Dict[str, Any] | None,
+    ) -> Dict[str, Any]:
+        revenue = _float_from_value(base_case["income_statement"]["revenue_total"], default=0.0)
+        gross_margin_pct = _ratio_from_value(base_case["income_statement"]["gross_margin_pct"], default=0.0)
+        pre_gna_margin_pct = _ratio_from_value(base_case["income_statement"]["pre_gna_margin_pct"], default=0.0)
+        irr_pct = _ratio_from_value(base_case["cash_flow_metrics"]["irr_pre_gna_pct"], default=0.0)
+        residual_gap = _float_from_value(
+            base_case["investment_summary"]["land_value_gap_to_residual"],
+            default=0.0,
+        )
+
+        strengths: List[str] = []
+        risks: List[str] = []
+
+        if hurdle_results["base_case"]["gross_margin"]:
+            strengths.append("Base gross margin clears the underwriting hurdle.")
+        else:
+            risks.append("Base gross margin is below the underwriting hurdle.")
+        if hurdle_results["base_case"]["pre_gna_margin"]:
+            strengths.append("Base pre-G&A contribution clears the target.")
+        else:
+            risks.append("Base pre-G&A contribution misses the target.")
+        if hurdle_results["base_case"]["irr"]:
+            strengths.append("Base IRR clears the required return.")
+        else:
+            risks.append("Base IRR does not clear the required return.")
+        if residual_gap <= 0:
+            strengths.append("Residual land value supports the current land basis.")
+        else:
+            risks.append("Current land basis is above residual value support.")
+
+        for item in note_hits.get("positive_signals", [])[:3]:
+            strengths.append(f"Deal notes indicate {item}.")
+        for item in note_hits.get("risk_signals", [])[:3]:
+            risks.append(f"Deal notes flag {item}.")
+
+        if market_intelligence is not None:
+            for item in market_intelligence.get("upside_flags", [])[:2]:
+                strengths.append(item)
+            for item in market_intelligence.get("risk_flags", [])[:2]:
+                risks.append(item)
+
+        if recommendation == "pursue":
+            next_steps = [
+                "Advance LOI and lock down diligence scope.",
+                "Confirm takedown timing and entitlement milestones.",
+                "Protect current pricing assumptions with fresh market checks before committee approval.",
+            ]
+        elif recommendation == "negotiate":
+            next_steps = [
+                "Re-cut the land basis to create more residual support.",
+                "Validate pace and pricing with an updated comp shop before final bid.",
+                "Stress-test offsite, grading, and utility exposure in diligence.",
+            ]
+        else:
+            next_steps = [
+                "Do not advance at the current basis.",
+                "Revisit only if price, phasing, or product mix materially improve returns.",
+                "Use the sensitivity matrix to identify what would be required to re-open the deal.",
+            ]
+
+        summary = (
+            f"{request.community_name} underwrites to {recommendation.upper()} on "
+            f"{request.total_lots:.0f} lots / {request.gross_acres:.1f} acres. "
+            f"Base revenue is {revenue:,.0f}, gross margin is {gross_margin_pct:.1%}, "
+            f"pre-G&A margin is {pre_gna_margin_pct:.1%}, and IRR is {irr_pct:.1%}."
+        )
+
+        return {
+            "headline": f"{recommendation.upper()} | {request.community_name}",
+            "summary": summary,
+            "strengths": strengths[:6],
+            "risks": risks[:6],
+            "next_steps": next_steps,
+            "reason_snapshot": list(reasons[:6]),
+        }
+
     def _note_signals(self, notes: str) -> Dict[str, Any]:
         positive_hits = _find_signal_hits(notes, POSITIVE_SIGNAL_WEIGHTS)
         risk_hits = _find_signal_hits(notes, RISK_SIGNAL_WEIGHTS)

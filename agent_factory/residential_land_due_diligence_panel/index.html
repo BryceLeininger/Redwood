@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Residential Land Due Diligence Intake</title>
+  <link rel="stylesheet" href="/diligence/styles.css">
+</head>
+<body>
+  <div class="page-shell">
+    <header class="hero">
+      <div class="hero-copy">
+        <p class="eyebrow">Residential Land Due Diligence</p>
+        <h1>Capture the deal story, then pressure-test the risk posture fast.</h1>
+        <p class="hero-text">
+          Use a structured intake for entitlement, utilities, title, environmental, and contract notes.
+          The panel will classify the opportunity as advance, targeted follow-up, or fatal flaw risk,
+          then let you ask the diligence agent follow-up questions against its playbook.
+        </p>
+      </div>
+      <div class="hero-band">
+        <div class="hero-stat">
+          <span class="hero-stat-label">Primary use</span>
+          <strong>Acquisition screen</strong>
+        </div>
+        <div class="hero-stat">
+          <span class="hero-stat-label">Output</span>
+          <strong>Posture + follow-up</strong>
+        </div>
+        <div class="hero-stat">
+          <span class="hero-stat-label">Mode</span>
+          <strong>Browser or desktop</strong>
+        </div>
+      </div>
+    </header>
+
+    <section class="workspace">
+      <aside class="intake-column">
+        <section class="panel-card compact-card">
+          <div class="card-header">
+            <div>
+              <p class="section-kicker">Session</p>
+              <h2>Agent</h2>
+            </div>
+            <span class="status-pill" id="appState" data-tone="idle">Loading</span>
+          </div>
+
+          <label class="field-label" for="agentSelect">Due diligence specialist</label>
+          <select id="agentSelect"></select>
+          <p class="field-hint" id="agentMeta">Looking for ResidentialLandDueDiligenceAdvisor artifacts.</p>
+        </section>
+
+        <section class="panel-card compact-card">
+          <div class="card-header">
+            <div>
+              <p class="section-kicker">Samples</p>
+              <h2>Load a starting point</h2>
+            </div>
+          </div>
+
+          <div class="sample-grid">
+            <button type="button" class="secondary-button" data-sample="advance">Advance</button>
+            <button type="button" class="secondary-button" data-sample="follow_up">Follow-Up</button>
+            <button type="button" class="secondary-button" data-sample="fatal">Fatal Risk</button>
+          </div>
+          <p class="field-hint">Samples populate the form so you can test the posture logic immediately.</p>
+        </section>
+
+        <section class="panel-card form-card">
+          <div class="card-header">
+            <div>
+              <p class="section-kicker">Intake</p>
+              <h2>Opportunity notes</h2>
+            </div>
+            <span class="status-line" id="runStatus">Waiting for input.</span>
+          </div>
+
+          <div class="form-grid two-up">
+            <label>
+              <span class="field-label">Opportunity name</span>
+              <input id="opportunityName" type="text" placeholder="Roseville North Lots">
+            </label>
+            <label>
+              <span class="field-label">Market</span>
+              <input id="market" type="text" placeholder="Roseville, CA">
+            </label>
+          </div>
+
+          <label>
+            <span class="field-label">Transaction stage</span>
+            <input id="transactionStage" type="text" placeholder="Initial screen, PSA diligence, contract renegotiation">
+          </label>
+
+          <label>
+            <span class="field-label">Opportunity summary</span>
+            <textarea id="opportunitySummary" rows="4" placeholder="What is the seller offering, what product seems plausible, and why is the team looking at it?"></textarea>
+          </label>
+
+          <div class="form-grid two-up">
+            <label>
+              <span class="field-label">Entitlement and zoning</span>
+              <textarea id="entitlementAndZoning" rows="5" placeholder="Current zoning, map status, approvals, political path, density assumptions."></textarea>
+            </label>
+            <label>
+              <span class="field-label">Utilities and agencies</span>
+              <textarea id="utilitiesAndAgencies" rows="5" placeholder="Water, sewer, dry utilities, offsites, agency comments, timing risk."></textarea>
+            </label>
+          </div>
+
+          <div class="form-grid two-up">
+            <label>
+              <span class="field-label">Title and access</span>
+              <textarea id="titleAndAccess" rows="5" placeholder="Easements, legal access, frontage, ALTA exceptions, encumbrances."></textarea>
+            </label>
+            <label>
+              <span class="field-label">Environmental and site</span>
+              <textarea id="environmentalAndSite" rows="5" placeholder="Wetlands, floodplain, topo, soils, remediation, grading, protected habitat."></textarea>
+            </label>
+          </div>
+
+          <div class="form-grid two-up">
+            <label>
+              <span class="field-label">Contract and seller items</span>
+              <textarea id="contractAndSellerItems" rows="5" placeholder="PSA issues, extension rights, deposit timing, diligence package, file completeness."></textarea>
+            </label>
+            <label>
+              <span class="field-label">Key open items</span>
+              <textarea id="keyOpenItems" rows="5" placeholder="What still has to be proven before the team should spend more time or capital?"></textarea>
+            </label>
+          </div>
+
+          <div class="action-row">
+            <button type="button" class="primary-button" id="runAssessment">Assess diligence posture</button>
+            <button type="button" class="ghost-button" id="clearForm">Clear</button>
+          </div>
+        </section>
+
+        <section class="panel-card compact-card">
+          <div class="card-header">
+            <div>
+              <p class="section-kicker">Follow-up</p>
+              <h2>Ask the playbook</h2>
+            </div>
+          </div>
+
+          <label>
+            <span class="field-label">Question</span>
+            <textarea id="questionInput" rows="4" placeholder="Ask what to verify next, how to frame a contract issue, or where a diligence gap usually breaks the deal."></textarea>
+          </label>
+
+          <div class="action-row">
+            <button type="button" class="secondary-button" id="loadQuestion">Load sample question</button>
+            <button type="button" class="primary-button subtle-button" id="askQuestion">Ask agent</button>
+          </div>
+        </section>
+      </aside>
+
+      <main class="results-column">
+        <section class="summary-strip">
+          <article class="summary-card">
+            <span class="summary-label">Current posture</span>
+            <strong id="postureSummary">No assessment yet</strong>
+          </article>
+          <article class="summary-card">
+            <span class="summary-label">Confidence</span>
+            <strong id="confidenceSummary">--</strong>
+          </article>
+          <article class="summary-card">
+            <span class="summary-label">Active agent</span>
+            <strong id="agentSummary">--</strong>
+          </article>
+        </section>
+
+        <section class="panel-card results-card">
+          <div class="card-header results-header">
+            <div>
+              <p class="section-kicker">Output</p>
+              <h2>Diligence readout</h2>
+            </div>
+          </div>
+
+          <div id="resultsBody" class="results-body">
+            <div class="empty-state">
+              <p class="empty-kicker">No result yet</p>
+              <h3>Run an assessment or ask a diligence question.</h3>
+              <p>
+                The panel will summarize the recommended posture, show class confidence, and surface the
+                knowledge excerpts the agent used for follow-up questions.
+              </p>
+            </div>
+          </div>
+        </section>
+      </main>
+    </section>
+  </div>
+
+  <script src="/diligence/app.js"></script>
+</body>
+</html>

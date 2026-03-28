@@ -329,8 +329,10 @@ class LandUnderwriterDesktopApp:
         self.open_button.grid(row=0, column=1, padx=(0, 8))
         self.save_button = self._make_button(actions, "Save Request", self._save_request_file, "secondary")
         self.save_button.grid(row=0, column=2, padx=(0, 8))
+        self.memo_button = self._make_button(actions, "Copy IC Memo", self._copy_ic_memo, "secondary")
+        self.memo_button.grid(row=0, column=3, padx=(0, 8))
         self.run_button = self._make_button(actions, "Run Underwrite", self._run_active_request, "primary")
-        self.run_button.grid(row=0, column=3)
+        self.run_button.grid(row=0, column=4)
 
     def _build_status_strip(self, parent: tk.Widget) -> None:
         strip = tk.Frame(parent, bg=COLORS["bg"], pady=10)
@@ -846,6 +848,90 @@ class LandUnderwriterDesktopApp:
             note.pack(anchor="w")
             self.overview_cards[key] = (value, note)
 
+        self.health_card = tk.Frame(
+            panel,
+            bg=COLORS["navy"],
+            padx=12,
+            pady=12,
+            highlightbackground=COLORS["navy"],
+            highlightthickness=1,
+        )
+        self.health_card.pack(fill="x", pady=(0, 10))
+        tk.Label(
+            self.health_card,
+            text="Deal Readiness",
+            bg=COLORS["navy"],
+            fg="#D8E6EF",
+            font=("Segoe UI", 9, "bold"),
+        ).pack(anchor="w")
+        self.health_value_label = tk.Label(
+            self.health_card,
+            text="0",
+            bg=COLORS["navy"],
+            fg="white",
+            font=("Aptos Display", 28, "bold"),
+        )
+        self.health_value_label.pack(anchor="w", pady=(4, 0))
+        self.health_note_label = tk.Label(
+            self.health_card,
+            text="Complete the core assumptions to get a live quality score.",
+            bg=COLORS["navy"],
+            fg="#D8E6EF",
+            font=("Segoe UI", 9),
+            justify="left",
+            wraplength=280,
+        )
+        self.health_note_label.pack(anchor="w", pady=(2, 0))
+
+        diagnostics = tk.Frame(
+            panel,
+            bg=COLORS["card_alt"],
+            padx=12,
+            pady=12,
+            highlightbackground=COLORS["line"],
+            highlightthickness=1,
+        )
+        diagnostics.pack(fill="x", pady=(0, 10))
+        tk.Label(
+            diagnostics,
+            text="Live Diagnostics",
+            bg=COLORS["card_alt"],
+            fg=COLORS["navy"],
+            font=("Segoe UI", 10, "bold"),
+        ).pack(anchor="w")
+        self.diagnostics_text = ScrolledText(
+            diagnostics,
+            height=8,
+            wrap="word",
+            font=("Segoe UI", 9),
+            bg="#FFFDFC",
+            fg=COLORS["ink"],
+            relief="flat",
+            borderwidth=1,
+        )
+        self.diagnostics_text.pack(fill="x", pady=(8, 0))
+        self.diagnostics_text.configure(state="disabled")
+
+        quick_actions = tk.Frame(
+            panel,
+            bg=COLORS["card_alt"],
+            padx=12,
+            pady=12,
+            highlightbackground=COLORS["line"],
+            highlightthickness=1,
+        )
+        quick_actions.pack(fill="x", pady=(0, 10))
+        tk.Label(
+            quick_actions,
+            text="Quick Actions",
+            bg=COLORS["card_alt"],
+            fg=COLORS["navy"],
+            font=("Segoe UI", 10, "bold"),
+        ).pack(anchor="w")
+        self._make_button(quick_actions, "Auto-Build Phases", self._auto_build_phases, "secondary").pack(fill="x", pady=(8, 6))
+        self._make_button(quick_actions, "Match Pace To Market", self._balance_absorption_to_market, "secondary").pack(fill="x", pady=(0, 6))
+        self._make_button(quick_actions, "Run Underwrite", self._run_active_request, "primary").pack(fill="x")
+
         tips = tk.Frame(panel, bg=COLORS["accent_soft"], padx=12, pady=12, highlightbackground="#E5C9B6", highlightthickness=1)
         tips.pack(fill="both", expand=True)
         tk.Label(tips, text="Workflow", bg=COLORS["accent_soft"], fg=COLORS["navy"], font=("Segoe UI", 10, "bold")).pack(anchor="w")
@@ -955,15 +1041,21 @@ class LandUnderwriterDesktopApp:
         decision_tab = tk.Frame(right_tabs, bg=COLORS["bg"])
         series_tab = tk.Frame(right_tabs, bg=COLORS["bg"])
         market_tab = tk.Frame(right_tabs, bg=COLORS["bg"])
+        sensitivity_tab = tk.Frame(right_tabs, bg=COLORS["bg"])
+        memo_tab = tk.Frame(right_tabs, bg=COLORS["bg"])
         raw_tab = tk.Frame(right_tabs, bg=COLORS["bg"])
         right_tabs.add(decision_tab, text="Decision")
         right_tabs.add(series_tab, text="Series + Schedule")
         right_tabs.add(market_tab, text="Market / CMA")
+        right_tabs.add(sensitivity_tab, text="Sensitivity")
+        right_tabs.add(memo_tab, text="IC Memo")
         right_tabs.add(raw_tab, text="Raw JSON")
 
         self._build_decision_tab(decision_tab)
         self._build_series_tab(series_tab)
         self._build_market_tab(market_tab)
+        self._build_sensitivity_tab(sensitivity_tab)
+        self._build_memo_tab(memo_tab)
         self._build_raw_result_tab(raw_tab)
 
     def _build_decision_tab(self, parent: tk.Widget) -> None:
@@ -1109,6 +1201,66 @@ class LandUnderwriterDesktopApp:
             highlightbackground=COLORS["line"],
         )
         self.market_resale_canvas.grid(row=5, column=0, sticky="nsew")
+
+    def _build_sensitivity_tab(self, parent: tk.Widget) -> None:
+        parent.grid_columnconfigure(0, weight=1)
+        parent.grid_rowconfigure(1, weight=1)
+        parent.grid_rowconfigure(3, weight=0)
+
+        tk.Label(
+            parent,
+            text="Price / Cost Sensitivity",
+            bg=COLORS["bg"],
+            fg=COLORS["navy"],
+            font=("Segoe UI", 10, "bold"),
+        ).grid(row=0, column=0, sticky="w", pady=(6, 4))
+        self.sensitivity_canvas = tk.Canvas(
+            parent,
+            bg=COLORS["card"],
+            height=260,
+            highlightthickness=1,
+            highlightbackground=COLORS["line"],
+        )
+        self.sensitivity_canvas.grid(row=1, column=0, sticky="nsew")
+        tk.Label(
+            parent,
+            text="Each cell shows pre-G&A margin under a price / cost move. Green clears hurdles, amber is watch, red fails.",
+            bg=COLORS["bg"],
+            fg=COLORS["muted"],
+            font=("Segoe UI", 9),
+            wraplength=360,
+            justify="left",
+        ).grid(row=2, column=0, sticky="w", pady=(8, 0))
+        self.sensitivity_summary_label = tk.Label(
+            parent,
+            text="",
+            bg=COLORS["bg"],
+            fg=COLORS["ink"],
+            font=("Segoe UI", 9),
+            justify="left",
+            wraplength=360,
+        )
+        self.sensitivity_summary_label.grid(row=3, column=0, sticky="w", pady=(6, 0))
+
+    def _build_memo_tab(self, parent: tk.Widget) -> None:
+        parent.grid_columnconfigure(0, weight=1)
+        parent.grid_rowconfigure(1, weight=1)
+
+        toolbar = tk.Frame(parent, bg=COLORS["bg"])
+        toolbar.grid(row=0, column=0, sticky="ew", pady=(6, 4))
+        self._make_button(toolbar, "Copy Memo", self._copy_ic_memo, "primary").grid(row=0, column=0, sticky="w")
+
+        self.memo_text = ScrolledText(
+            parent,
+            wrap="word",
+            font=("Segoe UI", 10),
+            bg=COLORS["card"],
+            fg=COLORS["ink"],
+            relief="flat",
+            borderwidth=1,
+        )
+        self.memo_text.grid(row=1, column=0, sticky="nsew")
+        self.memo_text.configure(state="disabled")
 
     def _build_raw_result_tab(self, parent: tk.Widget) -> None:
         parent.grid_columnconfigure(0, weight=1)
@@ -1400,6 +1552,201 @@ class LandUnderwriterDesktopApp:
             set_card("market_pace", _format_number(monthly_absorption, 2), "Add competitor pace to benchmark")
 
         self._draw_builder_schedule_preview(payload)
+        diagnostics = self._builder_diagnostics(payload)
+        band = diagnostics["band"]
+        if band == "ready":
+            bg = COLORS["green_soft"]
+            fg = COLORS["green"]
+            card_bg = COLORS["green"]
+        elif band == "watch":
+            bg = COLORS["amber_soft"]
+            fg = COLORS["amber"]
+            card_bg = COLORS["amber"]
+        else:
+            bg = COLORS["red_soft"]
+            fg = COLORS["red"]
+            card_bg = COLORS["red"]
+
+        self.health_card.configure(bg=card_bg, highlightbackground=card_bg)
+        self.health_value_label.configure(text=str(diagnostics["score"]), bg=card_bg)
+        self.health_note_label.configure(text=diagnostics["summary"], bg=card_bg)
+        for child in self.health_card.winfo_children():
+            child.configure(bg=card_bg)
+        self._set_scrolled_text(self.diagnostics_text, "\n".join(diagnostics["lines"]))
+
+    def _set_scrolled_text(self, widget: ScrolledText, text: str) -> None:
+        widget.configure(state="normal")
+        widget.delete("1.0", "end")
+        widget.insert("1.0", text)
+        widget.configure(state="disabled")
+
+    def _builder_diagnostics(self, payload: dict[str, Any]) -> dict[str, Any]:
+        lines: list[str] = []
+        score = 100
+        series = payload.get("product_series", [])
+        total_lots = sum(float(item.get("lots", 0) or 0) for item in series)
+        phases = payload.get("schedule_phases") or payload.get("land_purchase_events") or []
+        phase_lots = sum(float(item.get("lots", 0) or 0) for item in phases)
+        competitors = payload.get("competitor_projects", [])
+        resales = payload.get("resale_comps", [])
+        market = str(payload.get("market") or "").strip()
+        notes = str(payload.get("notes") or "").strip()
+        monthly_absorption = float(payload.get("monthly_absorption", 0) or 0)
+
+        if not market:
+            score -= 8
+            lines.append("Market is blank. Name the market so saved deals are easier to review.")
+        if total_lots <= 0:
+            score -= 25
+            lines.append("No active product series. Add at least one series with positive lots.")
+        if phases and total_lots and abs(phase_lots - total_lots) > 0.1:
+            score -= 18
+            lines.append(
+                f"Phase lots ({_format_number(phase_lots, 0)}) do not match series lots ({_format_number(total_lots, 0)})."
+            )
+        elif not phases and (payload.get("land_purchase_price_per_lot") or 0) <= 0:
+            score -= 20
+            lines.append("No valid land basis. Enter Land Price / Lot or build a phase schedule.")
+        elif not phases:
+            score -= 6
+            lines.append("Using a flat land price. Add phases if takedown timing matters to cash flow.")
+
+        if len(competitors) == 0:
+            score -= 8
+            lines.append("No competitor communities loaded. Pace and pricing are not benchmarked.")
+        if len(resales) == 0:
+            score -= 6
+            lines.append("No resale comps loaded. There is no backstop for price / sqft support.")
+        if not notes:
+            score -= 4
+            lines.append("Notes are blank. Add diligence context so risk flags are more useful.")
+
+        if competitors and monthly_absorption > 0:
+            avg_comp_pace = sum(float(item.get("monthly_absorption", 0) or 0) for item in competitors) / len(competitors)
+            if avg_comp_pace > 0:
+                pace_delta = (monthly_absorption - avg_comp_pace) / avg_comp_pace
+                if pace_delta > 0.2:
+                    score -= 12
+                    lines.append("Planned absorption is materially ahead of the competitor set.")
+                elif pace_delta > 0.08:
+                    score -= 5
+                    lines.append("Planned absorption is modestly ahead of the competitor set.")
+
+        if score >= 80:
+            band = "ready"
+            summary = "Deal packet is well-formed and benchmarked."
+        elif score >= 60:
+            band = "watch"
+            summary = "Usable, but a few assumptions still need tightening."
+        else:
+            band = "risk"
+            summary = "Incomplete or unsupported assumptions are weakening the screen."
+
+        if not lines:
+            lines.append("No major input issues detected. Run the underwrite and review the sensitivity tab.")
+
+        return {
+            "score": max(0, min(100, score)),
+            "band": band,
+            "summary": summary,
+            "lines": lines,
+        }
+
+    def _auto_build_phases(self) -> None:
+        payload = self._request_from_form(strict=False)
+        total_lots = sum(float(item.get("lots", 0) or 0) for item in payload.get("product_series", []))
+        if total_lots <= 0:
+            messagebox.showerror("Missing Lots", "Add at least one product series before auto-building phases.", parent=self.root)
+            return
+
+        structure = str(payload.get("takedown_structure") or "bulk").lower()
+        base_price = float(payload.get("land_purchase_price_per_lot", 0) or 0)
+        if base_price <= 0:
+            existing = payload.get("land_purchase_events") or []
+            if existing:
+                total_cost = sum(float(item.get("lots", 0) or 0) * float(item.get("price_per_lot", 0) or 0) for item in existing)
+                base_price = total_cost / total_lots if total_lots else 0
+
+        if structure == "bulk":
+            phase_count = 1
+            spacing = 0
+        elif structure == "rolling":
+            phase_count = 4 if total_lots >= 80 else 3
+            spacing = 4
+        else:
+            phase_count = 3 if total_lots >= 50 else 2
+            spacing = 6
+
+        base_phase_size = int(total_lots // phase_count)
+        remainder = int(round(total_lots - (base_phase_size * phase_count)))
+        lots_by_phase = []
+        for index in range(phase_count):
+            lots = base_phase_size + (1 if index < remainder else 0)
+            lots_by_phase.append(lots)
+
+        for index, row in enumerate(self.phase_rows):
+            default_name = f"Phase {index + 1}"
+            if index < phase_count:
+                price_multiplier = 1.0 + (0.02 * index if structure != "bulk" else 0.0)
+                row["name"].set(default_name)
+                row["month"].set(str(index * spacing))
+                row["lots"].set(str(lots_by_phase[index]))
+                row["price_per_lot"].set(_format_input_number(base_price * price_multiplier if base_price else 0))
+            else:
+                row["name"].set(default_name)
+                row["month"].set("")
+                row["lots"].set("")
+                row["price_per_lot"].set("")
+
+        self.events_text.delete("1.0", "end")
+        self._schedule_refresh()
+        self._set_status("Built a staged takedown plan from the current lot count and takedown structure.")
+
+    def _balance_absorption_to_market(self) -> None:
+        payload = self._request_from_form(strict=False)
+        competitors = payload.get("competitor_projects", [])
+        if not competitors:
+            messagebox.showerror("No Competitors", "Add competitor communities before matching pace to market.", parent=self.root)
+            return
+        valid_paces = [float(item.get("monthly_absorption", 0) or 0) for item in competitors if float(item.get("monthly_absorption", 0) or 0) > 0]
+        if not valid_paces:
+            messagebox.showerror("No Pace Data", "Competitor rows need monthly absorption values.", parent=self.root)
+            return
+        avg_pace = sum(valid_paces) / len(valid_paces)
+        self.form_vars["monthly_absorption"].set(_format_input_number(avg_pace, 2))
+        self._schedule_refresh()
+        self._set_status("Updated monthly absorption to the competitor average pace.")
+
+    def _copy_ic_memo(self) -> None:
+        result = self.current_result
+        if isinstance(result, list):
+            result = result[0] if result and isinstance(result[0], dict) else None
+        if not isinstance(result, dict):
+            self._set_status("Run an underwrite first to generate an IC memo.")
+            return
+        memo = result.get("investment_committee_memo")
+        if not isinstance(memo, dict):
+            self._set_status("No IC memo is available for the current result.")
+            return
+        lines = [
+            memo.get("headline", ""),
+            "",
+            memo.get("summary", ""),
+            "",
+            "Strengths:",
+        ]
+        for item in memo.get("strengths", []):
+            lines.append(f"- {item}")
+        lines.extend(["", "Risks:"])
+        for item in memo.get("risks", []):
+            lines.append(f"- {item}")
+        lines.extend(["", "Next Steps:"])
+        for item in memo.get("next_steps", []):
+            lines.append(f"- {item}")
+        text = "\n".join(lines).strip()
+        self.root.clipboard_clear()
+        self.root.clipboard_append(text)
+        self._set_status("Investment committee memo copied to clipboard.")
 
     def _request_from_form(self, strict: bool = True) -> dict[str, Any]:
         def text_value(key: str) -> str:
@@ -2094,7 +2441,7 @@ class LandUnderwriterDesktopApp:
     def _set_busy(self, busy: bool) -> None:
         self.run_inflight = busy
         state = "disabled" if busy else "normal"
-        for button in (self.load_button, self.open_button, self.save_button, self.run_button):
+        for button in (self.load_button, self.open_button, self.save_button, self.memo_button, self.run_button):
             button.configure(state=state)
         self.root.configure(cursor="watch" if busy else "")
         if not busy:
@@ -2177,6 +2524,8 @@ class LandUnderwriterDesktopApp:
         self._populate_decision_tab(display_result)
         self._populate_series_tab(display_result)
         self._populate_market_tab(display_result)
+        self._populate_sensitivity_tab(display_result)
+        self._populate_memo_tab(display_result)
         self._render_raw_result(result)
 
     def _update_banner(self, result: dict[str, Any] | None) -> None:
@@ -2208,10 +2557,12 @@ class LandUnderwriterDesktopApp:
         assumptions = result.get("assumptions", {})
         risk_flags = result.get("risk_flags", [])
         upside_flags = result.get("upside_flags", [])
+        deal_score = result.get("deal_score", {})
         summary = (
             f"{result.get('community_name', 'Deal')} | "
             f"{_format_number(assumptions.get('total_lots'), 0)} lots | "
             f"{_format_number(assumptions.get('gross_acres'), 1)} acres | "
+            f"Score {deal_score.get('score', '-')} | "
             f"{len(risk_flags)} risk flags | {len(upside_flags)} upside flags"
         )
 
@@ -2514,7 +2865,12 @@ class LandUnderwriterDesktopApp:
         )
 
     def _populate_decision_tab(self, result: dict[str, Any]) -> None:
-        lines = [f"Recommendation: {str(result.get('recommendation') or '').upper()}", ""]
+        score = result.get("deal_score") or {}
+        lines = [
+            f"Recommendation: {str(result.get('recommendation') or '').upper()}",
+            f"Deal Score: {score.get('score', '-')}/100 ({str(score.get('band') or '').replace('_', ' ')})",
+            "",
+        ]
 
         reasons = result.get("recommendation_reasons") or []
         lines.append("Why:")
@@ -2771,6 +3127,123 @@ class LandUnderwriterDesktopApp:
             y = y_for(subject_ppsf)
             canvas.create_oval(x - 7, y - 7, x + 7, y + 7, fill=COLORS["accent"], outline="")
             canvas.create_text(x + 10, y - 10, text="Subject", anchor="w", fill=COLORS["accent"], font=("Segoe UI", 8, "bold"))
+
+    def _populate_sensitivity_tab(self, result: dict[str, Any]) -> None:
+        matrix = result.get("sensitivity_matrix")
+        if not matrix:
+            self.sensitivity_canvas.delete("all")
+            self.sensitivity_summary_label.configure(text="Sensitivity data is unavailable.")
+            return
+
+        canvas = self.sensitivity_canvas
+        canvas.delete("all")
+        width = max(canvas.winfo_width(), 420)
+        height = max(canvas.winfo_height(), 260)
+        left = 92
+        top = 42
+        cell_w = 74
+        cell_h = 42
+
+        price_labels = list(matrix.get("price_deltas_pct") or [])
+        rows = list(matrix.get("rows") or [])
+
+        canvas.create_text(
+            left + (len(price_labels) * cell_w) / 2,
+            16,
+            text="Sales Price Delta",
+            fill=COLORS["navy"],
+            font=("Segoe UI", 9, "bold"),
+        )
+        canvas.create_text(
+            28,
+            top + (len(rows) * cell_h) / 2,
+            text="Cost\nDelta",
+            fill=COLORS["navy"],
+            font=("Segoe UI", 9, "bold"),
+            justify="center",
+        )
+
+        for col, price_delta in enumerate(price_labels):
+            canvas.create_text(
+                left + col * cell_w + cell_w / 2,
+                top - 16,
+                text=_format_pct(price_delta),
+                fill=COLORS["muted"],
+                font=("Segoe UI", 8, "bold"),
+            )
+
+        clear_count = 0
+        fail_count = 0
+        for row_index, row in enumerate(rows):
+            cost_delta = row.get("cost_delta_pct")
+            canvas.create_text(
+                left - 12,
+                top + row_index * cell_h + cell_h / 2,
+                text=_format_pct(cost_delta),
+                anchor="e",
+                fill=COLORS["muted"],
+                font=("Segoe UI", 8, "bold"),
+            )
+            for col_index, cell in enumerate(row.get("cells", [])):
+                x1 = left + col_index * cell_w
+                y1 = top + row_index * cell_h
+                x2 = x1 + cell_w - 4
+                y2 = y1 + cell_h - 4
+                status = cell.get("status")
+                if status == "clear":
+                    fill = COLORS["green_soft"]
+                    clear_count += 1
+                elif status == "watch":
+                    fill = COLORS["amber_soft"]
+                else:
+                    fill = COLORS["red_soft"]
+                    fail_count += 1
+                canvas.create_rectangle(x1, y1, x2, y2, fill=fill, outline=COLORS["line"])
+                canvas.create_text(
+                    (x1 + x2) / 2,
+                    y1 + 14,
+                    text=_format_pct(cell.get("pre_gna_margin_pct")),
+                    fill=COLORS["ink"],
+                    font=("Segoe UI", 8, "bold"),
+                )
+                canvas.create_text(
+                    (x1 + x2) / 2,
+                    y1 + 30,
+                    text=_format_pct(cell.get("irr_pre_gna_pct")),
+                    fill=COLORS["muted"],
+                    font=("Segoe UI", 7),
+                )
+
+        summary = (
+            f"{clear_count} clear cells, {fail_count} fail cells. "
+            "Top line in each cell is pre-G&A margin; second line is IRR."
+        )
+        self.sensitivity_summary_label.configure(text=summary)
+
+    def _populate_memo_tab(self, result: dict[str, Any]) -> None:
+        memo = result.get("investment_committee_memo") or {}
+        score = result.get("deal_score") or {}
+        lines = [
+            str(memo.get("headline") or "Investment Committee Memo"),
+            "",
+            str(memo.get("summary") or ""),
+            "",
+            f"Deal score: {score.get('score', '-')}/100 ({str(score.get('band') or '').replace('_', ' ')})",
+            "",
+            "Strengths:",
+        ]
+        for item in memo.get("strengths", []):
+            lines.append(f"- {item}")
+        lines.extend(["", "Risks:"])
+        for item in memo.get("risks", []):
+            lines.append(f"- {item}")
+        lines.extend(["", "Next Steps:"])
+        for item in memo.get("next_steps", []):
+            lines.append(f"- {item}")
+        lines.extend(["", "Reason Snapshot:"])
+        for item in memo.get("reason_snapshot", []):
+            lines.append(f"- {item}")
+        self._set_scrolled_text(self.memo_text, "\n".join(lines))
 
     def _render_raw_result(self, result: Any) -> None:
         rendered = json.dumps(result, indent=2)

@@ -131,6 +131,7 @@ install_land_underwriter_desktop_shortcut.bat
 It can:
 - classify diligence notes as `advance`, `targeted_follow_up`, or `fatal_flaw_risk`
 - answer retrieval-based questions about entitlement, utilities, environmental, title, site, and contract diligence
+- drive a local intake panel for structured deal screening and follow-up questions
 
 Create the agent:
 
@@ -159,6 +160,20 @@ Ask a diligence question:
 python -m agent_factory.cli ask \
   --agent-dir generated_agents/residentiallandduediligenceadvisor_YYYYMMDD_HHMMSS \
   --question "What contract items matter most when buying long-lead residential land with unresolved utility risk?"
+```
+
+Run the local browser panel:
+
+```bash
+python -m agent_factory.residential_land_due_diligence_panel_server --host 127.0.0.1 --port 8786
+```
+
+Or use the top-level helpers from the repo root:
+
+```bash
+run_due_diligence_panel.bat
+run_due_diligence_desktop.bat
+install_due_diligence_desktop_shortcut.bat
 ```
 
 ## Residential Subdivision Scout
