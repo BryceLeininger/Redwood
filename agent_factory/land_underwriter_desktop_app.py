@@ -942,9 +942,9 @@ class LandUnderwriterDesktopApp:
         tk.Label(tips, text="Workflow", bg=COLORS["accent_soft"], fg=COLORS["navy"], font=("Segoe UI", 10, "bold")).pack(anchor="w")
         guidance = (
             "1. Use the builder for fast screening.\n"
-            "2. Open Advanced JSON only when you need staged takedowns or custom per-series overrides.\n"
+            "2. Use Auto-Build Phases when you want a quick takedown structure.\n"
             "3. Press Ctrl+R to run, Ctrl+S to save, Ctrl+O to open.\n"
-            "4. Review Results Dashboard before deciding whether to pursue, negotiate, or pass."
+            "4. Review the Decision Center before deciding whether to pursue, negotiate, or pass."
         )
         tk.Label(
             tips,
@@ -1048,20 +1048,20 @@ class LandUnderwriterDesktopApp:
         market_tab = tk.Frame(right_tabs, bg=COLORS["bg"])
         sensitivity_tab = tk.Frame(right_tabs, bg=COLORS["bg"])
         memo_tab = tk.Frame(right_tabs, bg=COLORS["bg"])
-        raw_tab = tk.Frame(right_tabs, bg=COLORS["bg"])
+        detail_tab = tk.Frame(right_tabs, bg=COLORS["bg"])
         right_tabs.add(decision_tab, text="Decision")
         right_tabs.add(series_tab, text="Series + Schedule")
         right_tabs.add(market_tab, text="Market / CMA")
         right_tabs.add(sensitivity_tab, text="Sensitivity")
         right_tabs.add(memo_tab, text="IC Memo")
-        right_tabs.add(raw_tab, text="Raw JSON")
+        right_tabs.add(detail_tab, text="Deep Dive")
 
         self._build_decision_tab(decision_tab)
         self._build_series_tab(series_tab)
         self._build_market_tab(market_tab)
         self._build_sensitivity_tab(sensitivity_tab)
         self._build_memo_tab(memo_tab)
-        self._build_raw_result_tab(raw_tab)
+        self._build_raw_result_tab(detail_tab)
 
     def _build_decision_tab(self, parent: tk.Widget) -> None:
         parent.grid_columnconfigure(0, weight=1)
