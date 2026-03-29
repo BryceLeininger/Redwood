@@ -6,10 +6,15 @@ import logging
 import unittest
 from pathlib import Path
 
+from land_due_diligence_agent.analysis.issue_registry import (
+    build_canonical_issue_registry,
+    build_recommendation_from_registry,
+    build_section_selections,
+)
 from land_due_diligence_agent.analysis.service import run_analysis
 from land_due_diligence_agent.llm.base import LLMProvider
 from land_due_diligence_agent.llm.heuristic_provider import HeuristicProvider
-from land_due_diligence_agent.models import ContradictionFinding, DocumentRecord, RiskFinding
+from land_due_diligence_agent.models import ContradictionFinding, DocumentRecord, OmissionAssessment, RiskFinding
 from land_due_diligence_agent.utils.text import normalize_text
 
 
@@ -177,6 +182,85 @@ class AnalysisTests(unittest.TestCase):
         self.assertFalse(synthesis.contradictions)
         self.assertLessEqual(len(synthesis.key_risks), 3)
         self.assertLessEqual(len(synthesis.seller_questions), 6)
+
+    def test_canonical_registry_merges_overlapping_utility_signals(self) -> None:
+        risks = [
+            RiskFinding(
+                category="Utilities / Infrastructure Issues",
+                severity="high",
+                summary="Utility capacity remains pending and will-serve support is not in the file.",
+                issue="Utility capacity and provider confirmation remain open.",
+                why_it_matters="Provider commitment is still required before the utility path is reliable.",
+                likely_implication="Schedule and offsite utility scope remain exposed.",
+                source_documents=["Utility Memo"],
+            ),
+            RiskFinding(
+                category="Schedule Risks",
+                severity="medium",
+                summary="Provider coordination remains open and keeps the schedule path exposed.",
+                issue="Utility-related schedule risk remains open.",
+                why_it_matters="The critical path still depends on provider coordination.",
+                likely_implication="Schedule slips remain likely until utility assumptions are confirmed.",
+                source_documents=["Schedule Memo"],
+            ),
+            RiskFinding(
+                category="Budget / Cost Reliability",
+                severity="medium",
+                summary="Joint trench and dry-utility scope still reads as budgetary.",
+                issue="Offsite utility risk is not fully priced.",
+                why_it_matters="Basis remains exposed if utility work is larger than assumed.",
+                likely_implication="Cost can move if utility scope is repriced.",
+                source_documents=["Budget Memo"],
+            ),
+        ]
+        omissions = [
+            OmissionAssessment(
+                item="Utility availability / will-serve documentation",
+                category="Utilities / Infrastructure Issues",
+                status="not found",
+                rationale="No current will-serve letter is in the package.",
+            )
+        ]
+        registry = build_canonical_issue_registry(
+            key_risks=risks,
+            contradictions=[],
+            omission_assessments=omissions,
+            document_analyses=[],
+        )
+
+        utility_issue = next((issue for issue in registry.issues if issue.issue_id == "utility-capacity"), None)
+        self.assertIsNotNone(utility_issue)
+        self.assertGreaterEqual(len(utility_issue.merged_fragment_ids), 3)
+        self.assertEqual(utility_issue.decision_action, "condition closing")
+
+    def test_registry_ranking_and_output_selection_are_stable(self) -> None:
+        documents = [
+            _document(
+                "title_report.txt",
+                "Preliminary title report lists an access easement exception affecting the current site layout.",
+            ),
+            _document(
+                "budget.txt",
+                "Budgetary pricing only. Preliminary proposal with allowances and unresolved contingencies.",
+            ),
+        ]
+        synthesis = run_analysis(
+            deal_name="Ranking Deal",
+            documents=documents,
+            llm_provider=HeuristicProvider(),
+            logger=logging.getLogger("test-ranking"),
+        )
+        registry = synthesis.canonical_issue_registry
+        self.assertTrue(registry.issues)
+        self.assertEqual(registry.issues[0].issue_id, "title-access-clearance")
+
+        recommendation = build_recommendation_from_registry(registry)
+        selections = build_section_selections(registry, recommendation, analysis_mode="full")
+        executive_ids = [selection.issue_id for selection in selections if selection.output_name == "01_executive_summary.md"]
+        key_risk_ids = [selection.issue_id for selection in selections if selection.output_name == "02_key_risks.md"]
+        self.assertEqual(len(executive_ids), len(set(executive_ids)))
+        self.assertEqual(len(key_risk_ids), len(set(key_risk_ids)))
+        self.assertTrue(set(executive_ids).issubset(set(key_risk_ids)))
 
 
 if __name__ == "__main__":

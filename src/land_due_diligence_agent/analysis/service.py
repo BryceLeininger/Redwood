@@ -7,20 +7,25 @@ import logging
 from land_due_diligence_agent.analysis.heuristics import (
     aggregate_risks,
     analyze_document,
-    build_executive_summary_draft,
-    collect_seller_questions,
     detect_contradictions,
     identify_missing_items,
     infer_entitlement_status,
     recommend_reading_order,
 )
+from land_due_diligence_agent.analysis.issue_registry import (
+    build_adversarial_challenges_from_registry,
+    build_canonical_issue_registry,
+    build_category_rollup_from_registry,
+    build_issue_analyses_from_registry,
+    build_omission_assessments,
+    build_overall_read_draft,
+    build_priority_assessment_from_registry,
+    build_recommendation_from_registry,
+    build_section_selections,
+    build_seller_questions_from_registry,
+)
 from land_due_diligence_agent.analysis.multi_pass import (
-    build_adversarial_challenges,
-    build_category_rollup_from_issue_analyses,
-    build_issue_analyses,
-    build_priority_assessment,
     build_structured_facts,
-    enrich_issue_analyses_with_contradictions,
 )
 from land_due_diligence_agent.llm.base import LLMProvider
 from land_due_diligence_agent.models import DealSynthesis, DocumentRecord, LLMCallFailure, PriorityAssessment
@@ -80,59 +85,44 @@ def run_analysis(
 
     missing_items = identify_missing_items(documents, document_analyses)
     entitlement_status = infer_entitlement_status(documents)
-    issue_analyses = []
-    if analysis_mode == "full":
-        issue_analyses = build_issue_analyses(
-            structured_facts=structured_facts,
-            document_analyses=document_analyses,
-            key_risks=key_risks,
-            missing_items=missing_items,
-        )
     contradictions = (
         detect_contradictions(document_analyses, key_risks, missing_items)
         if analysis_mode == "full"
         else []
     )
-    if analysis_mode == "full":
-        issue_analyses = enrich_issue_analyses_with_contradictions(issue_analyses, contradictions)
-
-    priority_assessment = build_priority_assessment(issue_analyses, contradictions) if analysis_mode == "full" else None
+    omission_assessments = build_omission_assessments(document_analyses)
+    registry = build_canonical_issue_registry(
+        key_risks=key_risks,
+        contradictions=contradictions,
+        omission_assessments=omission_assessments,
+        document_analyses=document_analyses,
+    )
+    recommendation = build_recommendation_from_registry(registry)
+    registry.output_selections = build_section_selections(
+        registry,
+        recommendation,
+        analysis_mode=analysis_mode,
+    )
+    issue_analyses = build_issue_analyses_from_registry(registry)
+    priority_assessment = build_priority_assessment_from_registry(registry) if registry.issues else None
     challenge_findings = (
-        build_adversarial_challenges(
-            issue_analyses=issue_analyses,
-            contradictions=contradictions,
-            missing_items=missing_items,
+        build_adversarial_challenges_from_registry(
+            registry=registry,
             document_analyses=document_analyses,
-            priority_assessment=priority_assessment,
         )
-        if analysis_mode == "full" and priority_assessment is not None
+        if analysis_mode == "full"
         else []
     )
-    category_rollup = (
-        {risk.category: risk.summary for risk in key_risks}
-        if analysis_mode == "fast"
-        else build_category_rollup_from_issue_analyses(issue_analyses)
-    )
-    seller_questions = collect_seller_questions(
-        document_analyses,
-        missing_items,
-        key_risks,
-        contradictions,
-        issue_analyses=issue_analyses,
-    )
+    category_rollup = build_category_rollup_from_registry(registry)
+    seller_questions = build_seller_questions_from_registry(registry)
     if analysis_mode == "fast":
         seller_questions = seller_questions[:6]
-    executive_summary = build_executive_summary_draft(
+    executive_summary = build_overall_read_draft(
         deal_name=deal_name,
-        document_analyses=document_analyses,
-        key_risks=key_risks,
-        issue_analyses=issue_analyses,
-        challenge_findings=challenge_findings,
-        priority_assessment=priority_assessment,
-        contradictions=contradictions,
+        registry=registry,
+        recommendation=recommendation,
         entitlement_status=entitlement_status,
-        missing_items=missing_items,
-        extraction_errors=extraction_errors,
+        challenge_findings=challenge_findings,
     )
 
     if use_external_llm:
@@ -141,10 +131,10 @@ def run_analysis(
         executive_summary = llm_provider.refine_executive_summary(
             deal_name=deal_name,
             draft_summary=executive_summary,
-            category_rollup=category_rollup,
-            key_risks=key_risks,
-            contradictions=contradictions,
-            missing_items=missing_items,
+        category_rollup=category_rollup,
+        key_risks=key_risks,
+        contradictions=contradictions,
+        missing_items=missing_items,
         )
     except Exception as exc:  # pragma: no cover - network/provider failure path
         detail = _format_llm_exception(exc)
@@ -169,9 +159,12 @@ def run_analysis(
         category_rollup=category_rollup,
         document_analyses=document_analyses,
         structured_facts=structured_facts,
+        omission_assessments=omission_assessments,
         issue_analyses=issue_analyses,
+        canonical_issue_registry=registry,
         challenge_findings=challenge_findings,
         priority_assessment=priority_assessment or PriorityAssessment(),
+        recommendation=recommendation,
         contradictions=contradictions,
         extraction_errors=extraction_errors,
         llm_failures=llm_failures,

@@ -88,6 +88,18 @@ class ContradictionFinding:
 
 
 @dataclass(slots=True)
+class OmissionAssessment:
+    """Assessment of whether a normally expected diligence item is present and usable."""
+
+    item: str
+    category: str
+    status: str
+    rationale: str
+    source_documents: list[str] = field(default_factory=list)
+    citations: list[Citation] = field(default_factory=list)
+
+
+@dataclass(slots=True)
 class StructuredFact:
     """Document-anchored fact extracted into an issue/category lane."""
 
@@ -96,6 +108,34 @@ class StructuredFact:
     document_name: str
     confidence: str
     citations: list[Citation] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class IssueFragment:
+    """Intermediate fragment before canonical issue consolidation."""
+
+    fragment_id: str
+    source_type: str
+    title: str
+    category: str
+    dependency_key: str
+    status: str
+    core_facts: list[str] = field(default_factory=list)
+    best_evidence: list[str] = field(default_factory=list)
+    why_it_matters: str = ""
+    likely_implication: str = ""
+    what_would_resolve_it: str = ""
+    open_questions: list[str] = field(default_factory=list)
+    confidence: str = "medium"
+    severity: str = "medium"
+    likelihood: str = "medium"
+    timing_sensitivity: str = "medium"
+    cost_sensitivity: str = "medium"
+    fixability: str = "medium"
+    decision_action: str = "verify"
+    citations: list[Citation] = field(default_factory=list)
+    source_documents: list[str] = field(default_factory=list)
+    gating_flags: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -147,6 +187,112 @@ class PriorityAssessment:
     top_cost_risk: PriorityCallout | None = None
     top_timing_risk: PriorityCallout | None = None
     top_closability_risk: PriorityCallout | None = None
+
+
+@dataclass(slots=True, frozen=True)
+class PriorityWeights:
+    """Configurable weights for decision-priority scoring."""
+
+    cost_exposure: int = 5
+    schedule_exposure: int = 5
+    yield_exposure: int = 3
+    entitlement_fragility: int = 5
+    closing_risk: int = 6
+    likelihood: int = 4
+    evidence_confidence: int = 3
+    preclose_mitigation_difficulty: int = 4
+    seller_shiftability_penalty: int = 3
+    ic_sensitivity: int = 5
+
+
+@dataclass(slots=True)
+class IssuePriorityScore:
+    """Weighted score breakdown for a canonical issue."""
+
+    total: int = 0
+    cost_exposure: int = 0
+    schedule_exposure: int = 0
+    yield_exposure: int = 0
+    entitlement_fragility: int = 0
+    closing_risk: int = 0
+    likelihood: int = 0
+    evidence_confidence: int = 0
+    preclose_mitigation_difficulty: int = 0
+    seller_shiftability: int = 0
+    ic_sensitivity: int = 0
+
+
+@dataclass(slots=True)
+class CanonicalIssue:
+    """Single source-of-truth issue used by all downstream outputs."""
+
+    issue_id: str
+    title: str
+    category: str
+    status: str
+    core_facts: list[str] = field(default_factory=list)
+    best_evidence: list[str] = field(default_factory=list)
+    why_it_matters: str = ""
+    likely_implication: str = ""
+    what_would_resolve_it: str = ""
+    open_questions: list[str] = field(default_factory=list)
+    confidence: str = "medium"
+    severity: str = "medium"
+    likelihood: str = "medium"
+    timing_sensitivity: str = "medium"
+    cost_sensitivity: str = "medium"
+    fixability: str = "medium"
+    decision_action: str = "verify"
+    citations: list[Citation] = field(default_factory=list)
+    source_documents: list[str] = field(default_factory=list)
+    gating_flags: list[str] = field(default_factory=list)
+    merged_fragment_ids: list[str] = field(default_factory=list)
+    merged_fragment_titles: list[str] = field(default_factory=list)
+    priority_score: IssuePriorityScore = field(default_factory=IssuePriorityScore)
+    output_bucket: str = "appendix"
+
+
+@dataclass(slots=True)
+class MergeDecision:
+    """Traceable merge record for canonical issue consolidation."""
+
+    canonical_issue_id: str
+    dependency_key: str
+    fragment_ids: list[str] = field(default_factory=list)
+    fragment_titles: list[str] = field(default_factory=list)
+    rationale: str = ""
+
+
+@dataclass(slots=True)
+class OutputIssueSelection:
+    """Selection trace for which canonical issues feed each output."""
+
+    output_name: str
+    issue_id: str
+    rank: int
+    reason: str
+
+
+@dataclass(slots=True)
+class RecommendationDecision:
+    """Decision posture built from ranked canonical issues."""
+
+    posture: str = "pause"
+    rationale: str = ""
+    reasons: list[str] = field(default_factory=list)
+    conditions: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class CanonicalIssueRegistry:
+    """Inspectable canonical issue registry and its supporting decisions."""
+
+    fragments: list[IssueFragment] = field(default_factory=list)
+    issues: list[CanonicalIssue] = field(default_factory=list)
+    merge_decisions: list[MergeDecision] = field(default_factory=list)
+    omission_assessments: list[OmissionAssessment] = field(default_factory=list)
+    output_selections: list[OutputIssueSelection] = field(default_factory=list)
+    weights: PriorityWeights = field(default_factory=PriorityWeights)
 
 
 @dataclass(slots=True)
@@ -201,9 +347,12 @@ class DealSynthesis:
     category_rollup: dict[str, str]
     document_analyses: list[DocumentAnalysis]
     structured_facts: list[StructuredFact] = field(default_factory=list)
+    omission_assessments: list[OmissionAssessment] = field(default_factory=list)
     issue_analyses: list[IssueAnalysis] = field(default_factory=list)
+    canonical_issue_registry: CanonicalIssueRegistry = field(default_factory=CanonicalIssueRegistry)
     challenge_findings: list[ChallengeFinding] = field(default_factory=list)
     priority_assessment: PriorityAssessment = field(default_factory=PriorityAssessment)
+    recommendation: RecommendationDecision = field(default_factory=RecommendationDecision)
     contradictions: list[ContradictionFinding] = field(default_factory=list)
     extraction_errors: list[str] = field(default_factory=list)
     llm_failures: list[LLMCallFailure] = field(default_factory=list)

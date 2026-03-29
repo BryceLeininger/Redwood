@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from land_due_diligence_agent.models import DealSynthesis, RunSummary
+from land_due_diligence_agent.models import CanonicalIssue, DealSynthesis, RunSummary
 from land_due_diligence_agent.utils.text import normalize_text
 
 
@@ -46,6 +46,7 @@ def write_markdown_outputs(
                     (output_dir / "07_deal_synthesis.md", _build_deal_synthesis_markdown(synthesis)),
                     (output_dir / "09_investment_committee_brief.md", _build_investment_committee_brief_markdown(synthesis)),
                     (output_dir / "10_issue_analysis.md", _build_issue_analysis_markdown(synthesis)),
+                    (output_dir / "11_issue_registry_debug.md", _build_issue_registry_debug_markdown(synthesis)),
                 ]
             )
 
@@ -76,6 +77,7 @@ def _analysis_output_names(analysis_mode: str) -> list[str]:
         "07_deal_synthesis.md",
         "09_investment_committee_brief.md",
         "10_issue_analysis.md",
+        "11_issue_registry_debug.md",
     ]
 
 
@@ -189,42 +191,9 @@ def _build_executive_summary_markdown(
     run_summary: RunSummary,
 ) -> str:
     limitations = _build_known_limitations(run_summary, synthesis)
-    conclusions = _build_executive_conclusions(synthesis)
+    top_issues = _selected_issues(synthesis, "01_executive_summary.md", default_count=4)
+    bullets = _build_executive_bullets(synthesis, top_issues)
     overall_read = normalize_text(synthesis.executive_summary)
-    if run_summary.analysis_mode == "fast":
-        lines = [
-            "# Executive Summary",
-            "",
-            f"**Deal:** {synthesis.deal_name}",
-            "",
-            f"**Provider:** {provider_name}",
-            "",
-            f"**Mode:** {run_summary.analysis_mode}",
-            "",
-            f"**Entitlement Status:** {synthesis.entitlement_status}",
-            "",
-            "## Overall Read",
-            "",
-            overall_read,
-            "",
-            "## Most Important Conclusions",
-            "",
-        ]
-        lines.extend(f"- {item}" for item in conclusions[:3])
-        lines.extend(
-            [
-                "",
-                "## Known Limitations Of This Run",
-                "",
-            ]
-        )
-        lines.extend(f"- {item}" for item in limitations)
-        return "\n".join(lines) + "\n"
-
-    known_points = _build_known_points(synthesis)
-    unresolved_points = _build_unresolved_points(synthesis)
-    gating_points = _build_gating_points(synthesis)
-    decision_points = _build_decision_points(synthesis)
     lines = [
         "# Executive Summary",
         "",
@@ -232,77 +201,38 @@ def _build_executive_summary_markdown(
         "",
         f"**Provider:** {provider_name}",
         "",
+        f"**Mode:** {run_summary.analysis_mode}",
+        "",
         f"**Entitlement Status:** {synthesis.entitlement_status}",
+        "",
+        f"**Recommendation Posture:** {synthesis.recommendation.posture}",
         "",
         "## Overall Read",
         "",
         overall_read,
-        "",
-        "## Decision Framing",
-        "",
     ]
-    lines.extend(_build_decision_framing_lines(synthesis))
+    if run_summary.analysis_mode == "full":
+        lines.extend(
+            [
+                "",
+                "## Decision Framing",
+                "",
+            ]
+        )
+        lines.extend(_build_decision_framing_lines(synthesis))
     lines.extend(
         [
             "",
-        "## Most Important Conclusions",
-        "",
-        ]
-    )
-    lines.extend(f"- {item}" for item in conclusions)
-    lines.extend(
-        [
-            "",
-            "## What Appears Known",
-            "",
-        ]
-    )
-    lines.extend(f"- {item}" for item in known_points)
-    lines.extend(
-        [
-            "",
-            "## What Appears Unresolved",
+            "## Executive Call",
             "",
         ]
     )
-    lines.extend(f"- {item}" for item in unresolved_points)
+    lines.extend(f"- {item}" for item in bullets)
     lines.extend(
         [
             "",
-            "## Potential Contradictions / Tensions",
+            "## Known Limitations Of This Run",
             "",
-        ]
-    )
-    lines.extend(_render_contradictions(synthesis.contradictions))
-    lines.extend(
-        [
-            "",
-            "## Adversarial Challenge",
-            "",
-        ]
-    )
-    lines.extend(_render_challenge_findings(synthesis.challenge_findings, limit=3))
-    lines.extend(
-        [
-            "",
-            "## Gating Issues",
-            "",
-        ]
-    )
-    lines.extend(f"- {item}" for item in gating_points)
-    lines.extend(
-        [
-            "",
-            "## What Matters Most For The Acquisition Decision",
-            "",
-        ]
-    )
-    lines.extend(f"- {item}" for item in decision_points)
-    lines.extend(
-        [
-            "",
-        "## Known Limitations Of This Run",
-        "",
         ]
     )
     lines.extend(f"- {item}" for item in limitations)
@@ -311,31 +241,22 @@ def _build_executive_summary_markdown(
 
 def _build_key_risks_markdown(synthesis: DealSynthesis, analysis_mode: str) -> str:
     lines = ["# Key Risks", ""]
-    if not synthesis.key_risks:
-        lines.append("No concentrated risk signals were detected from the supplied document text.")
+    issues = _selected_issues(
+        synthesis,
+        "02_key_risks.md",
+        default_count=3 if analysis_mode == "fast" else 5,
+    )
+    if not issues:
+        lines.append("No concentrated issue was elevated from the current package.")
         return "\n".join(lines) + "\n"
 
-    primary_risks, secondary_risks = _split_risk_tiers(synthesis.key_risks)
-    if analysis_mode == "fast":
-        lines.extend(["## Highest-Priority Risks", ""])
-        for risk in primary_risks[:3]:
-            lines.extend(_render_fast_risk_block(risk))
-        return "\n".join(lines).rstrip() + "\n"
+    lines.extend(["## Ranked Issues", ""])
+    for index, issue in enumerate(issues, start=1):
+        lines.extend(_render_canonical_issue_risk_block(issue, index=index))
 
-    lines.extend(["## Risk Priorities", ""])
-    lines.extend(_build_priority_call_lines(synthesis))
-    lines.append("")
-    lines.extend(["## Primary Risks (Deal-Shaping)", ""])
-    for risk in primary_risks:
-        lines.extend(_render_risk_block(risk, heading_level="###"))
-
-    if secondary_risks:
-        lines.extend(["## Secondary Risks (Important But Not Gating Yet)", ""])
-        for risk in secondary_risks:
-            lines.extend(_render_risk_block(risk, heading_level="###"))
-
-    lines.extend(["## Potential Contradictions / Tensions", ""])
-    lines.extend(_render_contradictions(synthesis.contradictions))
+    if analysis_mode == "full" and synthesis.contradictions:
+        lines.extend(["## Potential Contradictions / Tensions", ""])
+        lines.extend(_render_contradictions(synthesis.contradictions))
 
     return "\n".join(lines).rstrip() + "\n"
 
@@ -399,31 +320,38 @@ def _build_document_summaries_markdown(synthesis: DealSynthesis) -> str:
 
 def _build_issue_analysis_markdown(synthesis: DealSynthesis) -> str:
     lines = ["# Issue Analysis", ""]
-    if not synthesis.issue_analyses:
-        lines.append("- No issue-specific analysis lane was populated.")
+    issues = synthesis.canonical_issue_registry.issues
+    if not issues:
+        lines.append("- No canonical issue was populated.")
         return "\n".join(lines) + "\n"
 
-    for issue in synthesis.issue_analyses:
-        lines.append(f"## {issue.label}")
+    for issue in issues:
+        lines.append(f"## {issue.title}")
+        lines.append(f"- Category: {issue.category}")
+        lines.append(f"- Priority Score: {issue.priority_score.total}")
+        lines.append(f"- Status: {issue.status}")
         lines.append(f"- Confidence: {issue.confidence}")
+        lines.append(f"- Decision Action: {issue.decision_action}")
         if issue.citations:
             lines.append(f"- Source: {_format_citations(issue.citations)}")
         elif issue.source_documents:
             lines.append(f"- Source: {', '.join(issue.source_documents)}")
         lines.append("")
         lines.append("### Core Facts")
-        for fact in issue.core_facts:
-            fact_source = _format_citations(fact.citations[:1])
-            if fact_source:
-                lines.append(f"- {fact.statement} [Source: {fact_source}]")
-            else:
-                lines.append(f"- {fact.statement}")
-        if not issue.core_facts:
+        if issue.core_facts:
+            lines.extend(f"- {fact}" for fact in issue.core_facts[:4])
+        else:
             lines.append("- No concentrated fact pattern was isolated in this lane.")
         lines.append("")
+        lines.append("### Best Evidence")
+        if issue.best_evidence:
+            lines.extend(f"- {evidence}" for evidence in issue.best_evidence[:3])
+        else:
+            lines.append("- No short-form evidence snippet was captured.")
+        lines.append("")
         lines.append("### Unresolved Questions")
-        if issue.unresolved_questions:
-            lines.extend(f"- {question}" for question in issue.unresolved_questions)
+        if issue.open_questions:
+            lines.extend(f"- {question}" for question in issue.open_questions[:4])
         else:
             lines.append("- No unresolved question was isolated beyond the current cited facts.")
         lines.append("")
@@ -433,16 +361,38 @@ def _build_issue_analysis_markdown(synthesis: DealSynthesis) -> str:
         lines.append("### Likely Implication")
         lines.append(f"- {issue.likely_implication}")
         lines.append("")
+        lines.append("### What Would Resolve It")
+        lines.append(f"- {issue.what_would_resolve_it}")
+        lines.append("")
 
     return "\n".join(lines).rstrip() + "\n"
 
 
 def _build_missing_items_markdown(synthesis: DealSynthesis) -> str:
     lines = ["# Missing Diligence Items", ""]
-    if synthesis.missing_items:
-        lines.extend(f"- {item}" for item in synthesis.missing_items)
-    else:
-        lines.append("- No obvious checklist gaps were inferred from document keyword coverage.")
+    grouped = {
+        "not found": [],
+        "unclear whether present": [],
+        "present but weak": [],
+        "present and adequate": [],
+    }
+    for assessment in synthesis.omission_assessments:
+        grouped.setdefault(assessment.status, []).append(assessment)
+
+    for status in ("not found", "unclear whether present", "present but weak", "present and adequate"):
+        assessments = grouped.get(status, [])
+        if not assessments:
+            continue
+        lines.append(f"## {status.title()}")
+        lines.append("")
+        for assessment in assessments:
+            source = _format_citations(assessment.citations[:2]) or ", ".join(assessment.source_documents[:2])
+            suffix = f" [Source: {source}]" if source else ""
+            lines.append(f"- **{assessment.item}:** {assessment.rationale}{suffix}")
+        lines.append("")
+
+    if not synthesis.omission_assessments:
+        lines.append("- No omission assessment was generated.")
 
     if synthesis.extraction_errors:
         lines.append("")
@@ -452,41 +402,18 @@ def _build_missing_items_markdown(synthesis: DealSynthesis) -> str:
 
 
 def _build_deal_synthesis_markdown(synthesis: DealSynthesis) -> str:
-    primary_risks, secondary_risks = _split_risk_tiers(synthesis.key_risks)
+    issues = synthesis.canonical_issue_registry.issues
+    top_issues = issues[:3]
     lines = [
         "# Deal Synthesis",
         "",
         "## Overall Read",
         normalize_text(synthesis.executive_summary),
         "",
-        "## Top Risk Calls",
+        "## Risk Pattern",
         "",
     ]
-    lines.extend(_build_priority_call_lines(synthesis))
-    lines.extend(
-        [
-            "",
-        "## Primary Risks (Deal-Shaping)",
-        "",
-        ]
-    )
-
-    if primary_risks:
-        lines.extend(
-            f"- **{risk.category}:** {_with_light_citation(f'{risk.issue} {risk.likely_implication}'.strip(), risk)}"
-            for risk in primary_risks
-        )
-    else:
-        lines.append("- No primary deal-shaping risk was isolated from the extracted text.")
-
-    lines.extend(["", "## Secondary Risks (Important But Not Gating Yet)", ""])
-    if secondary_risks:
-        lines.extend(
-            f"- **{risk.category}:** {_with_light_citation(f'{risk.issue} {risk.likely_implication}'.strip(), risk)}"
-            for risk in secondary_risks
-        )
-    else:
-        lines.append("- No secondary risk was elevated beyond the primary issue set.")
+    lines.extend(f"- {item}" for item in _build_pattern_lines(synthesis, top_issues))
 
     lines.extend(["", "## Potential Contradictions / Tensions", ""])
     lines.extend(_render_contradictions(synthesis.contradictions))
@@ -495,68 +422,196 @@ def _build_deal_synthesis_markdown(synthesis: DealSynthesis) -> str:
     lines.extend(_render_challenge_findings(synthesis.challenge_findings, limit=4))
 
     lines.extend(["", "## Gating Issues", ""])
-    lines.extend(f"- {item}" for item in _build_gating_points(synthesis))
+    lines.extend(f"- {item}" for item in _build_decision_gate_lines(synthesis))
 
     return "\n".join(lines) + "\n"
 
 
 def _build_investment_committee_brief_markdown(synthesis: DealSynthesis) -> str:
     overall_read = _build_ic_overall_read(synthesis)
-    biggest_risks = _build_ic_biggest_risks(synthesis)
-    biggest_unknowns = _build_ic_biggest_unknowns(synthesis)
+    verify_points = _build_personal_verification_items(synthesis)
+    readiness_status, readiness_reason = _evaluate_decision_readiness(synthesis)
 
     lines = [
         "# Investment Committee Brief",
+        "",
+        f"**Recommendation:** {synthesis.recommendation.posture}",
         "",
         "## Overall Read",
         "",
         overall_read,
         "",
-        "## Decision Framing",
+        "## Reasons",
         "",
     ]
-    lines.extend(_build_decision_framing_lines(synthesis))
+    lines.extend(f"- {reason}" for reason in synthesis.recommendation.reasons[:3] or ["No reason line was generated."])
     lines.extend(
         [
             "",
-        "## Top Risk Calls",
-        "",
+            "## Conditions / Asks",
+            "",
         ]
     )
-    lines.extend(_build_priority_call_lines(synthesis))
+    lines.extend(f"- {condition}" for condition in synthesis.recommendation.conditions[:3] or ["No condition line was generated."])
     lines.extend(
         [
             "",
-        "## Biggest Risks",
-        "",
+            "## What I Would Verify Personally",
+            "",
         ]
     )
-    lines.extend(f"- {item}" for item in biggest_risks)
+    lines.extend(f"- {item}" for item in verify_points[:3] or ["Personally verify the highest-ranked issue sources."])
     lines.extend(
         [
             "",
-            "## Potential Contradictions / Tensions",
+            "## Decision Readiness",
             "",
         ]
     )
-    lines.extend(_render_contradictions(synthesis.contradictions))
+    lines.append(f"- Status: {readiness_status}")
+    lines.append(f"- Why: {readiness_reason}")
+    if synthesis.challenge_findings:
+        lines.extend(["", "## Likely IC Pushback", ""])
+        lines.extend(_render_challenge_findings(synthesis.challenge_findings, limit=3))
+    return "\n".join(lines) + "\n"
+
+
+def _build_issue_registry_debug_markdown(synthesis: DealSynthesis) -> str:
+    registry = synthesis.canonical_issue_registry
+    lines = ["# Issue Registry Debug", ""]
     lines.extend(
         [
+            "## Summary",
             "",
-            "## Likely IC Pushback",
-            "",
-        ]
-    )
-    lines.extend(_render_challenge_findings(synthesis.challenge_findings, limit=4))
-    lines.extend(
-        [
-            "",
-            "## Biggest Unknowns",
+            f"- Fragments: {len(registry.fragments)}",
+            f"- Canonical Issues: {len(registry.issues)}",
+            f"- Merge Decisions: {len(registry.merge_decisions)}",
             "",
         ]
     )
-    lines.extend(f"- {item}" for item in biggest_unknowns)
+
+    lines.extend(["## Canonical Issue Registry", ""])
+    for issue in registry.issues:
+        lines.append(f"### {issue.title}")
+        lines.append(f"- Issue ID: `{issue.issue_id}`")
+        lines.append(f"- Category: {issue.category}")
+        lines.append(f"- Status: {issue.status}")
+        lines.append(f"- Priority Score: {issue.priority_score.total}")
+        lines.append(f"- Output Bucket: {issue.output_bucket}")
+        lines.append(f"- Decision Action: {issue.decision_action}")
+        lines.append(f"- Source: {_format_citations(issue.citations[:3]) or ', '.join(issue.source_documents[:3]) or 'None'}")
+        lines.append(f"- Merged Fragments: {', '.join(issue.merged_fragment_ids) or 'None'}")
+        lines.append("")
+
+    lines.extend(["## Merge Decisions", ""])
+    if registry.merge_decisions:
+        for decision in registry.merge_decisions:
+            lines.append(f"- `{decision.canonical_issue_id}` <- {', '.join(decision.fragment_ids)}")
+            lines.append(f"  Rationale: {decision.rationale}")
+    else:
+        lines.append("- No merge decisions were recorded.")
+    lines.append("")
+
+    lines.extend(["## Output Selections", ""])
+    if registry.output_selections:
+        for selection in registry.output_selections:
+            lines.append(
+                f"- `{selection.output_name}` rank {selection.rank}: `{selection.issue_id}` ({selection.reason})"
+            )
+    else:
+        lines.append("- No output selections were recorded.")
+    lines.append("")
+
     return "\n".join(lines)
+
+
+def _selected_issues(
+    synthesis: DealSynthesis,
+    output_name: str,
+    *,
+    default_count: int,
+) -> list[CanonicalIssue]:
+    registry = synthesis.canonical_issue_registry
+    if not registry.issues:
+        return []
+    if registry.output_selections:
+        selected_ids = [
+            selection.issue_id
+            for selection in sorted(
+                registry.output_selections,
+                key=lambda item: (item.output_name, item.rank),
+            )
+            if selection.output_name == output_name
+        ]
+        if selected_ids:
+            issue_by_id = {issue.issue_id: issue for issue in registry.issues}
+            return [issue_by_id[issue_id] for issue_id in selected_ids if issue_id in issue_by_id]
+    return registry.issues[:default_count]
+
+
+def _render_canonical_issue_risk_block(issue: CanonicalIssue, *, index: int) -> list[str]:
+    lines = [f"### {index}. {issue.title}"]
+    lines.append(f"- Why It Matters: {issue.why_it_matters}")
+    lines.append(f"- Likely Implication: {issue.likely_implication}")
+    lines.append(f"- What Would Resolve It: {issue.what_would_resolve_it}")
+    lines.append(f"- Decision Action: {issue.decision_action}")
+    if issue.gating_flags:
+        lines.append(f"- Gating Impact: {', '.join(issue.gating_flags)}")
+    lines.append(f"- Confidence: {issue.confidence}")
+    source = _format_citations(issue.citations[:3]) or ", ".join(issue.source_documents[:3])
+    if source:
+        lines.append(f"- Source: {source}")
+    lines.append("")
+    return lines
+
+
+def _build_executive_bullets(synthesis: DealSynthesis, issues: list[CanonicalIssue]) -> list[str]:
+    bullets = [
+        f"Recommendation posture: {synthesis.recommendation.posture}. {synthesis.recommendation.rationale}",
+    ]
+    for issue in issues[:4]:
+        bullets.append(_with_light_citation(f"{issue.title}. {issue.likely_implication}", issue))
+    if synthesis.contradictions:
+        bullets.append(_with_light_citation(synthesis.contradictions[0].description, synthesis.contradictions[0]))
+    return _unique_list(bullets)[:6]
+
+
+def _build_pattern_lines(synthesis: DealSynthesis, issues: list[CanonicalIssue]) -> list[str]:
+    if not issues:
+        return ["No concentrated issue pattern was elevated from the current package."]
+
+    categories = [issue.category for issue in issues]
+    dominant_category = max(set(categories), key=categories.count)
+    dominant_count = categories.count(dominant_category)
+    pattern_lines = []
+    if dominant_count >= 2:
+        pattern_lines.append(
+            f"Risk is concentrated around {dominant_category.lower()}, which suggests one underlying dependency is driving multiple downstream concerns."
+        )
+    else:
+        pattern_lines.append(
+            "Risk is concentrated in a small number of separate issues rather than across every diligence lane."
+        )
+
+    if any(issue.category in {"Title / Access Concerns", "Entitlement Status", "Offsite Obligations"} for issue in issues[:2]):
+        pattern_lines.append(
+            "This reads more like a land-control and pre-close scope-closure problem than a routine clean-up exercise."
+        )
+    else:
+        pattern_lines.append(
+            "This reads closer to a normal diligence package, but the top issue set is still strong enough to control basis or schedule."
+        )
+
+    posture = synthesis.recommendation.posture
+    if posture in {"pause", "retrade", "no-go"}:
+        pattern_lines.append(
+            f"The current pattern is structurally fragile enough that the recommendation stays at '{posture}' until the lead issues are closed."
+        )
+    else:
+        pattern_lines.append(
+            f"The deal can continue under a '{posture}' posture, but only if the lead issues are resolved in the order shown."
+        )
+    return pattern_lines[:3]
 
 
 def _build_error_report_markdown(
@@ -862,14 +917,6 @@ def _build_decision_framing_lines(synthesis: DealSynthesis) -> list[str]:
     lines.extend(
         [
             "",
-            "### Top Risk Calls",
-            "",
-        ]
-    )
-    lines.extend(_build_priority_call_lines(synthesis))
-    lines.extend(
-        [
-            "",
             "### Gating Conditions",
             "",
         ]
@@ -904,45 +951,22 @@ def _build_decision_framing_lines(synthesis: DealSynthesis) -> list[str]:
 
 
 def _build_top_decision_drivers(synthesis: DealSynthesis) -> list[str]:
-    drivers: list[str] = []
-    covered_categories: set[str] = set()
-
-    for callout in synthesis.priority_assessment.top_deal_shaping_issues[:3]:
-        drivers.append(_priority_call_text(callout))
-        if callout.category:
-            covered_categories.add(callout.category)
-
-    closability_callout = synthesis.priority_assessment.top_closability_risk
-    if (
-        closability_callout is not None
-        and closability_callout.category
-        and closability_callout.category not in covered_categories
-        and len(drivers) < 5
-    ):
-        drivers.append(_priority_call_text(closability_callout))
-        covered_categories.add(closability_callout.category)
-
-    for finding in synthesis.contradictions[:2]:
-        if covered_categories.intersection(finding.related_categories):
-            continue
-        drivers.append(_with_light_citation(finding.description, finding))
-        covered_categories.update(finding.related_categories)
-        if len(drivers) >= 5:
-            break
-
-    if not drivers:
-        drivers.append("No single decision driver clearly dominates the current package.")
-
-    return drivers[:5]
+    issues = _selected_issues(synthesis, "01_executive_summary.md", default_count=4)
+    if not issues:
+        return ["No single decision driver clearly dominates the current package."]
+    return [
+        _with_light_citation(f"{issue.title}. {issue.why_it_matters}", issue)
+        for issue in issues[:5]
+    ]
 
 
 def _build_decision_gate_lines(synthesis: DealSynthesis) -> list[str]:
-    grouped = _group_risks_by_gate(synthesis.key_risks)
+    issues = synthesis.canonical_issue_registry.issues
     lines: list[str] = []
     for gate_name in ("Closing", "Underwriting confidence", "Vertical start"):
-        risks = grouped[gate_name]
+        gate_issues = [issue for issue in issues if gate_name in issue.gating_flags]
         contradictions = _contradictions_for_gate(synthesis, gate_name)
-        actions = [_build_gate_action_text(risk) for risk in risks[:2]]
+        actions = [_build_gate_action_text_from_issue(issue) for issue in gate_issues[:2]]
         actions.extend(_build_gate_action_from_contradiction(finding) for finding in contradictions[:1])
         if gate_name == "Underwriting confidence" and any(
             analysis.confidence == "low" for analysis in synthesis.document_analyses
@@ -953,7 +977,7 @@ def _build_decision_gate_lines(synthesis: DealSynthesis) -> list[str]:
         if not actions:
             continue
 
-        citations = _collect_gate_citations(risks, contradictions)
+        citations = _collect_gate_citations(gate_issues, contradictions)
         source_suffix = f" [Source: {_format_citations(citations)}]" if citations else ""
         lines.append(f"Before {gate_name.lower()}: {'; '.join(actions)}.{source_suffix}")
 
@@ -964,31 +988,30 @@ def _build_decision_gate_lines(synthesis: DealSynthesis) -> list[str]:
 
 def _build_deal_breakers(synthesis: DealSynthesis) -> list[str]:
     breakers: list[str] = []
-    title_risk = _find_risk(synthesis, "Title / Access Concerns")
-    offsite_risk = _find_risk(synthesis, "Offsite Obligations")
-    geotech_risk = _find_risk(synthesis, "Geotechnical Risks")
-    geotech_budget_tension = _find_contradiction_by_category(synthesis, {"Geotechnical Risks", "Budget / Cost Reliability"})
+    title_issue = _find_issue(synthesis, "title-access-clearance")
+    offsite_issue = _find_issue(synthesis, "offsite-frontage")
+    geotech_budget_issue = _find_issue(synthesis, "geotech-budget-alignment")
     title_tension = _find_contradiction_by_category(synthesis, {"Title / Access Concerns"})
 
-    if title_risk is not None:
+    if title_issue is not None:
         breakers.append(
             _with_light_citation(
                 "If the title and access exceptions cannot be cured, insured over, or designed around, the deal changes materially because closing and buildability are impaired.",
-                title_tension or title_risk,
+                title_tension or title_issue,
             )
         )
-    if offsite_risk is not None:
+    if offsite_issue is not None:
         breakers.append(
             _with_light_citation(
                 "If frontage, dedication, or offsite obligations stay buyer-facing on terms not reflected in basis, the deal changes materially on cost and schedule.",
-                _find_contradiction_by_category(synthesis, {"Offsite Obligations"}) or offsite_risk,
+                _find_contradiction_by_category(synthesis, {"Offsite Obligations"}) or offsite_issue,
             )
         )
-    if geotech_risk is not None:
+    if geotech_budget_issue is not None:
         breakers.append(
             _with_light_citation(
                 "If soils-driven grading, retaining, or foundation scope is not fully carried into cost, current underwriting is not reliable enough for approval.",
-                geotech_budget_tension or geotech_risk,
+                geotech_budget_issue,
             )
         )
 
@@ -1003,12 +1026,15 @@ def _build_personal_verification_items(synthesis: DealSynthesis) -> list[str]:
     for finding in synthesis.contradictions[:2]:
         items.append(_build_verify_point_from_contradiction(finding))
 
-    primary_risks, _ = _split_risk_tiers(synthesis.key_risks)
-    covered_categories = {category for finding in synthesis.contradictions for category in finding.related_categories}
-    for risk in primary_risks:
-        if risk.category in covered_categories:
+    covered_ids = {
+        issue.issue_id
+        for issue in synthesis.canonical_issue_registry.issues
+        if any(issue.category in finding.related_categories for finding in synthesis.contradictions)
+    }
+    for issue in _selected_issues(synthesis, "09_investment_committee_brief.md", default_count=3):
+        if issue.issue_id in covered_ids:
             continue
-        items.append(_build_verify_point_from_risk(risk))
+        items.append(_build_verify_point_from_issue(issue))
         if len(items) >= 4:
             break
 
@@ -1019,15 +1045,20 @@ def _build_personal_verification_items(synthesis: DealSynthesis) -> list[str]:
 
 
 def _evaluate_decision_readiness(synthesis: DealSynthesis) -> tuple[str, str]:
-    grouped = _group_risks_by_gate(synthesis.key_risks)
-    if synthesis.contradictions or grouped["Closing"] or synthesis.missing_items or any(
+    issues = synthesis.canonical_issue_registry.issues
+    if (
+        synthesis.contradictions
+        or any("Closing" in issue.gating_flags for issue in issues)
+        or any(assessment.status in {"not found", "unclear whether present"} for assessment in synthesis.omission_assessments)
+        or any(
         analysis.confidence == "low" for analysis in synthesis.document_analyses
+        )
     ):
         return (
             "Not ready",
             "Core documents still conflict on scope, access, or cost assumptions, and the package still has pre-closing or support gaps that change the recommendation.",
         )
-    if grouped["Underwriting confidence"] or grouped["Vertical start"]:
+    if any(issue.gating_flags for issue in issues):
         return (
             "Partially complete",
             "The package is substantive, but basis, permit, or execution items are still open enough that leadership should not treat it as fully underwritten.",
@@ -1052,8 +1083,11 @@ def _build_gate_action_from_contradiction(finding) -> str:
 
 
 def _contradictions_for_gate(synthesis: DealSynthesis, gate_name: str) -> list:
-    grouped = _group_risks_by_gate(synthesis.key_risks)
-    gate_categories = {risk.category for risk in grouped[gate_name]}
+    gate_categories = {
+        issue.category
+        for issue in synthesis.canonical_issue_registry.issues
+        if gate_name in issue.gating_flags
+    }
     return [
         finding
         for finding in synthesis.contradictions
@@ -1086,8 +1120,17 @@ def _build_verify_point_from_risk(risk) -> str:
     )
 
 
+def _build_verify_point_from_issue(issue: CanonicalIssue) -> str:
+    source_text = _format_citations(issue.citations[:2]) or ", ".join(issue.source_documents[:2])
+    return f"Read {source_text or issue.title} and confirm the current underwriting treatment for {issue.title.lower()}."
+
+
 def _find_risk(synthesis: DealSynthesis, category: str):
     return next((risk for risk in synthesis.key_risks if risk.category == category), None)
+
+
+def _find_issue(synthesis: DealSynthesis, issue_id: str):
+    return next((issue for issue in synthesis.canonical_issue_registry.issues if issue.issue_id == issue_id), None)
 
 
 def _find_contradiction_by_category(synthesis: DealSynthesis, categories: set[str]):
@@ -1253,27 +1296,20 @@ def _build_decision_points(synthesis: DealSynthesis) -> list[str]:
 
 
 def _build_ic_overall_read(synthesis: DealSynthesis) -> str:
-    if not synthesis.key_risks:
-        return "The file set does not surface a concentrated issue, but the package should still be checked for completeness before it is treated as decision-ready."
+    issues = _selected_issues(synthesis, "09_investment_committee_brief.md", default_count=3)
+    if not issues:
+        return "The package does not surface a concentrated issue, but it still needs a completeness check before it is treated as decision-ready."
 
-    top_issues = synthesis.priority_assessment.top_deal_shaping_issues[:2]
-    if top_issues:
-        lines = [
-            "The package is substantive, but the recommendation is still controlled by a small number of unresolved deal-shaping issues.",
-            f"The lead issue is {top_issues[0].statement}",
-        ]
-        if len(top_issues) > 1:
-            lines.append(f"The next issue is {top_issues[1].statement}")
-        if synthesis.challenge_findings:
-            lines.append(f"Expected IC pushback: {synthesis.challenge_findings[0].likely_pushback}")
-        return " ".join(lines)
-
-    primary_risks, _ = _split_risk_tiers(synthesis.key_risks)
-    lead_issues = "; ".join((risk.issue or risk.summary) for risk in primary_risks[:3])
-    return (
-        f"The package is substantive, but it is not ready for a clean recommendation yet. {lead_issues} "
-        f"Those issues still control closing risk, land-basis reliability, and execution timing."
+    lead = issues[0]
+    text = (
+        f"The recommendation is '{synthesis.recommendation.posture}' because {lead.title.lower()} is still open. "
+        f"{lead.likely_implication}"
     )
+    if len(issues) > 1:
+        text += f" The next issue is {issues[1].title.lower()}."
+    if synthesis.challenge_findings:
+        text += f" Expected IC pushback: {synthesis.challenge_findings[0].likely_pushback}"
+    return text
 
 
 def _build_ic_biggest_risks(synthesis: DealSynthesis) -> list[str]:
@@ -1345,3 +1381,9 @@ def _build_gate_action_text(risk) -> str:
     if risk.category == "Schedule Risks":
         return "rebuild the critical path with only confirmed assumptions"
     return f"resolve the current {risk.category.lower()} issue"
+
+
+def _build_gate_action_text_from_issue(issue: CanonicalIssue) -> str:
+    if issue.what_would_resolve_it:
+        return issue.what_would_resolve_it[0].lower() + issue.what_would_resolve_it[1:]
+    return _build_gate_action_text(issue)
