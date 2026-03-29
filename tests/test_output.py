@@ -18,6 +18,7 @@ from land_due_diligence_agent.models import (
     DocumentAnalysis,
     DocumentRecord,
     FileProcessingResult,
+    FurtherDiligenceRoadmap,
     IssueAnalysis,
     IssueCluster,
     IssueDependencyLink,
@@ -30,6 +31,7 @@ from land_due_diligence_agent.models import (
     PriorityAssessment,
     PriorityCallout,
     ReadingRecommendation,
+    ResearchAgendaItem,
     RecommendationDecision,
     RiskFinding,
     RunSummary,
@@ -74,6 +76,12 @@ class OutputWriterTests(unittest.TestCase):
             confidence="high",
             confidence_reason="Text extraction was strong with no OCR-related warnings.",
             focus_areas=["Environmental Risks"],
+            document_role="primary",
+            staleness_status="present and adequate",
+            staleness_reason="No obvious staleness signal was isolated.",
+            contradiction_count=1,
+            reading_bucket="must read personally",
+            reading_rationale_factors=["primary source document", "legal significance", "other conclusions depend on it"],
         )
         structured_fact = StructuredFact(
             category="Environmental Risks",
@@ -187,6 +195,21 @@ class OutputWriterTests(unittest.TestCase):
             likely_closing_effect="Material environmental exposure can push the deal back to a conditional or paused closing posture.",
             likely_structure_effect="May require seller indemnity, credit, escrow, or post-close remediation allocation.",
             likely_underwriting_effect="Basis and timing remain provisional until residual environmental scope and cost owner are clear.",
+            front_end_flag="red flag",
+            front_end_flag_reason="Direct evidence shows this issue is both real and close enough to the critical path that it should stand out in screening.",
+            information_status="present and adequate",
+            information_status_reason="This issue is supported by current direct evidence rather than by a missing-document inference.",
+            missing_confirmation="Provide the current environmental closure path, cost owner, and any remaining mitigation obligation.",
+            research_agenda=[
+                ResearchAgendaItem(
+                    issue_id="environmental-followup",
+                    title="Environmental follow-up is not fully closed",
+                    verify_what="What remediation scope remains open and who is paying for it?",
+                    request_item="Provide the current environmental closure path, cost owner, and any remaining mitigation obligation.",
+                    likely_source="environmental consultant and agency file review",
+                    timing="now",
+                )
+            ],
             downstream_dependencies=[
                 IssueDependencyLink(
                     issue_id="budget-reliability",
@@ -208,9 +231,12 @@ class OutputWriterTests(unittest.TestCase):
                     title="Memo",
                     relative_path="memo.txt",
                     priority=5,
-                    reason="Contains high-priority environmental indicators.",
+                    reason="Must Read Personally because this document carries primary source document, legal significance, other conclusions depend on it. Confidence is high.",
                     confidence="high",
                     focus_areas=["Environmental Risks"],
+                    bucket="must read personally",
+                    document_role="primary",
+                    rationale_factors=["primary source document", "legal significance", "other conclusions depend on it"],
                 )
             ],
             seller_questions=analysis.seller_questions,
@@ -224,6 +250,10 @@ class OutputWriterTests(unittest.TestCase):
                     category="Title / Access Concerns",
                     status="not found",
                     rationale="No survey file is present in the package.",
+                    front_end_status="missing and important",
+                    importance="important",
+                    recommended_request="a current, readable alta or boundary survey",
+                    front_end_reason="The package does not contain current, readable support for a normally expected diligence item.",
                 )
             ],
             issue_analyses=[issue_analysis],
@@ -246,6 +276,19 @@ class OutputWriterTests(unittest.TestCase):
                 fragility_classification="fragile sequencing",
                 critical_path_summary="The real critical path runs through environmental follow-up is not fully closed.",
                 confidence_unlocks=["Provide the current environmental closure path, cost owner, and any remaining mitigation obligation."],
+                package_quality="selectively presented",
+                package_quality_reason="The package has material conflicts and does not include enough current controlling support to cleanly resolve them.",
+                front_end_known_points=[
+                    "Environmental follow-up is not fully closed: Phase I ESA still leaves remediation scope unresolved."
+                ],
+                front_end_unresolved_points=[
+                    "ALTA or boundary survey: missing and important.",
+                    "Memo p. 1 shows environmental follow-up, but the pricing package still reads as preliminary.",
+                ],
+                front_end_routine_points=["No routine-only item was worth calling out separately."],
+                front_end_deeper_work=[
+                    "Environmental follow-up is not fully closed: verify What remediation scope remains open and who is paying for it?; request Provide the current environmental closure path, cost owner, and any remaining mitigation obligation.; use environmental consultant and agency file review (now)."
+                ],
                 issue_clusters=[
                     IssueCluster(
                         cluster_id="cluster-01-environmental-closure-path",
@@ -286,6 +329,28 @@ class OutputWriterTests(unittest.TestCase):
                     priority=90,
                 )
             ],
+            further_diligence_roadmap=FurtherDiligenceRoadmap(
+                top_real_flags=[
+                    "Environmental follow-up is not fully closed: red flag. Why it matters: Environmental scope still affects underwriting confidence. What it blocks: cost package is still budgetary."
+                ],
+                top_missing_items_to_request=[
+                    "ALTA or boundary survey: missing and important. Request a current, readable alta or boundary survey."
+                ],
+                top_contradictions_to_resolve=[
+                    "Memo p. 1 shows environmental follow-up, but the pricing package still reads as preliminary. Resolve by identifying which source controls and updating the underwriting assumption to that source."
+                ],
+                top_stale_materials_to_refresh=[],
+                top_public_consultant_internal_research=[
+                    "Environmental follow-up is not fully closed: verify What remediation scope remains open and who is paying for it? via environmental consultant and agency file review; request Provide the current environmental closure path, cost owner, and any remaining mitigation obligation. (now)."
+                ],
+                top_documents_to_read_first=[
+                    "Memo (memo.txt): Must Read Personally because this document carries primary source document, legal significance, other conclusions depend on it. Confidence is high."
+                ],
+                follow_up_order=[
+                    "Read Memo first because other conclusions depend on it.",
+                    "Request a current, readable alta or boundary survey now.",
+                ],
+            ),
             llm_failures=[
                 LLMCallFailure(
                     stage="document_summary",
@@ -319,7 +384,7 @@ class OutputWriterTests(unittest.TestCase):
             (output_dir / "run.log").write_text("log", encoding="utf-8")
             written = write_markdown_outputs(output_dir, run_summary=run_summary, synthesis=synthesis)
 
-            self.assertEqual(len(written), 13)
+            self.assertEqual(len(written), 14)
             self.assertTrue((output_dir / "00_run_summary.md").exists())
             self.assertTrue((output_dir / "08_error_report.md").exists())
             self.assertTrue((output_dir / "01_executive_summary.md").exists())
@@ -327,40 +392,49 @@ class OutputWriterTests(unittest.TestCase):
             self.assertTrue((output_dir / "10_issue_analysis.md").exists())
             self.assertTrue((output_dir / "11_issue_registry_debug.md").exists())
             self.assertTrue((output_dir / "12_reviewer_feedback_template.json").exists())
+            self.assertTrue((output_dir / "13_further_diligence_roadmap.md").exists())
             content = (output_dir / "01_executive_summary.md").read_text(encoding="utf-8")
             self.assertIn("Demo Deal", content)
             self.assertIn("heuristic", content)
-            self.assertIn("Decision Framing", content)
-            self.assertIn("Top Decision Drivers", content)
-            self.assertIn("Decision Readiness", content)
-            self.assertIn("Status:", content)
-            self.assertIn("Executive Call", content)
+            self.assertIn("What This Package Actually Tells Us", content)
+            self.assertIn("Biggest Flags", content)
+            self.assertIn("Biggest Blind Spots", content)
+            self.assertIn("What To Read First", content)
             self.assertIn("Known Limitations Of This Run", content)
             self.assertIn("Recommendation Posture", content)
             key_risk_content = (output_dir / "02_key_risks.md").read_text(encoding="utf-8")
             self.assertIn("Ranked Issues", key_risk_content)
+            self.assertIn("Flag Grade", key_risk_content)
+            self.assertIn("Core Fact", key_risk_content)
             self.assertIn("Why It Matters", key_risk_content)
-            self.assertIn("What Would Resolve It", key_risk_content)
+            self.assertIn("Missing Document / Confirmation", key_risk_content)
+            self.assertIn("Suggested Next Research Step", key_risk_content)
             self.assertIn("Gating Impact", key_risk_content)
             self.assertIn("Source: Memo p. 1", key_risk_content)
             self.assertIn("Potential Contradictions / Tensions", key_risk_content)
             synthesis_content = (output_dir / "07_deal_synthesis.md").read_text(encoding="utf-8")
+            self.assertIn("What This Package Really Tells Us", synthesis_content)
+            self.assertIn("What Appears Unresolved", synthesis_content)
+            self.assertIn("What Looks Routine", synthesis_content)
             self.assertIn("Central Pattern", synthesis_content)
             self.assertIn("Root-Cause Clusters", synthesis_content)
             self.assertIn("Real Critical Path", synthesis_content)
             self.assertIn("Potential Contradictions / Tensions", synthesis_content)
-            self.assertIn("Adversarial Challenge", synthesis_content)
+            self.assertIn("What Most Deserves Deeper Work", synthesis_content)
             ic_content = (output_dir / "09_investment_committee_brief.md").read_text(encoding="utf-8")
             self.assertIn("Recommendation", ic_content)
-            self.assertIn("Reasons", ic_content)
+            self.assertIn("Package Read", ic_content)
             self.assertIn("Top 3 Gating Issues", ic_content)
-            self.assertIn("Conditions / Asks", ic_content)
+            self.assertIn("Biggest Blind Spots", ic_content)
             self.assertIn("Decision Readiness", ic_content)
-            self.assertIn("Likely IC Pushback", ic_content)
+            self.assertIn("What I Would Verify Personally", ic_content)
             issue_content = (output_dir / "10_issue_analysis.md").read_text(encoding="utf-8")
             self.assertIn("Issue Analysis", issue_content)
             self.assertIn("Environmental follow-up is not fully closed", issue_content)
+            self.assertIn("Front-End Read", issue_content)
             self.assertIn("Core Facts", issue_content)
+            self.assertIn("Missing Document / Confirmation", issue_content)
+            self.assertIn("Suggested Next Research Step", issue_content)
             self.assertIn("Dependency Read", issue_content)
             self.assertIn("Downstream Consequences", issue_content)
             debug_content = (output_dir / "11_issue_registry_debug.md").read_text(encoding="utf-8")
@@ -370,12 +444,21 @@ class OutputWriterTests(unittest.TestCase):
             self.assertIn("Evidence Basis", debug_content)
             self.assertIn("Top-Line Eligible", debug_content)
             self.assertIn("Deal Metadata", debug_content)
+            self.assertIn("Front-End Flag", debug_content)
+            self.assertIn("Information Status", debug_content)
+            self.assertIn("Reading Priority Debug", debug_content)
+            self.assertIn("Omission Front-End Classification", debug_content)
             self.assertIn("Precedent Summary", debug_content)
             self.assertIn("Retrieved Precedent Matches", debug_content)
             self.assertIn("precedent=+6", debug_content)
             self.assertIn("Dependency Graph", debug_content)
             self.assertIn("Causal Clusters", debug_content)
             self.assertIn("## Evaluator", debug_content)
+            roadmap_content = (output_dir / "13_further_diligence_roadmap.md").read_text(encoding="utf-8")
+            self.assertIn("Further Diligence Roadmap", roadmap_content)
+            self.assertIn("Top Real Flags To Investigate", roadmap_content)
+            self.assertIn("Top Missing Items To Request", roadmap_content)
+            self.assertIn("Top Documents To Read First", roadmap_content)
             feedback_rows = json.loads((output_dir / "12_reviewer_feedback_template.json").read_text(encoding="utf-8"))
             self.assertEqual(feedback_rows[0]["issue_id"], "environmental-followup")
             self.assertEqual(
@@ -413,6 +496,7 @@ class OutputWriterTests(unittest.TestCase):
             self.assertIn("10_issue_analysis.md", summary_content)
             self.assertIn("11_issue_registry_debug.md", summary_content)
             self.assertIn("12_reviewer_feedback_template.json", summary_content)
+            self.assertIn("13_further_diligence_roadmap.md", summary_content)
             self.assertIn("LLM Model: `gpt-4.1`", summary_content)
             self.assertIn("Analysis Mode: `full`", summary_content)
             self.assertIn("OCR fallback was required on 1 file(s) across 1 page(s).", summary_content)

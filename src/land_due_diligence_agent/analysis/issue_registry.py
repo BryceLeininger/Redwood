@@ -510,8 +510,10 @@ def build_section_selections(
     del recommendation
     issues = registry.issues
     top_line_issues = [issue for issue in issues if issue.top_line_eligible]
+    front_end_flags = [issue for issue in top_line_issues if issue.front_end_flag in {"red flag", "yellow flag"}]
+    blocker_front_end_flags = [issue for issue in front_end_flags if issue.blocking_flag or issue.critical_path_flag]
     if analysis_mode == "fast":
-        executive_ids = [issue.issue_id for issue in top_line_issues[:3]]
+        executive_ids = [issue.issue_id for issue in (front_end_flags or top_line_issues)[:3]]
         key_risk_ids = executive_ids
         seller_ids = [issue.issue_id for issue in issues[:3]]
         return _selection_records(
@@ -522,9 +524,9 @@ def build_section_selections(
             appendix_ids=[issue.issue_id for issue in issues],
         )
 
-    executive_ids = [issue.issue_id for issue in top_line_issues[:4]]
-    key_risk_ids = [issue.issue_id for issue in top_line_issues[:5]]
-    ic_ids = [issue.issue_id for issue in top_line_issues[:3]]
+    executive_ids = [issue.issue_id for issue in (front_end_flags or top_line_issues)[:4]]
+    key_risk_ids = [issue.issue_id for issue in (front_end_flags or top_line_issues)[:5]]
+    ic_ids = [issue.issue_id for issue in (blocker_front_end_flags or front_end_flags or top_line_issues)[:3]]
     seller_ids = [issue.issue_id for issue in issues[:5]]
     appendix_ids = [issue.issue_id for issue in issues]
 
@@ -677,11 +679,12 @@ def build_overall_read_draft(
     if not issues:
         return f"{deal_name} does not currently present a concentrated diligence issue, but the package should still be checked for completeness."
 
-    blocking_issues = [issue for issue in registry.issues if issue.blocking_flag][:2]
+    real_flags = [issue for issue in registry.issues if issue.front_end_flag in {"red flag", "yellow flag"}][:2]
     issue_text = "; ".join(
         f"{issue.title.lower()} ({issue.likely_implication.lower()})"
-        for issue in (blocking_issues or issues)[:2]
+        for issue in (real_flags or issues)[:2]
     )
+    unresolved_text = "; ".join(registry.front_end_unresolved_points[:2]) or "remaining blind spots still limit confidence"
     challenge_text = (
         f" The main pushback is that {challenge_findings[0].concern.lower()}"
         if challenge_findings
@@ -690,7 +693,10 @@ def build_overall_read_draft(
     return (
         f"{deal_name} currently reads as '{recommendation.posture}'. {entitlement_status} "
         f"{registry.central_risk_pattern} {registry.cluster_pattern} {registry.critical_path_summary} "
-        f"The lead blockers are {issue_text}. This reads as a {registry.fragility_classification} deal.{challenge_text}"
+        f"The package currently feels {registry.package_quality or 'credible'}. "
+        f"The lead front-end flags are {issue_text}. "
+        f"The biggest blind spots are {unresolved_text}. "
+        f"This reads as a {registry.fragility_classification} deal.{challenge_text}"
     ).strip()
 
 

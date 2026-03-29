@@ -50,6 +50,7 @@ def write_markdown_outputs(
                     (output_dir / "10_issue_analysis.md", _build_issue_analysis_markdown(synthesis)),
                     (output_dir / "11_issue_registry_debug.md", _build_issue_registry_debug_markdown(synthesis)),
                     (output_dir / "12_reviewer_feedback_template.json", _build_reviewer_feedback_template_json(synthesis)),
+                    (output_dir / "13_further_diligence_roadmap.md", _build_further_diligence_roadmap_markdown(synthesis)),
                 ]
             )
 
@@ -82,6 +83,7 @@ def _analysis_output_names(analysis_mode: str) -> list[str]:
         "10_issue_analysis.md",
         "11_issue_registry_debug.md",
         "12_reviewer_feedback_template.json",
+        "13_further_diligence_roadmap.md",
     ]
 
 
@@ -196,7 +198,7 @@ def _build_executive_summary_markdown(
 ) -> str:
     limitations = _build_known_limitations(run_summary, synthesis)
     top_issues = _selected_issues(synthesis, "01_executive_summary.md", default_count=4)
-    bullets = _build_executive_bullets(synthesis, top_issues)
+    registry = synthesis.canonical_issue_registry
     overall_read = normalize_text(synthesis.executive_summary)
     lines = [
         "# Executive Summary",
@@ -215,23 +217,63 @@ def _build_executive_summary_markdown(
         "",
         overall_read,
     ]
+    lines.extend(
+        [
+            "",
+            "## What This Package Actually Tells Us",
+            "",
+        ]
+    )
+    lines.extend(
+        f"- {item}"
+        for item in (
+            registry.front_end_known_points
+            or _build_executive_bullets(synthesis, top_issues)
+        )[:5]
+    )
+    lines.extend(
+        [
+            "",
+            "## Biggest Flags",
+            "",
+        ]
+    )
+    if top_issues:
+        for issue in top_issues:
+            lines.append(
+                f"- [{issue.front_end_flag.upper()}] {issue.title}: {issue.why_it_matters}"
+            )
+    else:
+        lines.append("- No concentrated red or yellow flag was elevated from the current package.")
+    lines.extend(
+        [
+            "",
+            "## Biggest Blind Spots",
+            "",
+        ]
+    )
+    lines.extend(
+        f"- {item}"
+        for item in (
+            registry.front_end_unresolved_points
+            or ["No major blind spot was isolated beyond the current issue set."]
+        )[:5]
+    )
     if run_summary.analysis_mode == "full":
         lines.extend(
             [
                 "",
-                "## Decision Framing",
+                "## What To Read First",
                 "",
             ]
         )
-        lines.extend(_build_decision_framing_lines(synthesis))
-    lines.extend(
-        [
-            "",
-            "## Executive Call",
-            "",
-        ]
-    )
-    lines.extend(f"- {item}" for item in bullets)
+        lines.extend(
+            f"- {item.title} (`{item.relative_path}`): {item.reason}"
+            for item in synthesis.recommended_reading_order
+            if item.bucket == "must read personally"
+        )
+        if not any(item.bucket == "must read personally" for item in synthesis.recommended_reading_order):
+            lines.append("- No single document was elevated to a must-read personally tier.")
     lines.extend(
         [
             "",
@@ -251,7 +293,7 @@ def _build_key_risks_markdown(synthesis: DealSynthesis, analysis_mode: str) -> s
         default_count=3 if analysis_mode == "fast" else 5,
     )
     if not issues:
-        lines.append("No concentrated issue was elevated from the current package.")
+        lines.append("No concentrated red or yellow flag was elevated from the current package.")
         return "\n".join(lines) + "\n"
 
     lines.extend(["## Ranked Issues", ""])
@@ -267,14 +309,27 @@ def _build_key_risks_markdown(synthesis: DealSynthesis, analysis_mode: str) -> s
 
 def _build_reading_order_markdown(synthesis: DealSynthesis) -> str:
     lines = ["# Recommended Reading Order", ""]
-    for index, recommendation in enumerate(synthesis.recommended_reading_order, start=1):
-        lines.append(f"{index}. **{recommendation.title}** (`{recommendation.relative_path}`)")
-        lines.append(f"   Priority Score: {recommendation.priority}")
-        lines.append(f"   Reason: {recommendation.reason}")
-        lines.append(f"   Confidence: {recommendation.confidence}")
-        if recommendation.focus_areas:
-            lines.append(f"   Focus Areas: {', '.join(recommendation.focus_areas)}")
+    for bucket in ("must read personally", "should skim", "safe to rely on agent"):
+        recommendations = [
+            recommendation
+            for recommendation in synthesis.recommended_reading_order
+            if recommendation.bucket == bucket
+        ]
+        if not recommendations:
+            continue
+        lines.append(f"## {bucket.title()}")
         lines.append("")
+        for index, recommendation in enumerate(recommendations, start=1):
+            lines.append(f"{index}. **{recommendation.title}** (`{recommendation.relative_path}`)")
+            lines.append(f"   Priority Score: {recommendation.priority}")
+            lines.append(f"   Role: {recommendation.document_role}")
+            lines.append(f"   Reason: {recommendation.reason}")
+            lines.append(f"   Confidence: {recommendation.confidence}")
+            if recommendation.focus_areas:
+                lines.append(f"   Focus Areas: {', '.join(recommendation.focus_areas)}")
+            if recommendation.rationale_factors:
+                lines.append(f"   Why This Bucket: {', '.join(recommendation.rationale_factors)}")
+            lines.append("")
     return "\n".join(lines).rstrip() + "\n"
 
 
@@ -295,11 +350,17 @@ def _build_document_summaries_markdown(synthesis: DealSynthesis) -> str:
         lines.append(f"## {analysis.document.title}")
         lines.append(f"- Source: `{analysis.document.relative_path.as_posix()}`")
         lines.append(f"- File Type: `{analysis.document.extension}`")
+        lines.append(f"- Review Bucket: {analysis.reading_bucket}")
+        lines.append(f"- Document Role: {analysis.document_role}")
         lines.append(f"- Reading Priority: {analysis.reading_priority}")
         lines.append(f"- Reading Rationale: {analysis.reading_reason}")
         lines.append(f"- Confidence: {analysis.confidence} ({analysis.confidence_reason})")
+        lines.append(f"- Staleness: {analysis.staleness_status} ({analysis.staleness_reason})")
+        lines.append(f"- Contradiction Count: {analysis.contradiction_count}")
         if analysis.focus_areas:
             lines.append(f"- Focus Areas: {', '.join(analysis.focus_areas)}")
+        if analysis.reading_rationale_factors:
+            lines.append(f"- Reading Factors: {', '.join(analysis.reading_rationale_factors)}")
         if analysis.document.ocr_pages:
             lines.append(f"- OCR Pages: {_format_page_list(analysis.document.ocr_pages)}")
         if analysis.document.warnings:
@@ -336,10 +397,18 @@ def _build_issue_analysis_markdown(synthesis: DealSynthesis) -> str:
         lines.append(f"- Status: {issue.status}")
         lines.append(f"- Confidence: {issue.confidence}")
         lines.append(f"- Decision Action: {issue.decision_action}")
+        lines.append(f"- Front-End Flag: {issue.front_end_flag}")
+        lines.append(f"- Information Status: {issue.information_status}")
         if issue.citations:
             lines.append(f"- Source: {_format_citations(issue.citations)}")
         elif issue.source_documents:
             lines.append(f"- Source: {', '.join(issue.source_documents)}")
+        lines.append("")
+        lines.append("### Front-End Read")
+        lines.append(f"- Flag Reason: {issue.front_end_flag_reason}")
+        lines.append(f"- Information Read: {issue.information_status_reason}")
+        if issue.blocking_reason:
+            lines.append(f"- Blocking Read: {issue.blocking_reason}")
         lines.append("")
         lines.append("### Core Facts")
         if issue.core_facts:
@@ -358,6 +427,19 @@ def _build_issue_analysis_markdown(synthesis: DealSynthesis) -> str:
             lines.extend(f"- {question}" for question in issue.open_questions[:4])
         else:
             lines.append("- No unresolved question was isolated beyond the current cited facts.")
+        lines.append("")
+        lines.append("### Missing Document / Confirmation")
+        lines.append(f"- {issue.missing_confirmation or 'No additional missing confirmation was isolated beyond the cited support.'}")
+        lines.append("")
+        lines.append("### Suggested Next Research Step")
+        if issue.research_agenda:
+            for step in issue.research_agenda[:2]:
+                lines.append(f"- Verify: {step.verify_what}")
+                lines.append(f"- Request: {step.request_item}")
+                lines.append(f"- Best Source: {step.likely_source}")
+                lines.append(f"- When: {step.timing}")
+        else:
+            lines.append("- No separate research step was elevated for this issue.")
         lines.append("")
         lines.append("### Why It Matters")
         lines.append(f"- {issue.why_it_matters}")
@@ -422,15 +504,22 @@ def _build_issue_analysis_markdown(synthesis: DealSynthesis) -> str:
 def _build_missing_items_markdown(synthesis: DealSynthesis) -> str:
     lines = ["# Missing Diligence Items", ""]
     grouped = {
-        "not found": [],
-        "unclear whether present": [],
-        "present but weak": [],
+        "missing and important": [],
+        "missing but normally expected": [],
+        "stale and potentially unreliable": [],
+        "conflicting across documents": [],
         "present and adequate": [],
     }
     for assessment in synthesis.omission_assessments:
-        grouped.setdefault(assessment.status, []).append(assessment)
+        grouped.setdefault(assessment.front_end_status or assessment.status, []).append(assessment)
 
-    for status in ("not found", "unclear whether present", "present but weak", "present and adequate"):
+    for status in (
+        "missing and important",
+        "missing but normally expected",
+        "stale and potentially unreliable",
+        "conflicting across documents",
+        "present and adequate",
+    ):
         assessments = grouped.get(status, [])
         if not assessments:
             continue
@@ -439,7 +528,9 @@ def _build_missing_items_markdown(synthesis: DealSynthesis) -> str:
         for assessment in assessments:
             source = _format_citations(assessment.citations[:2]) or ", ".join(assessment.source_documents[:2])
             suffix = f" [Source: {source}]" if source else ""
-            lines.append(f"- **{assessment.item}:** {assessment.rationale}{suffix}")
+            lines.append(f"- **{assessment.item}:** {assessment.front_end_reason or assessment.rationale}{suffix}")
+            if assessment.recommended_request:
+                lines.append(f"  Request Next: {assessment.recommended_request}")
         lines.append("")
 
     if not synthesis.omission_assessments:
@@ -460,12 +551,32 @@ def _build_deal_synthesis_markdown(synthesis: DealSynthesis) -> str:
         "## Overall Read",
         normalize_text(synthesis.executive_summary),
         "",
-        "## Central Pattern",
+        "## What This Package Really Tells Us",
         "",
     ]
+    lines.extend(
+        f"- {item}"
+        for item in (registry.front_end_known_points or ["No concentrated known point was isolated from the current package."])
+    )
+
+    lines.extend(["", "## What Appears Unresolved", ""])
+    lines.extend(
+        f"- {item}"
+        for item in (registry.front_end_unresolved_points or ["No major unresolved point was isolated beyond the current issue set."])
+    )
+
+    lines.extend(["", "## What Looks Routine", ""])
+    lines.extend(
+        f"- {item}"
+        for item in (registry.front_end_routine_points or ["No routine-only item was worth calling out separately."])
+    )
+
+    lines.extend(["", "## Central Pattern", ""])
     lines.append(f"- Central Risk Pattern: {registry.central_risk_pattern or 'No central pattern isolated.'}")
     lines.append(f"- Cluster Pattern: {registry.cluster_pattern or 'No cluster pattern isolated.'}")
     lines.append(f"- Deal Type: {registry.fragility_classification or 'n/a'}")
+    lines.append(f"- Package Read: {registry.package_quality or 'credible'}")
+    lines.append(f"- Why: {registry.package_quality_reason or 'No package-quality rationale was generated.'}")
 
     lines.extend(["", "## Root-Cause Clusters", ""])
     lines.extend(_render_issue_clusters(synthesis))
@@ -474,39 +585,33 @@ def _build_deal_synthesis_markdown(synthesis: DealSynthesis) -> str:
     lines.append(f"- {registry.critical_path_summary or 'No critical path summary was isolated.'}")
     lines.extend(f"- {item}" for item in _build_gating_issue_lines(synthesis))
 
-    lines.extend(["", "## What Changes Confidence", ""])
-    if registry.confidence_unlocks:
-        lines.extend(f"- {item}" for item in registry.confidence_unlocks[:4])
-    else:
-        lines.append("- No single confirmation was isolated beyond the current issue set.")
+    lines.extend(["", "## What Most Deserves Deeper Work", ""])
+    lines.extend(
+        f"- {item}"
+        for item in (registry.front_end_deeper_work or ["No focused next-step work item was isolated beyond the current issue set."])
+    )
 
     lines.extend(["", "## Potential Contradictions / Tensions", ""])
     lines.extend(_render_contradictions(synthesis.contradictions))
-
-    lines.extend(["", "## Adversarial Challenge", ""])
-    lines.extend(_render_challenge_findings(synthesis.challenge_findings, limit=4))
 
     return "\n".join(lines) + "\n"
 
 
 def _build_investment_committee_brief_markdown(synthesis: DealSynthesis) -> str:
     overall_read = _build_ic_overall_read(synthesis)
-    verify_points = _build_personal_verification_items(synthesis)
     readiness_status, readiness_reason = _evaluate_decision_readiness(synthesis)
+    registry = synthesis.canonical_issue_registry
 
     lines = [
         "# Investment Committee Brief",
         "",
         f"**Recommendation:** {synthesis.recommendation.posture}",
+        f"**Package Read:** {registry.package_quality or 'credible'}",
         "",
         "## Overall Read",
         "",
         overall_read,
-        "",
-        "## Reasons",
-        "",
     ]
-    lines.extend(f"- {reason}" for reason in synthesis.recommendation.reasons[:3] or ["No reason line was generated."])
     lines.extend(
         [
             "",
@@ -518,11 +623,14 @@ def _build_investment_committee_brief_markdown(synthesis: DealSynthesis) -> str:
     lines.extend(
         [
             "",
-            "## Conditions / Asks",
+            "## Biggest Blind Spots",
             "",
         ]
     )
-    lines.extend(f"- {condition}" for condition in synthesis.recommendation.conditions[:3] or ["No condition line was generated."])
+    lines.extend(
+        f"- {item}"
+        for item in (registry.front_end_unresolved_points[:4] or ["No large blind spot was isolated beyond the current package."])
+    )
     lines.extend(
         [
             "",
@@ -530,7 +638,10 @@ def _build_investment_committee_brief_markdown(synthesis: DealSynthesis) -> str:
             "",
         ]
     )
-    lines.extend(f"- {item}" for item in verify_points[:3] or ["Personally verify the highest-ranked issue sources."])
+    lines.extend(
+        f"- {item}"
+        for item in (_build_personal_verification_items(synthesis)[:3] or ["Personally verify the highest-ranked issue sources."])
+    )
     lines.extend(
         [
             "",
@@ -540,9 +651,6 @@ def _build_investment_committee_brief_markdown(synthesis: DealSynthesis) -> str:
     )
     lines.append(f"- Status: {readiness_status}")
     lines.append(f"- Why: {readiness_reason}")
-    if synthesis.challenge_findings:
-        lines.extend(["", "## Likely IC Pushback", ""])
-        lines.extend(_render_challenge_findings(synthesis.challenge_findings, limit=3))
     return "\n".join(lines) + "\n"
 
 
@@ -558,6 +666,8 @@ def _build_issue_registry_debug_markdown(synthesis: DealSynthesis) -> str:
             f"- Merge Decisions: {len(registry.merge_decisions)}",
             f"- Arbitration Records: {len(registry.arbitration_records)}",
             f"- Deal Metadata: stage={registry.deal_metadata.stage or 'n/a'}, region={registry.deal_metadata.region or 'n/a'}, product={registry.deal_metadata.product or 'n/a'}",
+            f"- Package Quality: {registry.package_quality or 'n/a'}",
+            f"- Package Quality Reason: {registry.package_quality_reason or 'n/a'}",
             "",
         ]
     )
@@ -579,6 +689,11 @@ def _build_issue_registry_debug_markdown(synthesis: DealSynthesis) -> str:
         if issue.top_line_filter_reasons:
             lines.append(f"- Filter Reasons: {', '.join(issue.top_line_filter_reasons)}")
         lines.append(f"- Output Bucket: {issue.output_bucket}")
+        lines.append(f"- Front-End Flag: {issue.front_end_flag}")
+        lines.append(f"- Front-End Flag Reason: {issue.front_end_flag_reason}")
+        lines.append(f"- Information Status: {issue.information_status}")
+        lines.append(f"- Information Status Reason: {issue.information_status_reason}")
+        lines.append(f"- Missing Confirmation: {issue.missing_confirmation or 'n/a'}")
         lines.append(f"- Dependency Type: {issue.dependency_type or 'n/a'}")
         lines.append(f"- Critical Path: {issue.critical_path_flag}")
         lines.append(f"- Blocking: {issue.blocking_flag}")
@@ -618,6 +733,14 @@ def _build_issue_registry_debug_markdown(synthesis: DealSynthesis) -> str:
                     for link in issue.downstream_dependencies[:4]
                 )
             )
+        if issue.research_agenda:
+            lines.append("- Research Agenda:")
+            for step in issue.research_agenda[:2]:
+                lines.append(
+                    "  - "
+                    f"verify={step.verify_what} | request={step.request_item} | "
+                    f"source={step.likely_source} | timing={step.timing}"
+                )
         if issue.calibration_notes:
             lines.append(f"- Calibration Notes: {' | '.join(issue.calibration_notes)}")
         if issue.precedent_summary.sample_size:
@@ -715,6 +838,53 @@ def _build_issue_registry_debug_markdown(synthesis: DealSynthesis) -> str:
         lines.append("- No causal clusters were built.")
     lines.append("")
 
+    lines.extend(["## Front-End Package Read", ""])
+    lines.append(
+        "- Known Points: "
+        + (", ".join(registry.front_end_known_points) if registry.front_end_known_points else "None")
+    )
+    lines.append(
+        "- Unresolved Points: "
+        + (", ".join(registry.front_end_unresolved_points) if registry.front_end_unresolved_points else "None")
+    )
+    lines.append(
+        "- Routine Points: "
+        + (", ".join(registry.front_end_routine_points) if registry.front_end_routine_points else "None")
+    )
+    lines.append(
+        "- Deeper Work: "
+        + (", ".join(registry.front_end_deeper_work) if registry.front_end_deeper_work else "None")
+    )
+    lines.append("")
+
+    lines.extend(["## Omission Front-End Classification", ""])
+    if synthesis.omission_assessments:
+        for assessment in synthesis.omission_assessments:
+            lines.append(
+                f"- {assessment.item}: status={assessment.status} | front-end={assessment.front_end_status or 'n/a'} | "
+                f"importance={assessment.importance} | request={assessment.recommended_request or 'n/a'}"
+            )
+            lines.append(f"  Read: {assessment.front_end_reason or assessment.rationale}")
+    else:
+        lines.append("- No omission assessment was generated.")
+    lines.append("")
+
+    lines.extend(["## Reading Priority Debug", ""])
+    if synthesis.document_analyses:
+        for analysis in synthesis.document_analyses:
+            lines.append(
+                f"- {analysis.document.title}: bucket={analysis.reading_bucket} | role={analysis.document_role} | "
+                f"priority={analysis.reading_priority} | staleness={analysis.staleness_status} | "
+                f"contradictions={analysis.contradiction_count}"
+            )
+            lines.append(
+                "  Rationale: "
+                + (", ".join(analysis.reading_rationale_factors) if analysis.reading_rationale_factors else analysis.reading_reason)
+            )
+    else:
+        lines.append("- No document analyses were available.")
+    lines.append("")
+
     evaluator = registry.evaluator_result
     lines.extend(["## Evaluator", ""])
     lines.append(f"- Redundancy Score: {evaluator.redundancy_score}")
@@ -752,6 +922,29 @@ def _build_issue_registry_debug_markdown(synthesis: DealSynthesis) -> str:
     lines.append("")
 
     return "\n".join(lines)
+
+
+def _build_further_diligence_roadmap_markdown(synthesis: DealSynthesis) -> str:
+    roadmap = synthesis.further_diligence_roadmap
+    lines = ["# Further Diligence Roadmap", ""]
+    lines.extend(["## Top Real Flags To Investigate", ""])
+    lines.extend(f"- {item}" for item in roadmap.top_real_flags or ["No concentrated real flag was isolated."])
+    lines.extend(["", "## Top Missing Items To Request", ""])
+    lines.extend(f"- {item}" for item in roadmap.top_missing_items_to_request or ["No material missing item was isolated."])
+    lines.extend(["", "## Top Contradictions To Resolve", ""])
+    lines.extend(f"- {item}" for item in roadmap.top_contradictions_to_resolve or ["No material contradiction was isolated."])
+    lines.extend(["", "## Top Stale Materials To Refresh", ""])
+    lines.extend(f"- {item}" for item in roadmap.top_stale_materials_to_refresh or ["No stale material was isolated."])
+    lines.extend(["", "## Top Public / Consultant / Internal Research Items", ""])
+    lines.extend(
+        f"- {item}"
+        for item in roadmap.top_public_consultant_internal_research or ["No separate research item was isolated."]
+    )
+    lines.extend(["", "## Top Documents To Read First", ""])
+    lines.extend(f"- {item}" for item in roadmap.top_documents_to_read_first or ["No must-read document was isolated."])
+    lines.extend(["", "## Suggested Order Of Follow-Up Diligence", ""])
+    lines.extend(f"- {item}" for item in roadmap.follow_up_order or ["No follow-up order was generated."])
+    return "\n".join(lines) + "\n"
 
 
 def _build_reviewer_feedback_template_json(synthesis: DealSynthesis) -> str:
@@ -822,14 +1015,30 @@ def _selected_issues(
             issue_by_id = {issue.issue_id: issue for issue in registry.issues}
             return [issue_by_id[issue_id] for issue_id in selected_ids if issue_id in issue_by_id]
     if output_name in {"01_executive_summary.md", "02_key_risks.md", "09_investment_committee_brief.md"}:
-        return [issue for issue in registry.issues if issue.top_line_eligible][:default_count]
+        front_end_selected = [
+            issue
+            for issue in registry.issues
+            if issue.top_line_eligible and issue.front_end_flag in {"red flag", "yellow flag"}
+        ]
+        return (front_end_selected or [issue for issue in registry.issues if issue.top_line_eligible])[:default_count]
     return registry.issues[:default_count]
 
 
 def _render_canonical_issue_risk_block(issue: CanonicalIssue, *, index: int) -> list[str]:
     lines = [f"### {index}. {issue.title}"]
+    lines.append(f"- Flag Grade: {issue.front_end_flag}")
+    if issue.core_facts:
+        lines.append(f"- Core Fact: {issue.core_facts[0]}")
     lines.append(f"- Why It Matters: {issue.why_it_matters}")
     lines.append(f"- Likely Implication: {issue.likely_implication}")
+    lines.append(f"- Why This Is Elevated: {issue.front_end_flag_reason}")
+    lines.append(f"- Unresolved Question: {issue.open_questions[0] if issue.open_questions else 'No specific unresolved question was isolated.'}")
+    lines.append(f"- Missing Document / Confirmation: {issue.missing_confirmation or 'No separate missing confirmation was isolated.'}")
+    if issue.research_agenda:
+        step = issue.research_agenda[0]
+        lines.append(
+            f"- Suggested Next Research Step: Verify {step.verify_what}; request {step.request_item}; use {step.likely_source} ({step.timing})."
+        )
     if issue.dependency_type:
         lines.append(f"- Dependency Type: {issue.dependency_type}")
     lines.append(f"- Critical Path Read: {issue.blocker_classification} | {issue.schedule_impact_classification}")
@@ -1261,9 +1470,10 @@ def _build_gating_issue_lines(synthesis: DealSynthesis, *, limit: int = 3) -> li
 
     lines: list[str] = []
     for issue in gating_issues[:limit]:
+        unlock = issue.research_agenda[0].request_item if issue.research_agenda else issue.what_would_resolve_it
         lines.append(
             f"{issue.title}: blocks {_issue_blocks(issue) or 'the next decision gate'}; "
-            f"unlock confirmation: {issue.what_would_resolve_it or 'current support and owner confirmation'}."
+            f"unlock confirmation: {unlock or 'current support and owner confirmation'}."
         )
 
     if not lines:
@@ -1343,6 +1553,15 @@ def _build_deal_breakers(synthesis: DealSynthesis) -> list[str]:
 
 def _build_personal_verification_items(synthesis: DealSynthesis) -> list[str]:
     items: list[str] = []
+    for recommendation in synthesis.recommended_reading_order:
+        if recommendation.bucket != "must read personally":
+            continue
+        items.append(
+            f"Read {recommendation.title} (`{recommendation.relative_path}`) because {recommendation.reason}"
+        )
+        if len(items) >= 2:
+            break
+
     for finding in synthesis.contradictions[:2]:
         items.append(_build_verify_point_from_contradiction(finding))
 
@@ -1370,23 +1589,27 @@ def _evaluate_decision_readiness(synthesis: DealSynthesis) -> tuple[str, str]:
     if (
         synthesis.contradictions
         or registry.blocker_issue_ids
-        or any(assessment.status in {"not found", "unclear whether present"} for assessment in synthesis.omission_assessments)
+        or any(
+            assessment.front_end_status in {"missing and important", "conflicting across documents"}
+            for assessment in synthesis.omission_assessments
+        )
         or any(
         analysis.confidence == "low" for analysis in synthesis.document_analyses
         )
+        or registry.package_quality in {"thin", "stale", "selectively presented"}
     ):
         return (
             "Not ready",
-            "One or more blocker issues still sits on the real critical path, so the package is not yet decision-clean.",
+            "One or more blocker issues, blind spots, or stale/conflicted materials still sit on the front-end critical path.",
         )
     if registry.critical_path_issue_ids or any(issue.gating_flags for issue in issues):
         return (
             "Partially complete",
-            "The package is substantive, but sequencing and confirmation items still sit on the path to a clean recommendation.",
+            "The package is substantive, but sequencing and confirmation items still sit on the path to a clean front-end read.",
         )
     return (
         "Decision-ready",
-        "The current package supports a clean view on closing, basis, and execution with no material contradiction still driving the recommendation.",
+        "The current package supports a credible front-end read with no material blind spot still driving the recommendation.",
     )
 
 

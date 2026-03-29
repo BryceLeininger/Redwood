@@ -97,6 +97,10 @@ class OmissionAssessment:
     rationale: str
     source_documents: list[str] = field(default_factory=list)
     citations: list[Citation] = field(default_factory=list)
+    front_end_status: str = ""
+    importance: str = "normal"
+    recommended_request: str = ""
+    front_end_reason: str = ""
 
 
 @dataclass(slots=True)
@@ -379,6 +383,18 @@ class IssueDependencyLink:
 
 
 @dataclass(slots=True)
+class ResearchAgendaItem:
+    """Practical next-step item for front-end diligence follow-up."""
+
+    issue_id: str = ""
+    title: str = ""
+    verify_what: str = ""
+    request_item: str = ""
+    likely_source: str = ""
+    timing: str = "now"
+
+
+@dataclass(slots=True)
 class IssueCluster:
     """Causal cluster of linked issues with a root issue and downstream effects."""
 
@@ -460,6 +476,12 @@ class CanonicalIssue:
     likely_closing_effect: str = ""
     likely_structure_effect: str = ""
     likely_underwriting_effect: str = ""
+    front_end_flag: str = "routine item"
+    front_end_flag_reason: str = ""
+    information_status: str = "present and adequate"
+    information_status_reason: str = ""
+    missing_confirmation: str = ""
+    research_agenda: list[ResearchAgendaItem] = field(default_factory=list)
     output_bucket: str = "appendix"
 
 
@@ -520,6 +542,12 @@ class CanonicalIssueRegistry:
     fragility_classification: str = ""
     critical_path_summary: str = ""
     confidence_unlocks: list[str] = field(default_factory=list)
+    package_quality: str = ""
+    package_quality_reason: str = ""
+    front_end_known_points: list[str] = field(default_factory=list)
+    front_end_unresolved_points: list[str] = field(default_factory=list)
+    front_end_routine_points: list[str] = field(default_factory=list)
+    front_end_deeper_work: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -542,6 +570,9 @@ class ReadingRecommendation:
     reason: str
     confidence: str
     focus_areas: list[str] = field(default_factory=list)
+    bucket: str = "should skim"
+    document_role: str = "supporting"
+    rationale_factors: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -558,6 +589,25 @@ class DocumentAnalysis:
     confidence_reason: str
     focus_areas: list[str] = field(default_factory=list)
     missing_items: list[str] = field(default_factory=list)
+    document_role: str = "supporting"
+    staleness_status: str = "present and adequate"
+    staleness_reason: str = ""
+    contradiction_count: int = 0
+    reading_bucket: str = "should skim"
+    reading_rationale_factors: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class FurtherDiligenceRoadmap:
+    """Front-end follow-up roadmap built from flags, blind spots, and document quality."""
+
+    top_real_flags: list[str] = field(default_factory=list)
+    top_missing_items_to_request: list[str] = field(default_factory=list)
+    top_contradictions_to_resolve: list[str] = field(default_factory=list)
+    top_stale_materials_to_refresh: list[str] = field(default_factory=list)
+    top_public_consultant_internal_research: list[str] = field(default_factory=list)
+    top_documents_to_read_first: list[str] = field(default_factory=list)
+    follow_up_order: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -581,6 +631,7 @@ class DealSynthesis:
     priority_assessment: PriorityAssessment = field(default_factory=PriorityAssessment)
     recommendation: RecommendationDecision = field(default_factory=RecommendationDecision)
     contradictions: list[ContradictionFinding] = field(default_factory=list)
+    further_diligence_roadmap: FurtherDiligenceRoadmap = field(default_factory=FurtherDiligenceRoadmap)
     extraction_errors: list[str] = field(default_factory=list)
     llm_failures: list[LLMCallFailure] = field(default_factory=list)
     analysis_mode: str = "full"

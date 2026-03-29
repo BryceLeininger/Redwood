@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import logging
 
+from land_due_diligence_agent.analysis.front_end import apply_front_end_assessment
 from land_due_diligence_agent.analysis.heuristics import (
     aggregate_risks,
     analyze_document,
     detect_contradictions,
     identify_missing_items,
     infer_entitlement_status,
-    recommend_reading_order,
 )
 from land_due_diligence_agent.analysis.issue_registry import (
     build_adversarial_challenges_from_registry,
@@ -107,6 +107,12 @@ def run_analysis(
         deal_metadata=precedent_engine.deal_metadata,
     )
     recommendation = build_recommendation_from_registry(registry)
+    reading_order, further_diligence_roadmap = apply_front_end_assessment(
+        registry=registry,
+        document_analyses=document_analyses,
+        omission_assessments=omission_assessments,
+        contradictions=contradictions,
+    )
     registry.output_selections = build_section_selections(
         registry,
         recommendation,
@@ -162,7 +168,7 @@ def run_analysis(
         executive_summary=executive_summary,
         entitlement_status=entitlement_status,
         key_risks=key_risks,
-        recommended_reading_order=recommend_reading_order(document_analyses),
+        recommended_reading_order=reading_order,
         seller_questions=seller_questions,
         missing_items=missing_items,
         category_rollup=category_rollup,
@@ -175,6 +181,7 @@ def run_analysis(
         priority_assessment=priority_assessment or PriorityAssessment(),
         recommendation=recommendation,
         contradictions=contradictions,
+        further_diligence_roadmap=further_diligence_roadmap,
         extraction_errors=extraction_errors,
         llm_failures=llm_failures,
         analysis_mode=analysis_mode,

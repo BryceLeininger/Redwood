@@ -6,6 +6,7 @@ import logging
 import unittest
 from pathlib import Path
 
+from land_due_diligence_agent.analysis.front_end import apply_front_end_assessment
 from land_due_diligence_agent.analysis.issue_registry import (
     build_canonical_issue_registry,
     build_overall_read_draft,
@@ -15,7 +16,15 @@ from land_due_diligence_agent.analysis.issue_registry import (
 from land_due_diligence_agent.analysis.service import run_analysis
 from land_due_diligence_agent.llm.base import LLMProvider
 from land_due_diligence_agent.llm.heuristic_provider import HeuristicProvider
-from land_due_diligence_agent.models import Citation, ContradictionFinding, DocumentRecord, OmissionAssessment, RiskFinding
+from land_due_diligence_agent.models import (
+    CanonicalIssue,
+    CanonicalIssueRegistry,
+    Citation,
+    ContradictionFinding,
+    DocumentRecord,
+    OmissionAssessment,
+    RiskFinding,
+)
 from land_due_diligence_agent.utils.text import normalize_text
 
 
@@ -340,6 +349,114 @@ class AnalysisTests(unittest.TestCase):
         executive_ids = [selection.issue_id for selection in selections if selection.output_name == "01_executive_summary.md"]
         self.assertIn("environmental-followup", executive_ids)
         self.assertNotIn("entitlement-conditions", executive_ids)
+
+    def test_front_end_flag_grading_distinguishes_real_flags_document_gaps_and_routine_items(self) -> None:
+        synthesis = run_analysis(
+            deal_name="Front End Flags",
+            documents=[
+                _document(
+                    "title_report_2026.txt",
+                    "Preliminary title report lists an access easement exception affecting the current site layout.",
+                )
+            ],
+            llm_provider=HeuristicProvider(),
+            logger=logging.getLogger("test-front-end-flags"),
+        )
+
+        issue_by_id = {issue.issue_id: issue for issue in synthesis.canonical_issue_registry.issues}
+        self.assertIn(issue_by_id["title-access-clearance"].front_end_flag, {"red flag", "yellow flag"})
+        self.assertEqual(issue_by_id["entitlement-conditions"].front_end_flag, "document gap")
+
+        registry = CanonicalIssueRegistry(
+            issues=[
+                CanonicalIssue(
+                    issue_id="routine-check",
+                    title="Routine process follow-up",
+                    category="Schedule Risks",
+                    status="open",
+                    why_it_matters="This is normal coordination work.",
+                    likely_implication="No concentrated project-specific concern is visible.",
+                    evidence_basis="direct_confirmed_risk",
+                    materiality="low",
+                    normal_friction_flag=True,
+                    decision_relevant=False,
+                    false_positive_risk="high",
+                )
+            ]
+        )
+        apply_front_end_assessment(
+            registry=registry,
+            document_analyses=[],
+            omission_assessments=[],
+            contradictions=[],
+        )
+        self.assertEqual(registry.issues[0].front_end_flag, "routine item")
+
+    def test_front_end_separates_missing_stale_and_conflict_signals(self) -> None:
+        synthesis = run_analysis(
+            deal_name="Signal Separation",
+            documents=[
+                _document(
+                    "stormwater_plan.txt",
+                    "Diana Avenue frontage is already improved.",
+                ),
+                _document(
+                    "conditions_of_approval.txt",
+                    "At improvement plan stage, the project shall confirm if the Diana Avenue frontage was dedicated to the City.",
+                ),
+                _document(
+                    "2019_fee_schedule.txt",
+                    "2019 fee schedule. Impact fees and capacity fees shown for planning purposes.",
+                ),
+            ],
+            llm_provider=HeuristicProvider(),
+            logger=logging.getLogger("test-front-end-separation"),
+        )
+
+        issue_by_id = {issue.issue_id: issue for issue in synthesis.canonical_issue_registry.issues}
+        self.assertEqual(issue_by_id["offsite-frontage"].front_end_flag, "conflict / contradiction concern")
+        stale_omissions = [
+            assessment
+            for assessment in synthesis.omission_assessments
+            if assessment.front_end_status == "stale and potentially unreliable"
+        ]
+        self.assertTrue(stale_omissions)
+        missing_important = [
+            assessment
+            for assessment in synthesis.omission_assessments
+            if assessment.front_end_status == "missing and important"
+        ]
+        self.assertTrue(missing_important)
+
+    def test_reading_order_and_roadmap_are_front_end_oriented(self) -> None:
+        synthesis = run_analysis(
+            deal_name="Reading Deal",
+            documents=[
+                _document(
+                    "title_report.txt",
+                    "Preliminary title report lists an access easement exception affecting the current site layout.",
+                ),
+                _document(
+                    "conditions_of_approval.txt",
+                    "At improvement plan stage, the project shall confirm if the Diana Avenue frontage was dedicated to the City.",
+                ),
+                _document(
+                    "memo_summary.txt",
+                    "Executive memo summarizing the package.",
+                ),
+            ],
+            llm_provider=HeuristicProvider(),
+            logger=logging.getLogger("test-reading-roadmap"),
+        )
+
+        self.assertTrue(synthesis.recommended_reading_order)
+        self.assertEqual(synthesis.recommended_reading_order[0].bucket, "must read personally")
+        self.assertTrue(synthesis.recommended_reading_order[0].rationale_factors)
+        self.assertTrue(synthesis.further_diligence_roadmap.top_documents_to_read_first)
+        self.assertTrue(
+            synthesis.further_diligence_roadmap.top_real_flags
+            or synthesis.further_diligence_roadmap.top_contradictions_to_resolve
+        )
 
     def test_evaluator_output_is_stable_and_flags_routine_issue(self) -> None:
         registry = build_canonical_issue_registry(
