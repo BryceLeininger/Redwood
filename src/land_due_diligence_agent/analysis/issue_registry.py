@@ -7,6 +7,7 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass
 from typing import Callable
 
+from land_due_diligence_agent.analysis.dependencies import apply_dependency_reasoning
 from land_due_diligence_agent.analysis.evaluator import (
     build_evaluator_adjustments,
     evaluate_registry,
@@ -385,6 +386,9 @@ def build_canonical_issue_registry(
         deal_metadata=deal_metadata or DealMetadata(),
     )
     _evaluate_and_revise_registry(registry)
+    apply_dependency_reasoning(registry)
+    for issue in registry.issues:
+        issue.calibration_notes = _calibration_notes(issue)
     return registry
 
 
@@ -445,7 +449,13 @@ def build_recommendation_from_registry(registry: CanonicalIssueRegistry) -> Reco
             rationale="No concentrated issue was elevated from the current package.",
         )
 
-    top_issues = issues[:3]
+    issue_by_id = {issue.issue_id: issue for issue in registry.issues}
+    blocking_issues = [
+        issue_by_id[issue_id]
+        for issue_id in registry.blocker_issue_ids
+        if issue_id in issue_by_id
+    ]
+    top_issues = (blocking_issues or issues)[:3]
     max_closing = max(issue.priority_score.closing_risk for issue in top_issues)
     max_cost = max(issue.priority_score.cost_exposure for issue in top_issues)
     unresolved_title = any(issue.issue_id == "title-access-clearance" for issue in top_issues)
@@ -454,22 +464,33 @@ def build_recommendation_from_registry(registry: CanonicalIssueRegistry) -> Reco
 
     if any(issue.decision_action == "treat as fatal" for issue in top_issues):
         posture = "no-go"
+    elif any(issue.schedule_impact_classification in {"immediate blocker", "pre-close blocker"} for issue in top_issues):
+        posture = "pause"
     elif unresolved_title and max_closing >= 5 and unsupported_core:
         posture = "pause"
     elif retrade_signal and max_cost >= 4:
         posture = "retrade"
+    elif any(issue.blocking_flag or issue.critical_path_flag for issue in top_issues):
+        posture = "proceed with conditions"
     elif any(issue.gating_flags for issue in top_issues):
         posture = "proceed with conditions"
     else:
         posture = "proceed"
 
-    reasons = [_issue_reason_line(issue) for issue in top_issues[:3]]
+    reasons = [_issue_blocked_line(issue) for issue in top_issues[:3]]
     conditions = unique_preserve_order(_issue_condition_line(issue) for issue in top_issues[:3])[:3]
-    rationale = (
-        f"{posture.title()} is the current posture because the deal is being driven by {', '.join(issue.title.lower() for issue in top_issues[:2])}."
-        if len(top_issues) > 1
-        else f"{posture.title()} is the current posture because the lead issue is {top_issues[0].title.lower()}."
-    )
+    if blocking_issues:
+        lead_blockers = ", ".join(issue.title.lower() for issue in top_issues[:2])
+        rationale = normalize_line(
+            f"{posture.title()} is the current posture because the real gating path runs through {lead_blockers}. "
+            f"{registry.critical_path_summary}"
+        )
+    else:
+        rationale = (
+            f"{posture.title()} is the current posture because the deal is being driven by {', '.join(issue.title.lower() for issue in top_issues[:2])}."
+            if len(top_issues) > 1
+            else f"{posture.title()} is the current posture because the lead issue is {top_issues[0].title.lower()}."
+        )
     return RecommendationDecision(
         posture=posture,
         rationale=rationale,
@@ -656,9 +677,10 @@ def build_overall_read_draft(
     if not issues:
         return f"{deal_name} does not currently present a concentrated diligence issue, but the package should still be checked for completeness."
 
+    blocking_issues = [issue for issue in registry.issues if issue.blocking_flag][:2]
     issue_text = "; ".join(
         f"{issue.title.lower()} ({issue.likely_implication.lower()})"
-        for issue in issues[:2]
+        for issue in (blocking_issues or issues)[:2]
     )
     challenge_text = (
         f" The main pushback is that {challenge_findings[0].concern.lower()}"
@@ -667,7 +689,8 @@ def build_overall_read_draft(
     )
     return (
         f"{deal_name} currently reads as '{recommendation.posture}'. {entitlement_status} "
-        f"The recommendation is being driven by {issue_text}.{challenge_text}"
+        f"{registry.central_risk_pattern} {registry.cluster_pattern} {registry.critical_path_summary} "
+        f"The lead blockers are {issue_text}. This reads as a {registry.fragility_classification} deal.{challenge_text}"
     ).strip()
 
 
@@ -1796,6 +1819,21 @@ def _seller_shiftability(issue: CanonicalIssue) -> int:
 
 def _issue_reason_line(issue: CanonicalIssue) -> str:
     return f"{issue.title}: {issue.why_it_matters}"
+
+
+def _issue_blocked_line(issue: CanonicalIssue) -> str:
+    blocked = []
+    if issue.schedule_impact_classification == "pre-close blocker":
+        blocked.append("closing")
+    elif issue.schedule_impact_classification == "pre-underwriting blocker":
+        blocked.append("underwriting confidence")
+    elif issue.schedule_impact_classification == "pre-final-map blocker":
+        blocked.append("final map / improvement-plan timing")
+    elif issue.schedule_impact_classification == "pre-vertical-start blocker":
+        blocked.append("vertical readiness")
+    blocked.extend(link.title.lower() for link in issue.downstream_dependencies[:2])
+    blocked_text = ", ".join(unique_preserve_order(blocked)[:3]) or "the next decision gate"
+    return f"{issue.title}: blocks {blocked_text}. {issue.why_it_matters}"
 
 
 def _issue_condition_line(issue: CanonicalIssue) -> str:

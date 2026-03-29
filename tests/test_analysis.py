@@ -8,6 +8,7 @@ from pathlib import Path
 
 from land_due_diligence_agent.analysis.issue_registry import (
     build_canonical_issue_registry,
+    build_overall_read_draft,
     build_recommendation_from_registry,
     build_section_selections,
 )
@@ -424,6 +425,151 @@ class AnalysisTests(unittest.TestCase):
         )
 
         self.assertEqual([issue.issue_id for issue in registry.issues], ["title-access-clearance"])
+
+    def test_dependency_assignment_and_blocker_classification_are_deterministic(self) -> None:
+        registry = build_canonical_issue_registry(
+            key_risks=[
+                RiskFinding(
+                    category="Utilities / Infrastructure Issues",
+                    severity="high",
+                    summary="Utility capacity remains pending and will-serve support is not in the file.",
+                    issue="Utility capacity and provider confirmation remain open.",
+                    why_it_matters="Provider commitment is still required before the utility path is reliable.",
+                    likely_implication="Schedule and offsite utility scope remain exposed.",
+                    source_documents=["Utility Memo"],
+                    citations=[Citation(document_name="Utility Memo", chunk_id="page-0001", page_number=1)],
+                    gating_flags=["Underwriting confidence", "Vertical start"],
+                ),
+                RiskFinding(
+                    category="Offsite Obligations",
+                    severity="high",
+                    summary="Frontage and offsite obligations remain buyer-facing.",
+                    issue="Offsite and frontage scope is still buyer-facing.",
+                    why_it_matters="Scope owner and timing triggers remain open.",
+                    likely_implication="Buyer-facing hard cost and schedule remain exposed.",
+                    source_documents=["Offsite Memo"],
+                    citations=[Citation(document_name="Offsite Memo", chunk_id="page-0001", page_number=1)],
+                    gating_flags=["Underwriting confidence", "Vertical start"],
+                ),
+                RiskFinding(
+                    category="Schedule Risks",
+                    severity="medium",
+                    summary="The critical path still depends on unconfirmed agency and procurement assumptions.",
+                    issue="Critical path still relies on unconfirmed assumptions.",
+                    why_it_matters="The execution path still depends on unresolved agency and procurement sequencing.",
+                    likely_implication="The current map and vertical timing are still provisional.",
+                    source_documents=["Schedule Memo"],
+                    citations=[Citation(document_name="Schedule Memo", chunk_id="page-0001", page_number=1)],
+                    gating_flags=["Vertical start"],
+                ),
+            ],
+            contradictions=[],
+            omission_assessments=[],
+            document_analyses=[],
+        )
+
+        utility_issue = next(issue for issue in registry.issues if issue.issue_id == "utility-capacity")
+        schedule_issue = next(issue for issue in registry.issues if issue.issue_id == "schedule-path")
+        self.assertEqual(utility_issue.dependency_type, "utility")
+        self.assertIn("offsite-frontage", [link.issue_id for link in utility_issue.downstream_dependencies])
+        self.assertIn("schedule-path", [link.issue_id for link in utility_issue.downstream_dependencies])
+        self.assertEqual(utility_issue.schedule_impact_classification, "pre-final-map blocker")
+        self.assertTrue(utility_issue.blocking_flag)
+        self.assertTrue(utility_issue.critical_path_flag)
+        self.assertEqual(utility_issue.blocker_classification, "blocking issue")
+        self.assertEqual(schedule_issue.blocker_classification, "sequencing issue")
+        self.assertTrue(schedule_issue.critical_path_flag)
+
+    def test_cluster_grouping_identifies_root_causes(self) -> None:
+        registry = build_canonical_issue_registry(
+            key_risks=[
+                RiskFinding(
+                    category="Utilities / Infrastructure Issues",
+                    severity="high",
+                    summary="Utility capacity remains pending and will-serve support is not in the file.",
+                    issue="Utility capacity and provider confirmation remain open.",
+                    why_it_matters="Provider commitment is still required before the utility path is reliable.",
+                    likely_implication="Schedule and offsite utility scope remain exposed.",
+                    source_documents=["Utility Memo"],
+                    citations=[Citation(document_name="Utility Memo", chunk_id="page-0001", page_number=1)],
+                    gating_flags=["Underwriting confidence", "Vertical start"],
+                ),
+                RiskFinding(
+                    category="Offsite Obligations",
+                    severity="high",
+                    summary="Frontage and offsite obligations remain buyer-facing.",
+                    issue="Offsite and frontage scope is still buyer-facing.",
+                    why_it_matters="Scope owner and timing triggers remain open.",
+                    likely_implication="Buyer-facing hard cost and schedule remain exposed.",
+                    source_documents=["Offsite Memo"],
+                    citations=[Citation(document_name="Offsite Memo", chunk_id="page-0001", page_number=1)],
+                    gating_flags=["Underwriting confidence", "Vertical start"],
+                ),
+                RiskFinding(
+                    category="Schedule Risks",
+                    severity="medium",
+                    summary="The critical path still depends on unconfirmed agency and procurement assumptions.",
+                    issue="Critical path still relies on unconfirmed assumptions.",
+                    why_it_matters="The execution path still depends on unresolved agency and procurement sequencing.",
+                    likely_implication="The current map and vertical timing are still provisional.",
+                    source_documents=["Schedule Memo"],
+                    citations=[Citation(document_name="Schedule Memo", chunk_id="page-0001", page_number=1)],
+                    gating_flags=["Vertical start"],
+                ),
+            ],
+            contradictions=[],
+            omission_assessments=[],
+            document_analyses=[],
+        )
+
+        cluster_labels = [cluster.label for cluster in registry.issue_clusters]
+        self.assertIn("utility/offsite readiness", cluster_labels)
+        self.assertEqual(registry.issue_clusters[0].root_issue_id, "utility-capacity")
+        self.assertEqual(registry.fragility_classification, "fragile sequencing")
+
+    def test_overall_read_uses_causal_pattern_language(self) -> None:
+        registry = build_canonical_issue_registry(
+            key_risks=[
+                RiskFinding(
+                    category="Utilities / Infrastructure Issues",
+                    severity="high",
+                    summary="Utility capacity remains pending and will-serve support is not in the file.",
+                    issue="Utility capacity and provider confirmation remain open.",
+                    why_it_matters="Provider commitment is still required before the utility path is reliable.",
+                    likely_implication="Schedule and offsite utility scope remain exposed.",
+                    source_documents=["Utility Memo"],
+                    citations=[Citation(document_name="Utility Memo", chunk_id="page-0001", page_number=1)],
+                    gating_flags=["Underwriting confidence", "Vertical start"],
+                ),
+                RiskFinding(
+                    category="Offsite Obligations",
+                    severity="high",
+                    summary="Frontage and offsite obligations remain buyer-facing.",
+                    issue="Offsite and frontage scope is still buyer-facing.",
+                    why_it_matters="Scope owner and timing triggers remain open.",
+                    likely_implication="Buyer-facing hard cost and schedule remain exposed.",
+                    source_documents=["Offsite Memo"],
+                    citations=[Citation(document_name="Offsite Memo", chunk_id="page-0001", page_number=1)],
+                    gating_flags=["Underwriting confidence", "Vertical start"],
+                ),
+            ],
+            contradictions=[],
+            omission_assessments=[],
+            document_analyses=[],
+        )
+
+        recommendation = build_recommendation_from_registry(registry)
+        overall_read = build_overall_read_draft(
+            deal_name="Dependency Deal",
+            registry=registry,
+            recommendation=recommendation,
+            entitlement_status="Status still conditional.",
+            challenge_findings=[],
+        )
+
+        self.assertIn("real critical path", overall_read.lower())
+        self.assertIn("fragile sequencing", overall_read.lower())
+        self.assertIn("utility/offsite readiness", overall_read.lower())
 
     def test_ambiguous_merge_arbiter_is_used(self) -> None:
         arbiter_calls: list[tuple[str, str]] = []

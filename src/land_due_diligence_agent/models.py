@@ -368,6 +368,32 @@ class IssueRegistryEvaluation:
 
 
 @dataclass(slots=True)
+class IssueDependencyLink:
+    """Directed dependency edge between canonical issues."""
+
+    issue_id: str
+    title: str = ""
+    dependency_type: str = ""
+    mechanism: str = ""
+    effect: str = ""
+
+
+@dataclass(slots=True)
+class IssueCluster:
+    """Causal cluster of linked issues with a root issue and downstream effects."""
+
+    cluster_id: str
+    label: str
+    tier: str = ""
+    root_issue_id: str = ""
+    issue_ids: list[str] = field(default_factory=list)
+    downstream_effects: list[str] = field(default_factory=list)
+    key_unresolved_confirmations: list[str] = field(default_factory=list)
+    decision_implication: str = ""
+    critical_path_issue_ids: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
 class MergeArbitrationRecord:
     """Trace for ambiguous merge review, optionally via LLM arbitration."""
 
@@ -419,6 +445,21 @@ class CanonicalIssue:
     calibration_notes: list[str] = field(default_factory=list)
     precedent_references: list[PrecedentReference] = field(default_factory=list)
     precedent_summary: PrecedentSummary = field(default_factory=PrecedentSummary)
+    dependency_type: str = ""
+    upstream_dependencies: list[IssueDependencyLink] = field(default_factory=list)
+    downstream_dependencies: list[IssueDependencyLink] = field(default_factory=list)
+    critical_path_flag: bool = False
+    blocking_flag: bool = False
+    blocker_classification: str = "monitoring issue"
+    schedule_impact_classification: str = "non-blocking"
+    blocking_reason: str = ""
+    critical_path_reason: str = ""
+    likely_cost_effect: str = ""
+    likely_schedule_effect: str = ""
+    likely_yield_or_product_effect: str = ""
+    likely_closing_effect: str = ""
+    likely_structure_effect: str = ""
+    likely_underwriting_effect: str = ""
     output_bucket: str = "appendix"
 
 
@@ -468,6 +509,17 @@ class CanonicalIssueRegistry:
     evaluator_result: IssueRegistryEvaluation = field(default_factory=IssueRegistryEvaluation)
     initial_issue_order: list[str] = field(default_factory=list)
     final_issue_order: list[str] = field(default_factory=list)
+    issue_clusters: list[IssueCluster] = field(default_factory=list)
+    blocker_issue_ids: list[str] = field(default_factory=list)
+    sequencing_issue_ids: list[str] = field(default_factory=list)
+    confirmatory_issue_ids: list[str] = field(default_factory=list)
+    monitoring_issue_ids: list[str] = field(default_factory=list)
+    critical_path_issue_ids: list[str] = field(default_factory=list)
+    central_risk_pattern: str = ""
+    cluster_pattern: str = ""
+    fragility_classification: str = ""
+    critical_path_summary: str = ""
+    confidence_unlocks: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)

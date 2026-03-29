@@ -368,6 +368,32 @@ def _build_issue_analysis_markdown(synthesis: DealSynthesis) -> str:
         lines.append("### What Would Resolve It")
         lines.append(f"- {issue.what_would_resolve_it}")
         lines.append("")
+        lines.append("### Dependency Read")
+        lines.append(f"- Dependency Type: {issue.dependency_type or 'n/a'}")
+        lines.append(f"- Classification: {issue.blocker_classification} | {issue.schedule_impact_classification}")
+        lines.append(f"- Critical Path: {'Yes' if issue.critical_path_flag else 'No'}")
+        lines.append(f"- Blocking: {'Yes' if issue.blocking_flag else 'No'}")
+        if issue.upstream_dependencies:
+            lines.append("- Upstream Dependencies: " + ", ".join(link.title for link in issue.upstream_dependencies[:3]))
+        else:
+            lines.append("- Upstream Dependencies: None")
+        if issue.downstream_dependencies:
+            lines.append("- Downstream Dependencies: " + ", ".join(link.title for link in issue.downstream_dependencies[:3]))
+        else:
+            lines.append("- Downstream Dependencies: None")
+        if issue.blocking_reason:
+            lines.append(f"- Blocking Read: {issue.blocking_reason}")
+        if issue.critical_path_reason:
+            lines.append(f"- Critical Path Read: {issue.critical_path_reason}")
+        lines.append("")
+        lines.append("### Downstream Consequences")
+        lines.append(f"- Cost: {issue.likely_cost_effect or 'None isolated.'}")
+        lines.append(f"- Schedule: {issue.likely_schedule_effect or 'None isolated.'}")
+        lines.append(f"- Yield / Product: {issue.likely_yield_or_product_effect or 'None isolated.'}")
+        lines.append(f"- Closing: {issue.likely_closing_effect or 'None isolated.'}")
+        lines.append(f"- Structure: {issue.likely_structure_effect or 'None isolated.'}")
+        lines.append(f"- Underwriting: {issue.likely_underwriting_effect or 'None isolated.'}")
+        lines.append("")
         if issue.precedent_summary.sample_size:
             lines.append("### Precedent Read")
             lines.append(f"- Historical Frequency: {issue.precedent_summary.historical_frequency}")
@@ -427,27 +453,38 @@ def _build_missing_items_markdown(synthesis: DealSynthesis) -> str:
 
 
 def _build_deal_synthesis_markdown(synthesis: DealSynthesis) -> str:
-    issues = synthesis.canonical_issue_registry.issues
-    top_issues = issues[:3]
+    registry = synthesis.canonical_issue_registry
     lines = [
         "# Deal Synthesis",
         "",
         "## Overall Read",
         normalize_text(synthesis.executive_summary),
         "",
-        "## Risk Pattern",
+        "## Central Pattern",
         "",
     ]
-    lines.extend(f"- {item}" for item in _build_pattern_lines(synthesis, top_issues))
+    lines.append(f"- Central Risk Pattern: {registry.central_risk_pattern or 'No central pattern isolated.'}")
+    lines.append(f"- Cluster Pattern: {registry.cluster_pattern or 'No cluster pattern isolated.'}")
+    lines.append(f"- Deal Type: {registry.fragility_classification or 'n/a'}")
+
+    lines.extend(["", "## Root-Cause Clusters", ""])
+    lines.extend(_render_issue_clusters(synthesis))
+
+    lines.extend(["", "## Real Critical Path", ""])
+    lines.append(f"- {registry.critical_path_summary or 'No critical path summary was isolated.'}")
+    lines.extend(f"- {item}" for item in _build_gating_issue_lines(synthesis))
+
+    lines.extend(["", "## What Changes Confidence", ""])
+    if registry.confidence_unlocks:
+        lines.extend(f"- {item}" for item in registry.confidence_unlocks[:4])
+    else:
+        lines.append("- No single confirmation was isolated beyond the current issue set.")
 
     lines.extend(["", "## Potential Contradictions / Tensions", ""])
     lines.extend(_render_contradictions(synthesis.contradictions))
 
     lines.extend(["", "## Adversarial Challenge", ""])
     lines.extend(_render_challenge_findings(synthesis.challenge_findings, limit=4))
-
-    lines.extend(["", "## Gating Issues", ""])
-    lines.extend(f"- {item}" for item in _build_decision_gate_lines(synthesis))
 
     return "\n".join(lines) + "\n"
 
@@ -470,6 +507,14 @@ def _build_investment_committee_brief_markdown(synthesis: DealSynthesis) -> str:
         "",
     ]
     lines.extend(f"- {reason}" for reason in synthesis.recommendation.reasons[:3] or ["No reason line was generated."])
+    lines.extend(
+        [
+            "",
+            "## Top 3 Gating Issues",
+            "",
+        ]
+    )
+    lines.extend(f"- {item}" for item in _build_gating_issue_lines(synthesis, limit=3))
     lines.extend(
         [
             "",
@@ -534,14 +579,45 @@ def _build_issue_registry_debug_markdown(synthesis: DealSynthesis) -> str:
         if issue.top_line_filter_reasons:
             lines.append(f"- Filter Reasons: {', '.join(issue.top_line_filter_reasons)}")
         lines.append(f"- Output Bucket: {issue.output_bucket}")
+        lines.append(f"- Dependency Type: {issue.dependency_type or 'n/a'}")
+        lines.append(f"- Critical Path: {issue.critical_path_flag}")
+        lines.append(f"- Blocking: {issue.blocking_flag}")
+        lines.append(f"- Blocker Classification: {issue.blocker_classification}")
+        lines.append(f"- Schedule Impact: {issue.schedule_impact_classification}")
+        if issue.blocking_reason:
+            lines.append(f"- Blocking Reason: {issue.blocking_reason}")
+        if issue.critical_path_reason:
+            lines.append(f"- Critical Path Reason: {issue.critical_path_reason}")
         lines.append(f"- Decision Action: {issue.decision_action}")
         lines.append(
             f"- Score Adjustments: calibration={issue.priority_score.calibration_adjustment:+d}, "
             f"precedent={issue.priority_score.precedent_adjustment:+d}, "
             f"evaluator={issue.priority_score.evaluator_adjustment:+d}"
         )
+        lines.append(f"- Consequence Cost: {issue.likely_cost_effect or 'n/a'}")
+        lines.append(f"- Consequence Schedule: {issue.likely_schedule_effect or 'n/a'}")
+        lines.append(f"- Consequence Yield/Product: {issue.likely_yield_or_product_effect or 'n/a'}")
+        lines.append(f"- Consequence Closing: {issue.likely_closing_effect or 'n/a'}")
+        lines.append(f"- Consequence Structure: {issue.likely_structure_effect or 'n/a'}")
+        lines.append(f"- Consequence Underwriting: {issue.likely_underwriting_effect or 'n/a'}")
         lines.append(f"- Source: {_format_citations(issue.citations[:3]) or ', '.join(issue.source_documents[:3]) or 'None'}")
         lines.append(f"- Merged Fragments: {', '.join(issue.merged_fragment_ids) or 'None'}")
+        if issue.upstream_dependencies:
+            lines.append(
+                "- Upstream Dependencies: "
+                + " | ".join(
+                    f"{link.title} [{link.dependency_type}] ({link.mechanism})"
+                    for link in issue.upstream_dependencies[:4]
+                )
+            )
+        if issue.downstream_dependencies:
+            lines.append(
+                "- Downstream Dependencies: "
+                + " | ".join(
+                    f"{link.title} [{link.dependency_type}] ({link.effect})"
+                    for link in issue.downstream_dependencies[:4]
+                )
+            )
         if issue.calibration_notes:
             lines.append(f"- Calibration Notes: {' | '.join(issue.calibration_notes)}")
         if issue.precedent_summary.sample_size:
@@ -599,6 +675,44 @@ def _build_issue_registry_debug_markdown(synthesis: DealSynthesis) -> str:
             )
     else:
         lines.append("- No output selections were recorded.")
+    lines.append("")
+
+    lines.extend(["## Dependency Graph", ""])
+    if registry.issues:
+        for issue in registry.issues:
+            upstream = ", ".join(link.issue_id for link in issue.upstream_dependencies) or "None"
+            downstream = ", ".join(link.issue_id for link in issue.downstream_dependencies) or "None"
+            lines.append(
+                f"- `{issue.issue_id}` [{issue.dependency_type or 'n/a'}] | upstream: {upstream} | downstream: {downstream}"
+            )
+    else:
+        lines.append("- No dependency graph was built.")
+    lines.append("")
+
+    lines.extend(["## Critical Path Summary", ""])
+    lines.append(f"- Central Risk Pattern: {registry.central_risk_pattern or 'None'}")
+    lines.append(f"- Cluster Pattern: {registry.cluster_pattern or 'None'}")
+    lines.append(f"- Fragility Classification: {registry.fragility_classification or 'None'}")
+    lines.append(f"- Critical Path Summary: {registry.critical_path_summary or 'None'}")
+    lines.append(f"- Blocking Issues: {', '.join(registry.blocker_issue_ids) or 'None'}")
+    lines.append(f"- Sequencing Issues: {', '.join(registry.sequencing_issue_ids) or 'None'}")
+    lines.append(f"- Confirmatory Issues: {', '.join(registry.confirmatory_issue_ids) or 'None'}")
+    lines.append(f"- Monitoring Issues: {', '.join(registry.monitoring_issue_ids) or 'None'}")
+    lines.append("")
+
+    lines.extend(["## Causal Clusters", ""])
+    if registry.issue_clusters:
+        for cluster in registry.issue_clusters:
+            lines.append(f"- {cluster.tier} cluster: {cluster.label}")
+            lines.append(f"  Root Issue: {cluster.root_issue_id}")
+            lines.append(f"  Members: {', '.join(cluster.issue_ids)}")
+            lines.append(f"  Downstream Effects: {', '.join(cluster.downstream_effects) or 'None'}")
+            lines.append(
+                f"  Key Confirmations: {', '.join(cluster.key_unresolved_confirmations) or 'None'}"
+            )
+            lines.append(f"  Decision Implication: {cluster.decision_implication or 'None'}")
+    else:
+        lines.append("- No causal clusters were built.")
     lines.append("")
 
     evaluator = registry.evaluator_result
@@ -716,6 +830,14 @@ def _render_canonical_issue_risk_block(issue: CanonicalIssue, *, index: int) -> 
     lines = [f"### {index}. {issue.title}"]
     lines.append(f"- Why It Matters: {issue.why_it_matters}")
     lines.append(f"- Likely Implication: {issue.likely_implication}")
+    if issue.dependency_type:
+        lines.append(f"- Dependency Type: {issue.dependency_type}")
+    lines.append(f"- Critical Path Read: {issue.blocker_classification} | {issue.schedule_impact_classification}")
+    if issue.blocking_reason:
+        lines.append(f"- Why This Label: {issue.blocking_reason}")
+    blocked = _issue_blocks(issue)
+    if blocked:
+        lines.append(f"- What It Blocks: {blocked}")
     lines.append(f"- What Would Resolve It: {issue.what_would_resolve_it}")
     lines.append(f"- Decision Action: {issue.decision_action}")
     if issue.gating_flags:
@@ -1114,39 +1236,74 @@ def _build_decision_framing_lines(synthesis: DealSynthesis) -> list[str]:
 
 
 def _build_top_decision_drivers(synthesis: DealSynthesis) -> list[str]:
-    issues = _selected_issues(synthesis, "01_executive_summary.md", default_count=4)
+    registry = synthesis.canonical_issue_registry
+    issue_by_id = {issue.issue_id: issue for issue in registry.issues}
+    blocker_issues = [issue_by_id[issue_id] for issue_id in registry.blocker_issue_ids if issue_id in issue_by_id]
+    issues = blocker_issues or _selected_issues(synthesis, "01_executive_summary.md", default_count=4)
     if not issues:
         return ["No single decision driver clearly dominates the current package."]
     return [
-        _with_light_citation(f"{issue.title}. {issue.why_it_matters}", issue)
+        _with_light_citation(f"{issue.title}. {_issue_blocks(issue) or issue.why_it_matters}", issue)
         for issue in issues[:5]
     ]
 
 
 def _build_decision_gate_lines(synthesis: DealSynthesis) -> list[str]:
-    issues = synthesis.canonical_issue_registry.issues
+    return _build_gating_issue_lines(synthesis, limit=3)
+
+
+def _build_gating_issue_lines(synthesis: DealSynthesis, *, limit: int = 3) -> list[str]:
+    registry = synthesis.canonical_issue_registry
+    issue_by_id = {issue.issue_id: issue for issue in registry.issues}
+    gating_issues = [issue_by_id[issue_id] for issue_id in registry.blocker_issue_ids if issue_id in issue_by_id]
+    if not gating_issues:
+        gating_issues = [issue for issue in registry.issues if issue.critical_path_flag][:limit]
+
     lines: list[str] = []
-    for gate_name in ("Closing", "Underwriting confidence", "Vertical start"):
-        gate_issues = [issue for issue in issues if gate_name in issue.gating_flags]
-        contradictions = _contradictions_for_gate(synthesis, gate_name)
-        actions = [_build_gate_action_text_from_issue(issue) for issue in gate_issues[:2]]
-        actions.extend(_build_gate_action_from_contradiction(finding) for finding in contradictions[:1])
-        if gate_name == "Underwriting confidence" and any(
-            analysis.confidence == "low" for analysis in synthesis.document_analyses
-        ):
-            actions.append("replace unreadable budget or support files")
-
-        actions = _unique_list(actions)
-        if not actions:
-            continue
-
-        citations = _collect_gate_citations(gate_issues, contradictions)
-        source_suffix = f" [Source: {_format_citations(citations)}]" if citations else ""
-        lines.append(f"Before {gate_name.lower()}: {'; '.join(actions)}.{source_suffix}")
+    for issue in gating_issues[:limit]:
+        lines.append(
+            f"{issue.title}: blocks {_issue_blocks(issue) or 'the next decision gate'}; "
+            f"unlock confirmation: {issue.what_would_resolve_it or 'current support and owner confirmation'}."
+        )
 
     if not lines:
         lines.append("No specific gating condition was isolated beyond the current diligence gaps.")
-    return lines[:3]
+    return lines
+
+
+def _issue_blocks(issue: CanonicalIssue) -> str:
+    blocked: list[str] = []
+    if issue.schedule_impact_classification == "immediate blocker":
+        blocked.append("the current decision posture")
+    elif issue.schedule_impact_classification == "pre-close blocker":
+        blocked.append("closing")
+    elif issue.schedule_impact_classification == "pre-underwriting blocker":
+        blocked.append("underwriting confidence")
+    elif issue.schedule_impact_classification == "pre-final-map blocker":
+        blocked.append("final map / improvement-plan timing")
+    elif issue.schedule_impact_classification == "pre-vertical-start blocker":
+        blocked.append("vertical readiness")
+    blocked.extend(link.title.lower() for link in issue.downstream_dependencies[:2])
+    if issue.blocker_classification == "sequencing issue" and not blocked:
+        blocked.append("downstream sequencing confidence")
+    return ", ".join(_unique_list(blocked)[:3])
+
+
+def _render_issue_clusters(synthesis: DealSynthesis) -> list[str]:
+    registry = synthesis.canonical_issue_registry
+    if not registry.issue_clusters:
+        return ["- No causal cluster was isolated beyond the ranked issue list."]
+
+    lines: list[str] = []
+    for cluster in registry.issue_clusters[:3]:
+        lines.append(f"- {cluster.tier} cluster: {cluster.label}")
+        lines.append(f"  Root issue: {cluster.root_issue_id}")
+        lines.append(f"  Downstream effects: {', '.join(cluster.downstream_effects) or 'None'}")
+        lines.append(
+            f"  Key unresolved confirmations: {', '.join(cluster.key_unresolved_confirmations) or 'None'}"
+        )
+        lines.append(f"  Decision implication: {cluster.decision_implication or 'None'}")
+    return lines
 
 
 def _build_deal_breakers(synthesis: DealSynthesis) -> list[str]:
@@ -1208,10 +1365,11 @@ def _build_personal_verification_items(synthesis: DealSynthesis) -> list[str]:
 
 
 def _evaluate_decision_readiness(synthesis: DealSynthesis) -> tuple[str, str]:
-    issues = synthesis.canonical_issue_registry.issues
+    registry = synthesis.canonical_issue_registry
+    issues = registry.issues
     if (
         synthesis.contradictions
-        or any("Closing" in issue.gating_flags for issue in issues)
+        or registry.blocker_issue_ids
         or any(assessment.status in {"not found", "unclear whether present"} for assessment in synthesis.omission_assessments)
         or any(
         analysis.confidence == "low" for analysis in synthesis.document_analyses
@@ -1219,12 +1377,12 @@ def _evaluate_decision_readiness(synthesis: DealSynthesis) -> tuple[str, str]:
     ):
         return (
             "Not ready",
-            "Core documents still conflict on scope, access, or cost assumptions, and the package still has pre-closing or support gaps that change the recommendation.",
+            "One or more blocker issues still sits on the real critical path, so the package is not yet decision-clean.",
         )
-    if any(issue.gating_flags for issue in issues):
+    if registry.critical_path_issue_ids or any(issue.gating_flags for issue in issues):
         return (
             "Partially complete",
-            "The package is substantive, but basis, permit, or execution items are still open enough that leadership should not treat it as fully underwritten.",
+            "The package is substantive, but sequencing and confirmation items still sit on the path to a clean recommendation.",
         )
     return (
         "Decision-ready",
@@ -1459,17 +1617,22 @@ def _build_decision_points(synthesis: DealSynthesis) -> list[str]:
 
 
 def _build_ic_overall_read(synthesis: DealSynthesis) -> str:
-    issues = _selected_issues(synthesis, "09_investment_committee_brief.md", default_count=3)
+    registry = synthesis.canonical_issue_registry
+    issue_by_id = {issue.issue_id: issue for issue in registry.issues}
+    blocking_issues = [issue_by_id[issue_id] for issue_id in registry.blocker_issue_ids if issue_id in issue_by_id]
+    issues = blocking_issues or _selected_issues(synthesis, "09_investment_committee_brief.md", default_count=3)
     if not issues:
         return "The package does not surface a concentrated issue, but it still needs a completeness check before it is treated as decision-ready."
 
     lead = issues[0]
     text = (
         f"The recommendation is '{synthesis.recommendation.posture}' because {lead.title.lower()} is still open. "
-        f"{lead.likely_implication}"
+        f"{registry.central_risk_pattern or lead.likely_implication}"
     )
     if len(issues) > 1:
-        text += f" The next issue is {issues[1].title.lower()}."
+        text += f" The next gating issue is {issues[1].title.lower()}."
+    if registry.critical_path_summary:
+        text += f" {registry.critical_path_summary}"
     if synthesis.challenge_findings:
         text += f" Expected IC pushback: {synthesis.challenge_findings[0].likely_pushback}"
     return text

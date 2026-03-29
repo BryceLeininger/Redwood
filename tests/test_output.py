@@ -19,6 +19,8 @@ from land_due_diligence_agent.models import (
     DocumentRecord,
     FileProcessingResult,
     IssueAnalysis,
+    IssueCluster,
+    IssueDependencyLink,
     IssuePriorityScore,
     LLMCallFailure,
     OmissionAssessment,
@@ -172,6 +174,28 @@ class OutputWriterTests(unittest.TestCase):
                 sparse_data=False,
                 reasoning="Historical outcomes are mixed, so the current issue should stay anchored to the cited deal evidence first.",
             ),
+            dependency_type="legal",
+            critical_path_flag=True,
+            blocking_flag=True,
+            blocker_classification="blocking issue",
+            schedule_impact_classification="pre-underwriting blocker",
+            blocking_reason="Labeled blocking because it is a pre-underwriting blocker and currently blocks underwriting confidence.",
+            critical_path_reason="On the critical path because it directly controls the underwriting basis.",
+            likely_cost_effect="Mitigation, remediation, or agency follow-up can add direct cost and reserve requirements.",
+            likely_schedule_effect="Sampling, agency review, or mitigation closeout can delay underwriting and sometimes permit timing.",
+            likely_yield_or_product_effect="Buffers, mitigation areas, or cleanup limits can reduce buildable area or product flexibility.",
+            likely_closing_effect="Material environmental exposure can push the deal back to a conditional or paused closing posture.",
+            likely_structure_effect="May require seller indemnity, credit, escrow, or post-close remediation allocation.",
+            likely_underwriting_effect="Basis and timing remain provisional until residual environmental scope and cost owner are clear.",
+            downstream_dependencies=[
+                IssueDependencyLink(
+                    issue_id="budget-reliability",
+                    title="Cost package is still budgetary",
+                    dependency_type="cost",
+                    mechanism="Residual mitigation scope belongs in the basis.",
+                    effect="Underwriting remains exposed until cost ownership is explicit.",
+                )
+            ],
             output_bucket="executive",
         )
         synthesis = DealSynthesis(
@@ -215,6 +239,31 @@ class OutputWriterTests(unittest.TestCase):
                     OutputIssueSelection("10_issue_analysis.md", "environmental-followup", 1, "Appendix coverage"),
                 ],
                 deal_metadata=DealMetadata(stage="acquisition-dd", region="west", product="multifamily"),
+                blocker_issue_ids=["environmental-followup"],
+                critical_path_issue_ids=["environmental-followup"],
+                central_risk_pattern="Risk is concentrated around environmental closure path, with environmental follow-up acting as the root issue that drives downstream underwriting and schedule exposure.",
+                cluster_pattern="Most of the important issues cluster around one or two root causes rather than behaving independently.",
+                fragility_classification="fragile sequencing",
+                critical_path_summary="The real critical path runs through environmental follow-up is not fully closed.",
+                confidence_unlocks=["Provide the current environmental closure path, cost owner, and any remaining mitigation obligation."],
+                issue_clusters=[
+                    IssueCluster(
+                        cluster_id="cluster-01-environmental-closure-path",
+                        label="environmental closure path",
+                        tier="Primary",
+                        root_issue_id="environmental-followup",
+                        issue_ids=["environmental-followup"],
+                        downstream_effects=[
+                            "Sampling, agency review, or mitigation closeout can delay underwriting and sometimes permit timing.",
+                            "Mitigation, remediation, or agency follow-up can add direct cost and reserve requirements.",
+                        ],
+                        key_unresolved_confirmations=[
+                            "Provide the current environmental closure path, cost owner, and any remaining mitigation obligation."
+                        ],
+                        decision_implication="Basis and timing remain provisional until residual environmental scope and cost owner are clear.",
+                        critical_path_issue_ids=["environmental-followup"],
+                    )
+                ],
             ),
             challenge_findings=[challenge_finding],
             priority_assessment=PriorityAssessment(
@@ -296,13 +345,15 @@ class OutputWriterTests(unittest.TestCase):
             self.assertIn("Source: Memo p. 1", key_risk_content)
             self.assertIn("Potential Contradictions / Tensions", key_risk_content)
             synthesis_content = (output_dir / "07_deal_synthesis.md").read_text(encoding="utf-8")
-            self.assertIn("Risk Pattern", synthesis_content)
-            self.assertIn("Gating Issues", synthesis_content)
+            self.assertIn("Central Pattern", synthesis_content)
+            self.assertIn("Root-Cause Clusters", synthesis_content)
+            self.assertIn("Real Critical Path", synthesis_content)
             self.assertIn("Potential Contradictions / Tensions", synthesis_content)
             self.assertIn("Adversarial Challenge", synthesis_content)
             ic_content = (output_dir / "09_investment_committee_brief.md").read_text(encoding="utf-8")
             self.assertIn("Recommendation", ic_content)
             self.assertIn("Reasons", ic_content)
+            self.assertIn("Top 3 Gating Issues", ic_content)
             self.assertIn("Conditions / Asks", ic_content)
             self.assertIn("Decision Readiness", ic_content)
             self.assertIn("Likely IC Pushback", ic_content)
@@ -310,6 +361,8 @@ class OutputWriterTests(unittest.TestCase):
             self.assertIn("Issue Analysis", issue_content)
             self.assertIn("Environmental follow-up is not fully closed", issue_content)
             self.assertIn("Core Facts", issue_content)
+            self.assertIn("Dependency Read", issue_content)
+            self.assertIn("Downstream Consequences", issue_content)
             debug_content = (output_dir / "11_issue_registry_debug.md").read_text(encoding="utf-8")
             self.assertIn("Issue Registry Debug", debug_content)
             self.assertIn("Canonical Issue Registry", debug_content)
@@ -320,6 +373,8 @@ class OutputWriterTests(unittest.TestCase):
             self.assertIn("Precedent Summary", debug_content)
             self.assertIn("Retrieved Precedent Matches", debug_content)
             self.assertIn("precedent=+6", debug_content)
+            self.assertIn("Dependency Graph", debug_content)
+            self.assertIn("Causal Clusters", debug_content)
             self.assertIn("## Evaluator", debug_content)
             feedback_rows = json.loads((output_dir / "12_reviewer_feedback_template.json").read_text(encoding="utf-8"))
             self.assertEqual(feedback_rows[0]["issue_id"], "environmental-followup")
