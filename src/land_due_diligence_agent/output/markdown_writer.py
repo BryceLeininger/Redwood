@@ -173,9 +173,17 @@ def _build_executive_summary_markdown(
         "",
         synthesis.executive_summary,
         "",
-        "## Most Important Conclusions",
+        "## Decision Framing",
         "",
     ]
+    lines.extend(_build_decision_framing_lines(synthesis))
+    lines.extend(
+        [
+            "",
+        "## Most Important Conclusions",
+        "",
+        ]
+    )
     lines.extend(f"- {item}" for item in conclusions)
     lines.extend(
         [
@@ -361,8 +369,6 @@ def _build_investment_committee_brief_markdown(synthesis: DealSynthesis) -> str:
     overall_read = _build_ic_overall_read(synthesis)
     biggest_risks = _build_ic_biggest_risks(synthesis)
     biggest_unknowns = _build_ic_biggest_unknowns(synthesis)
-    verify_points = _build_ic_verify_points(synthesis)
-    decision_ready = _build_decision_ready_assessment(synthesis)
 
     lines = [
         "# Investment Committee Brief",
@@ -371,9 +377,17 @@ def _build_investment_committee_brief_markdown(synthesis: DealSynthesis) -> str:
         "",
         overall_read,
         "",
-        "## Biggest Risks",
+        "## Decision Framing",
         "",
     ]
+    lines.extend(_build_decision_framing_lines(synthesis))
+    lines.extend(
+        [
+            "",
+        "## Biggest Risks",
+        "",
+        ]
+    )
     lines.extend(f"- {item}" for item in biggest_risks)
     lines.extend(
         [
@@ -391,23 +405,6 @@ def _build_investment_committee_brief_markdown(synthesis: DealSynthesis) -> str:
         ]
     )
     lines.extend(f"- {item}" for item in biggest_unknowns)
-    lines.extend(
-        [
-            "",
-            "## What To Personally Verify",
-            "",
-        ]
-    )
-    lines.extend(f"- {item}" for item in verify_points)
-    lines.extend(
-        [
-            "",
-            "## Decision-Ready?",
-            "",
-            decision_ready,
-            "",
-        ]
-    )
     return "\n".join(lines)
 
 
@@ -605,6 +602,252 @@ def _render_contradictions(contradictions: list) -> list[str]:
     return lines
 
 
+def _build_decision_framing_lines(synthesis: DealSynthesis) -> list[str]:
+    readiness_status, readiness_reason = _evaluate_decision_readiness(synthesis)
+    lines = [
+        "### Top Decision Drivers",
+        "",
+    ]
+    lines.extend(f"- {item}" for item in _build_top_decision_drivers(synthesis))
+    lines.extend(
+        [
+            "",
+            "### Gating Conditions",
+            "",
+        ]
+    )
+    lines.extend(f"- {item}" for item in _build_decision_gate_lines(synthesis))
+    lines.extend(
+        [
+            "",
+            "### Deal Breakers",
+            "",
+        ]
+    )
+    lines.extend(f"- {item}" for item in _build_deal_breakers(synthesis))
+    lines.extend(
+        [
+            "",
+            "### What Must Be Verified Personally",
+            "",
+        ]
+    )
+    lines.extend(f"- {item}" for item in _build_personal_verification_items(synthesis))
+    lines.extend(
+        [
+            "",
+            "### Decision Readiness",
+            "",
+            f"- Status: {readiness_status}",
+            f"- Why: {readiness_reason}",
+        ]
+    )
+    return lines
+
+
+def _build_top_decision_drivers(synthesis: DealSynthesis) -> list[str]:
+    primary_risks, _ = _split_risk_tiers(synthesis.key_risks)
+    drivers: list[str] = []
+    covered_categories: set[str] = set()
+
+    for finding in synthesis.contradictions[:2]:
+        drivers.append(_with_light_citation(finding.description, finding))
+        covered_categories.update(finding.related_categories)
+
+    for risk in primary_risks:
+        if risk.category in covered_categories:
+            continue
+        drivers.append(_with_light_citation(f"{risk.issue} {risk.likely_implication}".strip(), risk))
+        covered_categories.add(risk.category)
+        if len(drivers) >= 5:
+            break
+
+    if not drivers:
+        drivers.append("No single decision driver clearly dominates the current package.")
+
+    return drivers[:5]
+
+
+def _build_decision_gate_lines(synthesis: DealSynthesis) -> list[str]:
+    grouped = _group_risks_by_gate(synthesis.key_risks)
+    lines: list[str] = []
+    for gate_name in ("Closing", "Underwriting confidence", "Vertical start"):
+        risks = grouped[gate_name]
+        contradictions = _contradictions_for_gate(synthesis, gate_name)
+        actions = [_build_gate_action_text(risk) for risk in risks[:2]]
+        actions.extend(_build_gate_action_from_contradiction(finding) for finding in contradictions[:1])
+        if gate_name == "Underwriting confidence" and any(
+            analysis.confidence == "low" for analysis in synthesis.document_analyses
+        ):
+            actions.append("replace unreadable budget or support files")
+
+        actions = _unique_list(actions)
+        if not actions:
+            continue
+
+        citations = _collect_gate_citations(risks, contradictions)
+        source_suffix = f" [Source: {_format_citations(citations)}]" if citations else ""
+        lines.append(f"Before {gate_name.lower()}: {'; '.join(actions)}.{source_suffix}")
+
+    if not lines:
+        lines.append("No specific gating condition was isolated beyond the current diligence gaps.")
+    return lines[:3]
+
+
+def _build_deal_breakers(synthesis: DealSynthesis) -> list[str]:
+    breakers: list[str] = []
+    title_risk = _find_risk(synthesis, "Title / Access Concerns")
+    offsite_risk = _find_risk(synthesis, "Offsite Obligations")
+    geotech_risk = _find_risk(synthesis, "Geotechnical Risks")
+    geotech_budget_tension = _find_contradiction_by_category(synthesis, {"Geotechnical Risks", "Budget / Cost Reliability"})
+    title_tension = _find_contradiction_by_category(synthesis, {"Title / Access Concerns"})
+
+    if title_risk is not None:
+        breakers.append(
+            _with_light_citation(
+                "If the title and access exceptions cannot be cured, insured over, or designed around, the deal changes materially because closing and buildability are impaired.",
+                title_tension or title_risk,
+            )
+        )
+    if offsite_risk is not None:
+        breakers.append(
+            _with_light_citation(
+                "If frontage, dedication, or offsite obligations stay buyer-facing on terms not reflected in basis, the deal changes materially on cost and schedule.",
+                _find_contradiction_by_category(synthesis, {"Offsite Obligations"}) or offsite_risk,
+            )
+        )
+    if geotech_risk is not None:
+        breakers.append(
+            _with_light_citation(
+                "If soils-driven grading, retaining, or foundation scope is not fully carried into cost, current underwriting is not reliable enough for approval.",
+                geotech_budget_tension or geotech_risk,
+            )
+        )
+
+    if not breakers:
+        breakers.append("No clear deal breaker is isolated from the current text, but the package is still too open for a clean approval.")
+
+    return _unique_list(breakers)[:3]
+
+
+def _build_personal_verification_items(synthesis: DealSynthesis) -> list[str]:
+    items: list[str] = []
+    for finding in synthesis.contradictions[:2]:
+        items.append(_build_verify_point_from_contradiction(finding))
+
+    primary_risks, _ = _split_risk_tiers(synthesis.key_risks)
+    covered_categories = {category for finding in synthesis.contradictions for category in finding.related_categories}
+    for risk in primary_risks:
+        if risk.category in covered_categories:
+            continue
+        items.append(_build_verify_point_from_risk(risk))
+        if len(items) >= 4:
+            break
+
+    if not items:
+        items.append("Personally review the highest-priority documents in the recommended reading order.")
+
+    return _unique_list(items)[:4]
+
+
+def _evaluate_decision_readiness(synthesis: DealSynthesis) -> tuple[str, str]:
+    grouped = _group_risks_by_gate(synthesis.key_risks)
+    if synthesis.contradictions or grouped["Closing"] or synthesis.missing_items or any(
+        analysis.confidence == "low" for analysis in synthesis.document_analyses
+    ):
+        return (
+            "Not ready",
+            "Core documents still conflict on scope, access, or cost assumptions, and the package still has pre-closing or support gaps that change the recommendation.",
+        )
+    if grouped["Underwriting confidence"] or grouped["Vertical start"]:
+        return (
+            "Partially complete",
+            "The package is substantive, but basis, permit, or execution items are still open enough that leadership should not treat it as fully underwritten.",
+        )
+    return (
+        "Decision-ready",
+        "The current package supports a clean view on closing, basis, and execution with no material contradiction still driving the recommendation.",
+    )
+
+
+def _build_gate_action_from_contradiction(finding) -> str:
+    related = set(finding.related_categories)
+    if "Title / Access Concerns" in related:
+        return "confirm the access layout shown in the plans is fully supported by title"
+    if "Offsite Obligations" in related:
+        return "confirm whether frontage and offsite work are actually complete or still buyer-facing"
+    if {"Geotechnical Risks", "Budget / Cost Reliability"}.issubset(related):
+        return "confirm soils-driven scope is fully priced into the current cost package"
+    if "Entitlement Status" in related:
+        return "reconcile approval status against the remaining conditions of approval"
+    return "reconcile the conflicting document assumptions"
+
+
+def _contradictions_for_gate(synthesis: DealSynthesis, gate_name: str) -> list:
+    grouped = _group_risks_by_gate(synthesis.key_risks)
+    gate_categories = {risk.category for risk in grouped[gate_name]}
+    return [
+        finding
+        for finding in synthesis.contradictions
+        if gate_categories.intersection(finding.related_categories)
+    ]
+
+
+def _collect_gate_citations(risks: list, contradictions: list) -> list:
+    citations = []
+    for finding in contradictions[:1]:
+        citations.extend(finding.citations[:2])
+    for risk in risks[:2]:
+        citations.extend(risk.citations[:1])
+    return _unique_citation_objects(citations)[:3]
+
+
+def _build_verify_point_from_contradiction(finding) -> str:
+    if finding.citations:
+        source_text = _format_citations(finding.citations[:2])
+        return f"Read {source_text} and decide which assumption controls underwriting: {finding.description}"
+    if finding.source_documents:
+        return f"Read {', '.join(finding.source_documents[:2])} and decide which assumption controls underwriting: {finding.description}"
+    return f"Personally verify the contradiction: {finding.description}"
+
+
+def _build_verify_point_from_risk(risk) -> str:
+    source_text = _format_citations(risk.citations[:2]) or ", ".join(risk.source_documents[:2])
+    return (
+        f"Read {source_text or risk.category} and confirm whether the current underwriting treatment is actually supported for {risk.category.lower()}."
+    )
+
+
+def _find_risk(synthesis: DealSynthesis, category: str):
+    return next((risk for risk in synthesis.key_risks if risk.category == category), None)
+
+
+def _find_contradiction_by_category(synthesis: DealSynthesis, categories: set[str]):
+    return next((finding for finding in synthesis.contradictions if categories.intersection(finding.related_categories)), None)
+
+
+def _unique_list(items: list[str]) -> list[str]:
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for item in items:
+        if item in seen:
+            continue
+        seen.add(item)
+        ordered.append(item)
+    return ordered
+
+
+def _unique_citation_objects(citations: list) -> list:
+    seen = set()
+    ordered = []
+    for citation in citations:
+        if citation in seen:
+            continue
+        seen.add(citation)
+        ordered.append(citation)
+    return ordered
+
+
 def _with_light_citation(text: str, risk) -> str:
     citation_text = _format_citations(risk.citations[:1])
     if not citation_text:
@@ -726,11 +969,17 @@ def _build_ic_overall_read(synthesis: DealSynthesis) -> str:
         return "The file set does not surface a concentrated issue, but the package should still be checked for completeness before it is treated as decision-ready."
 
     if synthesis.contradictions:
-        lead_tensions = "; ".join(finding.description for finding in synthesis.contradictions[:2])
-        return (
-            f"The package is substantive, but the documents do not line up cleanly. {lead_tensions} "
-            f"Until those tensions are reconciled, underwriting should stay conservative on basis, timing, and closing confidence."
+        lead_tensions = synthesis.contradictions[:2]
+        lines = [
+            "The package is substantive, but the documents do not line up cleanly.",
+            f"The highest tension is {lead_tensions[0].description}",
+        ]
+        if len(lead_tensions) > 1:
+            lines.append(f"The next tension is {lead_tensions[1].description}")
+        lines.append(
+            "Until those tensions are reconciled, underwriting should stay conservative on basis, timing, and closing confidence."
         )
+        return " ".join(lines)
 
     primary_risks, _ = _split_risk_tiers(synthesis.key_risks)
     lead_issues = "; ".join((risk.issue or risk.summary) for risk in primary_risks[:3])
@@ -776,25 +1025,12 @@ def _build_ic_biggest_unknowns(synthesis: DealSynthesis) -> list[str]:
 
 
 def _build_ic_verify_points(synthesis: DealSynthesis) -> list[str]:
-    primary_risks, _ = _split_risk_tiers(synthesis.key_risks)
-    verify_points = []
-    for risk in primary_risks[:4]:
-        if risk.source_documents:
-            verify_points.append(
-                f"Personally review {', '.join(risk.source_documents[:2])} to verify the current {risk.category.lower()} issue and whether the underwriting treatment is actually supported."
-            )
-    if not verify_points:
-        verify_points.append("Personally review the highest-priority documents in the recommended reading order.")
-    return verify_points[:4]
+    return _build_personal_verification_items(synthesis)
 
 
 def _build_decision_ready_assessment(synthesis: DealSynthesis) -> str:
-    grouped = _group_risks_by_gate(synthesis.key_risks)
-    if synthesis.contradictions or grouped["Closing"] or synthesis.missing_items or any(analysis.confidence == "low" for analysis in synthesis.document_analyses):
-        return "Not decision-ready. The package is useful, but closing and underwriting should stay conditional until the gating title, scope, cost, and support gaps are resolved."
-    if grouped["Underwriting confidence"] or grouped["Vertical start"]:
-        return "Not fully decision-ready. The package is substantive, but the risk stack is still too open on basis and execution timing to support a final recommendation."
-    return "Close to decision-ready, but still requires targeted verification of the highest-priority risks before final investment committee reliance."
+    status, reason = _evaluate_decision_readiness(synthesis)
+    return f"{status}. {reason}"
 
 
 def _group_risks_by_gate(key_risks: list) -> dict[str, list]:
