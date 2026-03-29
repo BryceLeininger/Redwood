@@ -241,7 +241,8 @@ def _build_executive_summary_markdown(
     if top_issues:
         for issue in top_issues:
             lines.append(
-                f"- [{issue.front_end_flag.upper()}] {issue.title}: {issue.why_it_matters}"
+                f"- [{issue.front_end_flag.upper()}] {issue.title}: {issue.why_it_matters} "
+                f"Normality: {issue.normality_classification}. Why now: {issue.why_now}."
             )
     else:
         lines.append("- No concentrated red or yellow flag was elevated from the current package.")
@@ -267,6 +268,8 @@ def _build_executive_summary_markdown(
                 "",
             ]
         )
+        lines.append(f"- Package Quality: {registry.package_quality or 'adequate'}")
+        lines.append(f"- Confidence In Initial Read: {registry.confidence_in_initial_read}")
         lines.extend(
             f"- {item.title} (`{item.relative_path}`): {item.reason}"
             for item in synthesis.recommended_reading_order
@@ -330,6 +333,14 @@ def _build_reading_order_markdown(synthesis: DealSynthesis) -> str:
             if recommendation.rationale_factors:
                 lines.append(f"   Why This Bucket: {', '.join(recommendation.rationale_factors)}")
             lines.append("")
+    lines.extend(
+        [
+            "## Package Read",
+            "",
+            f"- Package Quality: {synthesis.canonical_issue_registry.package_quality or 'adequate'}",
+            f"- Confidence In Initial Read: {synthesis.canonical_issue_registry.confidence_in_initial_read}",
+        ]
+    )
     return "\n".join(lines).rstrip() + "\n"
 
 
@@ -399,6 +410,8 @@ def _build_issue_analysis_markdown(synthesis: DealSynthesis) -> str:
         lines.append(f"- Decision Action: {issue.decision_action}")
         lines.append(f"- Front-End Flag: {issue.front_end_flag}")
         lines.append(f"- Information Status: {issue.information_status}")
+        lines.append(f"- Normality: {issue.normality_classification}")
+        lines.append(f"- Why Now: {issue.why_now}")
         if issue.citations:
             lines.append(f"- Source: {_format_citations(issue.citations)}")
         elif issue.source_documents:
@@ -407,6 +420,8 @@ def _build_issue_analysis_markdown(synthesis: DealSynthesis) -> str:
         lines.append("### Front-End Read")
         lines.append(f"- Flag Reason: {issue.front_end_flag_reason}")
         lines.append(f"- Information Read: {issue.information_status_reason}")
+        lines.append(f"- Routine vs Unusual Read: {issue.unusualness_rationale}")
+        lines.append(f"- Process Friction: {'Yes' if issue.process_friction_flag else 'No'}")
         if issue.blocking_reason:
             lines.append(f"- Blocking Read: {issue.blocking_reason}")
         lines.append("")
@@ -565,6 +580,12 @@ def _build_deal_synthesis_markdown(synthesis: DealSynthesis) -> str:
         for item in (registry.front_end_unresolved_points or ["No major unresolved point was isolated beyond the current issue set."])
     )
 
+    lines.extend(["", "## What Appears Elevated Or Unusual", ""])
+    lines.extend(
+        f"- {item}"
+        for item in (registry.front_end_elevated_points or ["No unusually elevated issue was isolated beyond routine front-end friction."])
+    )
+
     lines.extend(["", "## What Looks Routine", ""])
     lines.extend(
         f"- {item}"
@@ -577,6 +598,8 @@ def _build_deal_synthesis_markdown(synthesis: DealSynthesis) -> str:
     lines.append(f"- Deal Type: {registry.fragility_classification or 'n/a'}")
     lines.append(f"- Package Read: {registry.package_quality or 'credible'}")
     lines.append(f"- Why: {registry.package_quality_reason or 'No package-quality rationale was generated.'}")
+    lines.append(f"- Confidence In Initial Read: {registry.confidence_in_initial_read}")
+    lines.append(f"- Concern Pattern: {registry.concern_pattern or 'No concern pattern was generated.'}")
 
     lines.extend(["", "## Root-Cause Clusters", ""])
     lines.extend(_render_issue_clusters(synthesis))
@@ -584,6 +607,12 @@ def _build_deal_synthesis_markdown(synthesis: DealSynthesis) -> str:
     lines.extend(["", "## Real Critical Path", ""])
     lines.append(f"- {registry.critical_path_summary or 'No critical path summary was isolated.'}")
     lines.extend(f"- {item}" for item in _build_gating_issue_lines(synthesis))
+
+    lines.extend(["", "## What Most Deserves Attention Now", ""])
+    lines.extend(
+        f"- {item}"
+        for item in (registry.front_end_attention_now_points or ["No issue was isolated as an immediate attention item."])
+    )
 
     lines.extend(["", "## What Most Deserves Deeper Work", ""])
     lines.extend(
@@ -607,6 +636,7 @@ def _build_investment_committee_brief_markdown(synthesis: DealSynthesis) -> str:
         "",
         f"**Recommendation:** {synthesis.recommendation.posture}",
         f"**Package Read:** {registry.package_quality or 'credible'}",
+        f"**Confidence In Initial Read:** {registry.confidence_in_initial_read}",
         "",
         "## Overall Read",
         "",
@@ -668,6 +698,8 @@ def _build_issue_registry_debug_markdown(synthesis: DealSynthesis) -> str:
             f"- Deal Metadata: stage={registry.deal_metadata.stage or 'n/a'}, region={registry.deal_metadata.region or 'n/a'}, product={registry.deal_metadata.product or 'n/a'}",
             f"- Package Quality: {registry.package_quality or 'n/a'}",
             f"- Package Quality Reason: {registry.package_quality_reason or 'n/a'}",
+            f"- Confidence In Initial Read: {registry.confidence_in_initial_read}",
+            f"- Concern Pattern: {registry.concern_pattern or 'n/a'}",
             "",
         ]
     )
@@ -693,6 +725,10 @@ def _build_issue_registry_debug_markdown(synthesis: DealSynthesis) -> str:
         lines.append(f"- Front-End Flag Reason: {issue.front_end_flag_reason}")
         lines.append(f"- Information Status: {issue.information_status}")
         lines.append(f"- Information Status Reason: {issue.information_status_reason}")
+        lines.append(f"- Normality Classification: {issue.normality_classification}")
+        lines.append(f"- Process Friction Flag: {issue.process_friction_flag}")
+        lines.append(f"- Unusualness Rationale: {issue.unusualness_rationale}")
+        lines.append(f"- Why Now: {issue.why_now}")
         lines.append(f"- Missing Confirmation: {issue.missing_confirmation or 'n/a'}")
         lines.append(f"- Dependency Type: {issue.dependency_type or 'n/a'}")
         lines.append(f"- Critical Path: {issue.critical_path_flag}")
@@ -844,6 +880,14 @@ def _build_issue_registry_debug_markdown(synthesis: DealSynthesis) -> str:
         + (", ".join(registry.front_end_known_points) if registry.front_end_known_points else "None")
     )
     lines.append(
+        "- Elevated / Unusual Points: "
+        + (", ".join(registry.front_end_elevated_points) if registry.front_end_elevated_points else "None")
+    )
+    lines.append(
+        "- Attention Now Points: "
+        + (", ".join(registry.front_end_attention_now_points) if registry.front_end_attention_now_points else "None")
+    )
+    lines.append(
         "- Unresolved Points: "
         + (", ".join(registry.front_end_unresolved_points) if registry.front_end_unresolved_points else "None")
     )
@@ -854,6 +898,10 @@ def _build_issue_registry_debug_markdown(synthesis: DealSynthesis) -> str:
     lines.append(
         "- Deeper Work: "
         + (", ".join(registry.front_end_deeper_work) if registry.front_end_deeper_work else "None")
+    )
+    lines.append(
+        "- Package Quality Inputs: "
+        + (", ".join(registry.package_quality_inputs) if registry.package_quality_inputs else "None")
     )
     lines.append("")
 
@@ -927,7 +975,20 @@ def _build_issue_registry_debug_markdown(synthesis: DealSynthesis) -> str:
 def _build_further_diligence_roadmap_markdown(synthesis: DealSynthesis) -> str:
     roadmap = synthesis.further_diligence_roadmap
     lines = ["# Further Diligence Roadmap", ""]
-    lines.extend(["## Top Real Flags To Investigate", ""])
+    lines.extend(["## Investigate Immediately", ""])
+    lines.extend(f"- {item}" for item in roadmap.investigate_immediately or ["No issue was elevated to immediate investigation."])
+    lines.extend(["", "## Request / Verify Soon", ""])
+    lines.extend(f"- {item}" for item in roadmap.request_or_verify_soon or ["No near-term request or verification item was isolated."])
+    lines.extend(["", "## Read Personally", ""])
+    lines.extend(f"- {item}" for item in roadmap.read_personally or ["No must-read document was isolated."])
+    lines.extend(["", "## Monitor Later", ""])
+    lines.extend(f"- {item}" for item in roadmap.monitor_later or ["No monitor-later item was isolated."])
+    lines.extend(["", "## Likely Routine Unless Other Evidence Changes View", ""])
+    lines.extend(
+        f"- {item}"
+        for item in roadmap.likely_routine_unless_changed or ["No issue was explicitly classified as likely routine."]
+    )
+    lines.extend(["", "## Top Real Flags To Investigate", ""])
     lines.extend(f"- {item}" for item in roadmap.top_real_flags or ["No concentrated real flag was isolated."])
     lines.extend(["", "## Top Missing Items To Request", ""])
     lines.extend(f"- {item}" for item in roadmap.top_missing_items_to_request or ["No material missing item was isolated."])
@@ -1027,11 +1088,14 @@ def _selected_issues(
 def _render_canonical_issue_risk_block(issue: CanonicalIssue, *, index: int) -> list[str]:
     lines = [f"### {index}. {issue.title}"]
     lines.append(f"- Flag Grade: {issue.front_end_flag}")
+    lines.append(f"- Normality: {issue.normality_classification}")
+    lines.append(f"- Why Now: {issue.why_now}")
     if issue.core_facts:
         lines.append(f"- Core Fact: {issue.core_facts[0]}")
     lines.append(f"- Why It Matters: {issue.why_it_matters}")
     lines.append(f"- Likely Implication: {issue.likely_implication}")
     lines.append(f"- Why This Is Elevated: {issue.front_end_flag_reason}")
+    lines.append(f"- Routine Vs Unusual Read: {issue.unusualness_rationale}")
     lines.append(f"- Unresolved Question: {issue.open_questions[0] if issue.open_questions else 'No specific unresolved question was isolated.'}")
     lines.append(f"- Missing Document / Confirmation: {issue.missing_confirmation or 'No separate missing confirmation was isolated.'}")
     if issue.research_agenda:
@@ -1596,7 +1660,7 @@ def _evaluate_decision_readiness(synthesis: DealSynthesis) -> tuple[str, str]:
         or any(
         analysis.confidence == "low" for analysis in synthesis.document_analyses
         )
-        or registry.package_quality in {"thin", "stale", "selectively presented"}
+        or registry.package_quality in {"thin", "stale", "mixed", "selectively presented", "unclear"}
     ):
         return (
             "Not ready",

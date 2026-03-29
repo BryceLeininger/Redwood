@@ -458,6 +458,103 @@ class AnalysisTests(unittest.TestCase):
             or synthesis.further_diligence_roadmap.top_contradictions_to_resolve
         )
 
+    def test_omission_only_coordination_issue_stays_routine(self) -> None:
+        registry = build_canonical_issue_registry(
+            key_risks=[],
+            contradictions=[],
+            omission_assessments=[
+                OmissionAssessment(
+                    item="Agency correspondence log",
+                    category="Entitlement Status",
+                    status="unclear whether present",
+                    rationale="No clean correspondence log is in the package.",
+                )
+            ],
+            document_analyses=[],
+        )
+        apply_front_end_assessment(
+            registry=registry,
+            document_analyses=[],
+            omission_assessments=registry.omission_assessments,
+            contradictions=[],
+        )
+
+        issue = next(issue for issue in registry.issues if issue.issue_id == "entitlement-conditions")
+        self.assertEqual(issue.normality_classification, "routine")
+        self.assertTrue(issue.process_friction_flag)
+        self.assertEqual(issue.why_now, "likely routine unless contradicted")
+
+    def test_contradiction_driven_issue_is_treated_as_unusual(self) -> None:
+        synthesis = run_analysis(
+            deal_name="Contradiction Timing",
+            documents=[
+                _document("stormwater_plan.txt", "Diana Avenue frontage is already improved."),
+                _document(
+                    "conditions_of_approval.txt",
+                    "At improvement plan stage, the project shall confirm if the Diana Avenue frontage was dedicated to the City.",
+                ),
+            ],
+            llm_provider=HeuristicProvider(),
+            logger=logging.getLogger("test-contradiction-unusual"),
+        )
+
+        issue = next(issue for issue in synthesis.canonical_issue_registry.issues if issue.issue_id == "offsite-frontage")
+        self.assertIn(issue.normality_classification, {"elevated", "unusual"})
+        self.assertEqual(issue.front_end_flag, "conflict / contradiction concern")
+        self.assertEqual(issue.why_now, "investigate now")
+
+    def test_package_quality_classification_is_deterministic(self) -> None:
+        thin_synthesis = run_analysis(
+            deal_name="Thin Package",
+            documents=[
+                _document("memo_summary.txt", "Executive memo summarizing the package."),
+            ],
+            llm_provider=HeuristicProvider(),
+            logger=logging.getLogger("test-package-thin"),
+        )
+        self.assertIn(thin_synthesis.canonical_issue_registry.package_quality, {"thin", "mixed"})
+        self.assertIn(thin_synthesis.canonical_issue_registry.confidence_in_initial_read, {"low", "medium"})
+
+        selective_synthesis = run_analysis(
+            deal_name="Selective Package",
+            documents=[
+                _document("memo_summary.txt", "Executive memo summarizing the package."),
+                _document("stormwater_plan.txt", "Diana Avenue frontage is already improved."),
+                _document(
+                    "conditions_of_approval.txt",
+                    "At improvement plan stage, the project shall confirm if the Diana Avenue frontage was dedicated to the City.",
+                ),
+            ],
+            llm_provider=HeuristicProvider(),
+            logger=logging.getLogger("test-package-selective"),
+        )
+        self.assertEqual(selective_synthesis.canonical_issue_registry.package_quality, "selectively presented")
+        self.assertEqual(selective_synthesis.canonical_issue_registry.confidence_in_initial_read, "low")
+
+    def test_roadmap_and_reading_order_use_unusualness_and_timing(self) -> None:
+        synthesis = run_analysis(
+            deal_name="Priority Deal",
+            documents=[
+                _document(
+                    "title_report.txt",
+                    "Preliminary title report lists an access easement exception affecting the current site layout.",
+                ),
+                _document(
+                    "conditions_of_approval.txt",
+                    "At improvement plan stage, the project shall confirm if the Diana Avenue frontage was dedicated to the City.",
+                ),
+                _document("memo_summary.txt", "Executive memo summarizing routine next steps."),
+            ],
+            llm_provider=HeuristicProvider(),
+            logger=logging.getLogger("test-roadmap-priority"),
+        )
+
+        self.assertTrue(synthesis.further_diligence_roadmap.investigate_immediately)
+        self.assertTrue(synthesis.further_diligence_roadmap.read_personally)
+        self.assertTrue(synthesis.further_diligence_roadmap.likely_routine_unless_changed)
+        self.assertEqual(synthesis.recommended_reading_order[0].title, "Title Report")
+        self.assertEqual(synthesis.recommended_reading_order[0].bucket, "must read personally")
+
     def test_evaluator_output_is_stable_and_flags_routine_issue(self) -> None:
         registry = build_canonical_issue_registry(
             key_risks=[

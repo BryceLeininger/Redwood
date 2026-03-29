@@ -480,6 +480,10 @@ class CanonicalIssue:
     front_end_flag_reason: str = ""
     information_status: str = "present and adequate"
     information_status_reason: str = ""
+    normality_classification: str = "unknown"
+    process_friction_flag: bool = False
+    unusualness_rationale: str = ""
+    why_now: str = "unclear"
     missing_confirmation: str = ""
     research_agenda: list[ResearchAgendaItem] = field(default_factory=list)
     output_bucket: str = "appendix"
@@ -544,9 +548,14 @@ class CanonicalIssueRegistry:
     confidence_unlocks: list[str] = field(default_factory=list)
     package_quality: str = ""
     package_quality_reason: str = ""
+    confidence_in_initial_read: str = "medium"
+    package_quality_inputs: list[str] = field(default_factory=list)
+    concern_pattern: str = ""
     front_end_known_points: list[str] = field(default_factory=list)
     front_end_unresolved_points: list[str] = field(default_factory=list)
     front_end_routine_points: list[str] = field(default_factory=list)
+    front_end_elevated_points: list[str] = field(default_factory=list)
+    front_end_attention_now_points: list[str] = field(default_factory=list)
     front_end_deeper_work: list[str] = field(default_factory=list)
 
 
@@ -608,6 +617,11 @@ class FurtherDiligenceRoadmap:
     top_public_consultant_internal_research: list[str] = field(default_factory=list)
     top_documents_to_read_first: list[str] = field(default_factory=list)
     follow_up_order: list[str] = field(default_factory=list)
+    investigate_immediately: list[str] = field(default_factory=list)
+    request_or_verify_soon: list[str] = field(default_factory=list)
+    read_personally: list[str] = field(default_factory=list)
+    monitor_later: list[str] = field(default_factory=list)
+    likely_routine_unless_changed: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)

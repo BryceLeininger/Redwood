@@ -19,6 +19,7 @@ from land_due_diligence_agent.utils.text import unique_preserve_order
 
 _CURRENT_YEAR = datetime.now().year
 _REAL_FLAG_TYPES = {"red flag", "yellow flag"}
+_ELEVATED_NORMALITY = {"elevated", "unusual"}
 _CRITICAL_CATEGORIES = {
     "Title / Access Concerns",
     "Environmental Risks",
@@ -26,6 +27,12 @@ _CRITICAL_CATEGORIES = {
     "Utilities / Infrastructure Issues",
     "Offsite Obligations",
     "Entitlement Status",
+}
+_ROUTINE_FRICTION_CATEGORIES = {
+    "Entitlement Status",
+    "Schedule Risks",
+    "Fee / Exaction Burden",
+    "Budget / Cost Reliability",
 }
 _TIME_SENSITIVE_CATEGORIES = {
     "Entitlement Status",
@@ -105,6 +112,14 @@ _READ_BUCKET_ORDER = {
     "should skim": 1,
     "safe to rely on agent": 2,
 }
+_WHY_NOW_ORDER = {
+    "investigate now": 0,
+    "investigate after initial read": 1,
+    "investigate before underwriting": 2,
+    "monitor unless other signals worsen": 3,
+    "likely routine unless contradicted": 4,
+    "unclear": 5,
+}
 
 
 def apply_front_end_assessment(
@@ -172,14 +187,25 @@ def build_further_diligence_roadmap(
 ) -> FurtherDiligenceRoadmap:
     """Build a practical follow-up roadmap for front-end diligence."""
 
+    prioritized_issues = sorted(
+        registry.issues,
+        key=lambda issue: (
+            _WHY_NOW_ORDER.get(issue.why_now, 5),
+            {"unusual": 3, "elevated": 2, "mildly elevated": 1, "routine": 0, "unknown": 0}.get(issue.normality_classification, 0) * -1,
+            -int(issue.blocking_flag),
+            -len(issue.downstream_dependencies),
+            -issue.priority_score.total,
+            issue.title,
+        ),
+    )
     important_issues = [
         issue
-        for issue in registry.issues
+        for issue in prioritized_issues
         if issue.front_end_flag in {"red flag", "yellow flag", "conflict / contradiction concern"}
     ]
     gap_issues = [
         issue
-        for issue in registry.issues
+        for issue in prioritized_issues
         if issue.front_end_flag in {"document gap", "stale-information concern"}
     ]
     real_flags = [
@@ -216,11 +242,46 @@ def build_further_diligence_roadmap(
         if recommendation.bucket == "must read personally"
     ][:5]
     follow_up_order = _build_follow_up_order(
+        issues=prioritized_issues,
         reading_order=reading_order,
         omission_assessments=omission_assessments,
         contradictions=contradictions,
         research_lines=research_lines,
     )
+    investigate_immediately = [
+        _issue_roadmap_line(issue)
+        for issue in important_issues
+        if issue.why_now == "investigate now"
+    ][:5]
+    request_or_verify_soon = unique_preserve_order(
+        [
+            *(
+                _issue_roadmap_line(issue)
+                for issue in prioritized_issues
+                if issue.why_now in {"investigate after initial read", "investigate before underwriting"}
+            ),
+            *(
+                _omission_roadmap_line(assessment)
+                for assessment in omission_assessments
+                if assessment.front_end_status in {"missing and important", "stale and potentially unreliable"}
+            ),
+        ]
+    )[:6]
+    read_personally = [
+        f"{recommendation.title} ({recommendation.relative_path}): {recommendation.reason}"
+        for recommendation in reading_order
+        if recommendation.bucket == "must read personally"
+    ][:5]
+    monitor_later = [
+        _issue_roadmap_line(issue)
+        for issue in prioritized_issues
+        if issue.why_now == "monitor unless other signals worsen"
+    ][:5]
+    likely_routine = [
+        f"{issue.title}: {issue.unusualness_rationale}"
+        for issue in prioritized_issues
+        if issue.why_now == "likely routine unless contradicted"
+    ][:5]
 
     return FurtherDiligenceRoadmap(
         top_real_flags=real_flags,
@@ -230,6 +291,11 @@ def build_further_diligence_roadmap(
         top_public_consultant_internal_research=research_lines,
         top_documents_to_read_first=read_first,
         follow_up_order=follow_up_order,
+        investigate_immediately=investigate_immediately,
+        request_or_verify_soon=request_or_verify_soon,
+        read_personally=read_personally,
+        monitor_later=monitor_later,
+        likely_routine_unless_changed=likely_routine,
     )
 
 
@@ -286,9 +352,16 @@ def _annotate_issues(
     for issue in registry.issues:
         source_analyses = _source_analyses_for_issue(issue, document_analyses)
         issue.information_status, issue.information_status_reason = _issue_information_status(issue, source_analyses)
+        issue.process_friction_flag = _process_friction_flag(issue)
+        issue.normality_classification, issue.unusualness_rationale = _issue_normality(issue)
         issue.front_end_flag, issue.front_end_flag_reason = _issue_front_end_flag(issue)
+        issue.why_now = _why_now(issue)
         issue.missing_confirmation = issue.what_would_resolve_it or _default_missing_confirmation(issue)
-        issue.research_agenda = [_research_agenda_item(issue)] if issue.front_end_flag != "routine item" else []
+        issue.research_agenda = (
+            [_research_agenda_item(issue)]
+            if issue.front_end_flag != "routine item" or issue.why_now != "likely routine unless contradicted"
+            else []
+        )
 
         if issue.front_end_flag == "routine item" and not issue.blocking_flag:
             issue.top_line_filter_reasons = unique_preserve_order(
@@ -300,7 +373,10 @@ def _annotate_issues(
                 *issue.calibration_notes,
                 f"front-end flag={issue.front_end_flag}",
                 f"information status={issue.information_status}",
+                f"normality={issue.normality_classification}",
+                f"why now={issue.why_now}",
                 issue.front_end_flag_reason,
+                issue.unusualness_rationale,
             ]
         )
 
@@ -313,7 +389,7 @@ def _annotate_document_priorities(
     for analysis in document_analyses:
         factors: list[str] = []
         score = analysis.reading_priority
-        support_count = _supported_top_issue_count(analysis, registry)
+        elevated_support, routine_support, package_uncertainty_support = _supported_issue_mix(analysis, registry)
         legal_significance = any(category in _LEGAL_CATEGORIES for category in analysis.focus_areas)
         cost_schedule_significance = any(category in _TIME_SENSITIVE_CATEGORIES for category in analysis.focus_areas)
 
@@ -328,9 +404,15 @@ def _annotate_document_priorities(
         if analysis.contradiction_count:
             score += 12 * analysis.contradiction_count
             factors.append(f"supports {analysis.contradiction_count} contradiction signal(s)")
-        if support_count:
-            score += 6 * support_count
-            factors.append("other conclusions depend on it")
+        if elevated_support:
+            score += 8 * elevated_support
+            factors.append("supports elevated or unusual issue(s)")
+        if package_uncertainty_support:
+            score += 5 * package_uncertainty_support
+            factors.append("matters to package-quality uncertainty")
+        if routine_support and not elevated_support and not package_uncertainty_support:
+            score -= 4
+            factors.append("mostly tied to routine process items")
         if legal_significance:
             score += 8
             factors.append("legal significance")
@@ -352,7 +434,9 @@ def _annotate_document_priorities(
         analysis.reading_bucket = _reading_bucket(
             score=score,
             analysis=analysis,
-            support_count=support_count,
+            elevated_support=elevated_support,
+            routine_support=routine_support,
+            package_uncertainty_support=package_uncertainty_support,
             legal_significance=legal_significance,
         )
         analysis.reading_reason = _reading_reason_from_factors(analysis)
@@ -365,7 +449,11 @@ def _annotate_package_assessment(
     omission_assessments: list[OmissionAssessment],
     contradictions: list[ContradictionFinding],
 ) -> None:
-    real_flags = [issue for issue in registry.issues if issue.front_end_flag in _REAL_FLAG_TYPES]
+    real_flags = [
+        issue
+        for issue in registry.issues
+        if issue.front_end_flag in _REAL_FLAG_TYPES and issue.normality_classification in {"mildly elevated", "elevated", "unusual"}
+    ]
     blind_spots = [
         issue
         for issue in registry.issues
@@ -379,16 +467,49 @@ def _annotate_package_assessment(
         for analysis in document_analyses
         if analysis.document_role == "primary" and analysis.confidence == "low"
     ]
+    primary_docs = [analysis for analysis in document_analyses if analysis.document_role == "primary"]
+    summary_docs = [analysis for analysis in document_analyses if analysis.document_role == "summary"]
+    direct_elevated = [
+        issue
+        for issue in registry.issues
+        if issue.normality_classification in _ELEVATED_NORMALITY and issue.information_status == "present and adequate"
+    ]
 
-    registry.package_quality, registry.package_quality_reason = _package_quality(
+    (
+        registry.package_quality,
+        registry.package_quality_reason,
+        registry.confidence_in_initial_read,
+        registry.package_quality_inputs,
+    ) = _package_quality(
+        document_count=len(document_analyses),
+        primary_docs=primary_docs,
+        summary_docs=summary_docs,
         contradictions=contradictions,
         stale_docs=stale_docs,
         missing_important=missing_important,
         low_confidence_primary=low_confidence_primary,
+        direct_elevated=direct_elevated,
+    )
+    registry.concern_pattern = _concern_pattern(
+        real_flags=real_flags,
+        blind_spots=blind_spots,
+        routine_items=routine_items,
     )
     registry.front_end_known_points = _front_end_known_points(real_flags, registry)
     registry.front_end_unresolved_points = _front_end_unresolved_points(blind_spots, omission_assessments, stale_docs, contradictions)
     registry.front_end_routine_points = _front_end_routine_points(routine_items)
+    registry.front_end_elevated_points = _front_end_elevated_points(
+        [
+            *real_flags,
+            *[
+                issue
+                for issue in blind_spots
+                if issue.front_end_flag == "conflict / contradiction concern"
+                or issue.normality_classification in {"mildly elevated", "elevated", "unusual"}
+            ],
+        ]
+    )
+    registry.front_end_attention_now_points = _front_end_attention_now_points(registry.issues)
     registry.front_end_deeper_work = _front_end_deeper_work(real_flags, blind_spots)
 
 
@@ -444,6 +565,76 @@ def _issue_information_status(issue: CanonicalIssue, source_analyses: list[Docum
     return "present and adequate", "This issue is supported by current direct evidence rather than by a missing-document inference."
 
 
+def _process_friction_flag(issue: CanonicalIssue) -> bool:
+    if issue.normal_friction_flag:
+        return True
+    if issue.evidence_basis == "routine_missing_support":
+        return True
+    if issue.information_status == "missing but normally expected" and not issue.blocking_flag:
+        return True
+    if (
+        issue.evidence_basis == "omission_only"
+        and issue.category in _ROUTINE_FRICTION_CATEGORIES
+        and not issue.blocking_flag
+        and issue.status != "conflicted"
+    ):
+        return True
+    if (
+        issue.blocker_classification in {"confirmatory issue", "monitoring issue"}
+        and issue.category in _ROUTINE_FRICTION_CATEGORIES.union({"Utilities / Infrastructure Issues"})
+        and len(issue.downstream_dependencies) <= 1
+        and issue.false_positive_risk != "low"
+    ):
+        return True
+    if (
+        issue.precedent_summary.confidence_adjustment == "down"
+        and issue.evidence_basis in {"omission_only", "routine_missing_support", "weak_inference"}
+    ):
+        return True
+    return False
+
+
+def _issue_normality(issue: CanonicalIssue) -> tuple[str, str]:
+    if issue.evidence_basis == "weak_inference" and not issue.citations and not issue.source_documents:
+        return "unknown", "The current file set does not contain enough direct support to tell whether this issue is routine or unusual."
+
+    reach = len(issue.downstream_dependencies)
+    score = 0
+    score += 5 if issue.information_status == "conflicting across documents" else 0
+    score += 3 if issue.blocking_flag else 0
+    score += 2 if issue.critical_path_flag else 0
+    score += 2 if issue.evidence_basis == "contradictory_evidence_present" else 0
+    score += 2 if issue.evidence_basis == "direct_unresolved_risk" else 1 if issue.evidence_basis == "direct_confirmed_risk" else 0
+    score += 2 if issue.schedule_impact_classification in {"immediate blocker", "pre-close blocker"} else 1 if issue.schedule_impact_classification == "pre-underwriting blocker" else 0
+    score += 2 if reach >= 2 else 1 if reach == 1 else 0
+    score += 1 if issue.materiality == "high" else 0
+    score += 1 if issue.issue_strength == "strong" else 0
+    score += 1 if issue.decision_relevant else 0
+    score += 1 if issue.precedent_summary.confidence_adjustment == "up" and issue.precedent_summary.sample_size >= 2 else 0
+    score -= 4 if issue.process_friction_flag else 0
+    score -= 3 if issue.evidence_basis == "routine_missing_support" else 0
+    score -= 2 if issue.evidence_basis == "omission_only" else 0
+    score -= 2 if issue.false_positive_risk == "high" else 1 if issue.false_positive_risk == "medium" else 0
+    score -= 1 if issue.information_status == "missing but normally expected" else 0
+    score -= 1 if issue.precedent_summary.confidence_adjustment == "down" and issue.precedent_summary.sample_size >= 2 else 0
+
+    if issue.information_status == "conflicting across documents" and issue.blocking_flag:
+        return "unusual", "This looks unusual because documents conflict on a core path assumption rather than on a routine clean-up item."
+    if issue.process_friction_flag and score <= 0:
+        return "routine", "This reads like normal process friction because it is a common support or coordination gap without unusual deal-specific reach."
+    if issue.information_status == "missing but normally expected" and not issue.blocking_flag:
+        return "routine", "This reads like common seller-package incompleteness rather than unusual property or development risk."
+    if issue.information_status == "missing and important" and not issue.blocking_flag and issue.evidence_basis in {"omission_only", "routine_missing_support"}:
+        return "mildly elevated", "The missing support matters, but it still looks more like a meaningful diligence gap than an unusual property-level problem."
+    if score >= 8:
+        return "unusual", "Direct evidence leaves a core path issue or contradiction unresolved in a way that is not normal front-end friction."
+    if score >= 5:
+        return "elevated", "This issue is more than routine friction because it carries direct evidence, dependency reach, or critical-path significance."
+    if score >= 2:
+        return "mildly elevated", "This deserves attention, but it still resembles a fairly common diligence issue rather than something clearly unusual."
+    return "routine", "The current signal still looks closer to standard entitlement, engineering, utility, or package-assembly friction than to unusual risk."
+
+
 def _issue_front_end_flag(issue: CanonicalIssue) -> tuple[str, str]:
     if issue.information_status == "conflicting across documents":
         return (
@@ -460,39 +651,54 @@ def _issue_front_end_flag(issue: CanonicalIssue) -> tuple[str, str]:
             "document gap",
             "This reads as a support gap or missing confirmation, not as a confirmed property-level problem.",
         )
-    if issue.normal_friction_flag or issue.false_positive_risk == "high" or not issue.decision_relevant:
+    if issue.normality_classification == "routine" or issue.process_friction_flag or (issue.false_positive_risk == "high" and not issue.blocking_flag):
         return (
             "routine item",
             "The current signal looks closer to routine diligence friction than to a concentrated front-end flag.",
         )
 
-    seriousness = 0
-    seriousness += 3 if issue.blocking_flag else 0
-    seriousness += 2 if issue.critical_path_flag else 0
-    seriousness += 2 if issue.materiality == "high" else 1 if issue.materiality == "medium" else 0
-    seriousness += 1 if issue.decision_relevant else 0
-    seriousness += 1 if issue.issue_strength == "strong" else 0
-    seriousness += 1 if issue.false_positive_risk == "low" else 0
-    seriousness += 1 if issue.priority_score.total >= 95 else 0
-    seriousness += 1 if issue.schedule_impact_classification in {
-        "immediate blocker",
-        "pre-close blocker",
-        "pre-underwriting blocker",
-    } else 0
-    if seriousness >= 8:
+    if issue.normality_classification == "unusual":
         return (
             "red flag",
-            "Direct evidence shows this issue is both real and close enough to the critical path that it should stand out in screening.",
+            "This should stand out because it looks unusual for a normal front-end package and still affects a core path assumption.",
         )
-    if seriousness >= 5:
+    if issue.normality_classification == "elevated":
+        if issue.blocking_flag or issue.critical_path_flag or issue.priority_score.total >= 95:
+            return (
+                "red flag",
+                "This is elevated enough, and close enough to the critical path, that it deserves immediate front-end attention.",
+            )
         return (
             "yellow flag",
-            "The issue appears real and decision-relevant, but it does not yet read like a hard stop.",
+            "The issue appears elevated and decision-relevant, but it does not yet read like a front-end stop sign.",
+        )
+    if issue.normality_classification == "mildly elevated":
+        return (
+            "yellow flag",
+            "This issue is worth attention, but it still resembles a fairly common diligence problem rather than something clearly unusual.",
         )
     return (
         "routine item",
         "The current support does not justify elevating this lane above routine process friction.",
     )
+
+
+def _why_now(issue: CanonicalIssue) -> str:
+    if issue.normality_classification == "routine":
+        return "likely routine unless contradicted"
+    if issue.information_status == "conflicting across documents":
+        return "investigate now"
+    if issue.blocking_flag and issue.schedule_impact_classification in {"immediate blocker", "pre-close blocker"}:
+        return "investigate now"
+    if issue.normality_classification == "unusual":
+        return "investigate now"
+    if issue.schedule_impact_classification == "pre-underwriting blocker" or issue.decision_action in {"condition closing", "reprice"}:
+        return "investigate before underwriting"
+    if issue.normality_classification in {"elevated", "mildly elevated"} or issue.information_status in {"missing and important", "stale and potentially unreliable"}:
+        return "investigate after initial read"
+    if issue.blocker_classification in {"monitoring issue", "confirmatory issue"}:
+        return "monitor unless other signals worsen"
+    return "unclear"
 
 
 def _research_agenda_item(issue: CanonicalIssue) -> ResearchAgendaItem:
@@ -507,17 +713,22 @@ def _research_agenda_item(issue: CanonicalIssue) -> ResearchAgendaItem:
     )
 
 
-def _supported_top_issue_count(analysis: DocumentAnalysis, registry: CanonicalIssueRegistry) -> int:
+def _supported_issue_mix(analysis: DocumentAnalysis, registry: CanonicalIssueRegistry) -> tuple[int, int, int]:
     aliases = _analysis_aliases(analysis)
-    count = 0
+    elevated = 0
+    routine = 0
+    package_uncertainty = 0
     for issue in registry.issues:
-        if issue.front_end_flag not in {"red flag", "yellow flag", "conflict / contradiction concern"}:
-            continue
         issue_aliases = {name.lower() for name in issue.source_documents}
         issue_aliases.update(citation.document_name.lower() for citation in issue.citations)
         if aliases.intersection(issue_aliases) or issue.category in analysis.focus_areas:
-            count += 1
-    return count
+            if issue.front_end_flag in {"document gap", "stale-information concern", "conflict / contradiction concern"}:
+                package_uncertainty += 1
+            elif issue.normality_classification in {"mildly elevated", "elevated", "unusual"}:
+                elevated += 1
+            else:
+                routine += 1
+    return elevated, routine, package_uncertainty
 
 
 def _document_contradiction_count(analysis: DocumentAnalysis, contradictions: list[ContradictionFinding]) -> int:
@@ -535,18 +746,28 @@ def _reading_bucket(
     *,
     score: int,
     analysis: DocumentAnalysis,
-    support_count: int,
+    elevated_support: int,
+    routine_support: int,
+    package_uncertainty_support: int,
     legal_significance: bool,
 ) -> str:
     if (
         analysis.contradiction_count
-        or (analysis.document_role == "primary" and legal_significance and support_count)
+        or (analysis.document_role == "primary" and legal_significance and (elevated_support or package_uncertainty_support))
         or score >= 105
         or (analysis.confidence == "low" and analysis.document_role == "primary")
+        or elevated_support >= 2
     ):
         return "must read personally"
-    if score >= 82 or support_count or analysis.staleness_status == "stale and potentially unreliable":
+    if (
+        score >= 82
+        or elevated_support
+        or package_uncertainty_support
+        or analysis.staleness_status == "stale and potentially unreliable"
+    ):
         return "should skim"
+    if routine_support:
+        return "safe to rely on agent"
     return "safe to rely on agent"
 
 
@@ -560,29 +781,72 @@ def _reading_reason_from_factors(analysis: DocumentAnalysis) -> str:
 
 def _package_quality(
     *,
+    document_count: int,
+    primary_docs: list[DocumentAnalysis],
+    summary_docs: list[DocumentAnalysis],
     contradictions: list[ContradictionFinding],
     stale_docs: list[DocumentAnalysis],
     missing_important: list[OmissionAssessment],
     low_confidence_primary: list[DocumentAnalysis],
-) -> tuple[str, str]:
-    if contradictions and (missing_important or low_confidence_primary):
+    direct_elevated: list[CanonicalIssue],
+) -> tuple[str, str, str, list[str]]:
+    inputs: list[str] = [
+        f"documents={document_count}",
+        f"primary_docs={len(primary_docs)}",
+        f"summary_docs={len(summary_docs)}",
+        f"contradictions={len(contradictions)}",
+        f"stale_docs={len(stale_docs)}",
+        f"missing_important={len(missing_important)}",
+        f"low_confidence_primary={len(low_confidence_primary)}",
+        f"direct_elevated={len(direct_elevated)}",
+    ]
+    if document_count == 0:
+        return (
+            "unclear",
+            "No document set was available, so package quality cannot be assessed.",
+            "low",
+            inputs,
+        )
+    if contradictions and (missing_important or low_confidence_primary or len(primary_docs) <= len(summary_docs)):
         return (
             "selectively presented",
             "The package has material conflicts and does not include enough current controlling support to cleanly resolve them.",
+            "low",
+            inputs,
         )
-    if len(stale_docs) >= 2:
+    if len(stale_docs) >= 2 or (stale_docs and len(stale_docs) >= max(1, len(primary_docs) // 2 or 1)):
         return (
             "stale",
             "Too much of the primary support appears dated for a confident current read.",
+            "low" if len(stale_docs) >= 2 else "medium",
+            inputs,
         )
-    if len(missing_important) >= 2 or len(low_confidence_primary) >= 2:
+    if len(missing_important) >= 2 or len(low_confidence_primary) >= 2 or len(primary_docs) == 0:
         return (
             "thin",
             "Important source documents are missing, weak, or unreadable, so the package still leaves major blind spots.",
+            "low",
+            inputs,
+        )
+    if contradictions or stale_docs or missing_important:
+        return (
+            "mixed",
+            "The package supports a meaningful initial read, but the support quality is uneven across the issues that matter most.",
+            "medium",
+            inputs,
+        )
+    if len(primary_docs) >= 2 and len(summary_docs) <= len(primary_docs) and direct_elevated:
+        return (
+            "strong",
+            "The package contains current primary support in the lanes driving the initial read, so the first-pass judgment is reasonably grounded.",
+            "high",
+            inputs,
         )
     return (
-        "credible",
-        "The package contains enough current direct support to form a meaningful first-pass read, even if follow-up work remains.",
+        "adequate",
+        "The package is good enough for a first-pass read, but it still depends on follow-up and selective manual review.",
+        "medium",
+        inputs,
     )
 
 
@@ -621,9 +885,24 @@ def _front_end_unresolved_points(
 
 def _front_end_routine_points(routine_items: list[CanonicalIssue]) -> list[str]:
     return unique_preserve_order(
-        f"{issue.title}: {issue.front_end_flag_reason}"
+        f"{issue.title}: {issue.unusualness_rationale}"
         for issue in routine_items[:3]
     )
+
+
+def _front_end_elevated_points(real_flags: list[CanonicalIssue]) -> list[str]:
+    return unique_preserve_order(
+        f"{issue.title}: {issue.unusualness_rationale}"
+        for issue in real_flags[:4]
+    )
+
+
+def _front_end_attention_now_points(issues: list[CanonicalIssue]) -> list[str]:
+    return unique_preserve_order(
+        f"{issue.title}: {issue.why_now}"
+        for issue in issues
+        if issue.why_now == "investigate now"
+    )[:4]
 
 
 def _front_end_deeper_work(real_flags: list[CanonicalIssue], blind_spots: list[CanonicalIssue]) -> list[str]:
@@ -640,8 +919,8 @@ def _front_end_deeper_work(real_flags: list[CanonicalIssue], blind_spots: list[C
 def _issue_roadmap_line(issue: CanonicalIssue) -> str:
     blocked = issue.downstream_dependencies[0].title if issue.downstream_dependencies else "downstream diligence confidence"
     return (
-        f"{issue.title}: {issue.front_end_flag}. "
-        f"Why it matters: {issue.why_it_matters} "
+        f"{issue.title}: {issue.normality_classification}, {issue.front_end_flag}. "
+        f"Why now: {issue.why_now}. "
         f"What it blocks: {blocked.lower()}."
     )
 
@@ -655,12 +934,18 @@ def _omission_roadmap_line(assessment: OmissionAssessment) -> str:
 
 def _build_follow_up_order(
     *,
+    issues: list[CanonicalIssue],
     reading_order: list[ReadingRecommendation],
     omission_assessments: list[OmissionAssessment],
     contradictions: list[ContradictionFinding],
     research_lines: list[str],
 ) -> list[str]:
     steps: list[str] = []
+    for issue in issues:
+        if issue.why_now == "investigate now":
+            steps.append(f"Investigate now: {issue.title}.")
+        if len(steps) >= 2:
+            break
     for recommendation in reading_order:
         if recommendation.bucket == "must read personally":
             steps.append(f"Read {recommendation.title} first because other conclusions depend on it.")
@@ -725,16 +1010,30 @@ def _default_missing_confirmation(issue: CanonicalIssue) -> str:
 
 
 def _research_timing(issue: CanonicalIssue) -> str:
-    if issue.front_end_flag in {"red flag", "conflict / contradiction concern"}:
-        return "now"
-    if issue.schedule_impact_classification in {"immediate blocker", "pre-close blocker"}:
-        return "now"
-    if issue.schedule_impact_classification == "pre-underwriting blocker" or issue.decision_action in {
-        "condition closing",
-        "reprice",
+    if issue.why_now in {
+        "investigate now",
+        "investigate after initial read",
+        "investigate before underwriting",
+        "monitor unless other signals worsen",
+        "likely routine unless contradicted",
     }:
-        return "before underwriting"
+        return issue.why_now
     return "before deeper pursuit"
+
+
+def _concern_pattern(
+    *,
+    real_flags: list[CanonicalIssue],
+    blind_spots: list[CanonicalIssue],
+    routine_items: list[CanonicalIssue],
+) -> str:
+    if len(blind_spots) > len(real_flags) and len(blind_spots) >= len(routine_items):
+        return "Current concerns lean more toward package-quality uncertainty than toward confirmed property-level risk."
+    if len(real_flags) >= len(blind_spots) and len(real_flags) >= len(routine_items):
+        return "Current concerns lean more toward real property and development risk than toward package noise."
+    if len(routine_items) > len(real_flags) and len(routine_items) > len(blind_spots):
+        return "Most current issues look like normal process noise rather than unusual property risk."
+    return "Current concerns are split between real risk and package-quality uncertainty."
 
 
 def _recommended_request_for_omission(assessment: OmissionAssessment) -> str:

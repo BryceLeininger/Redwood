@@ -693,8 +693,9 @@ def build_overall_read_draft(
     return (
         f"{deal_name} currently reads as '{recommendation.posture}'. {entitlement_status} "
         f"{registry.central_risk_pattern} {registry.cluster_pattern} {registry.critical_path_summary} "
-        f"The package currently feels {registry.package_quality or 'credible'}. "
+        f"The package currently feels {registry.package_quality or 'adequate'} with {registry.confidence_in_initial_read} confidence in the initial read. "
         f"The lead front-end flags are {issue_text}. "
+        f"{registry.concern_pattern} "
         f"The biggest blind spots are {unresolved_text}. "
         f"This reads as a {registry.fragility_classification} deal.{challenge_text}"
     ).strip()
