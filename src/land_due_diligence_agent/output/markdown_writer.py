@@ -111,7 +111,20 @@ def _build_run_summary_markdown(
                 f"- OCR-related warnings affected {len(ocr_results)} file(s).",
             ]
         )
-        lines.extend(f"- `{result.relative_path}`" for result in ocr_results)
+        lines.extend(_format_ocr_result_line(result) for result in ocr_results)
+        lines.append("")
+
+    ocr_used_results = _ocr_used_results(run_summary)
+    if ocr_used_results:
+        total_ocr_pages = sum(len(result.ocr_pages) for result in ocr_used_results)
+        lines.extend(
+            [
+                "## OCR Fallback Applied",
+                "",
+                f"- OCR fallback was required on {len(ocr_used_results)} file(s) across {total_ocr_pages} page(s).",
+            ]
+        )
+        lines.extend(_format_ocr_result_line(result, include_warning_summary=False) for result in ocr_used_results)
         lines.append("")
 
     if synthesis is not None:
@@ -149,6 +162,8 @@ def _build_run_summary_markdown(
     else:
         for result in run_summary.file_results:
             detail = f"- `{result.relative_path}`: {result.status}"
+            if result.ocr_pages:
+                detail += f" | ocr pages: {_format_page_list(result.ocr_pages)}"
             if result.warnings:
                 detail += f" | warnings: {'; '.join(result.warnings)}"
             if result.error_message:
@@ -345,6 +360,8 @@ def _build_document_summaries_markdown(synthesis: DealSynthesis) -> str:
         lines.append(f"- Confidence: {analysis.confidence} ({analysis.confidence_reason})")
         if analysis.focus_areas:
             lines.append(f"- Focus Areas: {', '.join(analysis.focus_areas)}")
+        if analysis.document.ocr_pages:
+            lines.append(f"- OCR Pages: {_format_page_list(analysis.document.ocr_pages)}")
         if analysis.document.warnings:
             lines.append(f"- Extraction Warnings: {'; '.join(analysis.document.warnings)}")
         lines.append("")
@@ -475,12 +492,27 @@ def _build_error_report_markdown(
     failed_results = [result for result in run_summary.file_results if result.status == "failed"]
     warning_results = [result for result in run_summary.file_results if result.warnings]
     ocr_results = _ocr_affected_results(run_summary)
+    ocr_used_results = _ocr_used_results(run_summary)
 
+    lines.append("## OCR Fallback Activity")
+    lines.append("")
+    if ocr_used_results:
+        lines.append(
+            f"- OCR fallback was required on {len(ocr_used_results)} file(s) across {sum(len(result.ocr_pages) for result in ocr_used_results)} page(s)."
+        )
+        lines.extend(
+            _format_ocr_result_line(result, include_warning_summary=False)
+            for result in ocr_used_results
+        )
+    else:
+        lines.append("- OCR fallback was not used on this run.")
+
+    lines.append("")
     lines.append("## OCR / Low Confidence Documents")
     lines.append("")
     if ocr_results:
         lines.extend(
-            f"- `{result.relative_path}`: {'; '.join(result.warnings)}"
+            _format_ocr_result_line(result)
             for result in ocr_results
         )
     else:
@@ -549,7 +581,7 @@ def _ocr_affected_results(run_summary: RunSummary) -> list:
     return [
         result
         for result in run_summary.file_results
-        if any(_is_ocr_warning(warning) for warning in result.warnings)
+        if result.ocr_pages or any(_is_ocr_warning(warning) for warning in result.warnings)
     ]
 
 
@@ -560,6 +592,27 @@ def _is_ocr_warning(warning: str) -> bool:
         or "no pdf text extracted" in warning_lower
         or "normalized text is empty" in warning_lower
     )
+
+
+def _ocr_used_results(run_summary: RunSummary) -> list:
+    return [result for result in run_summary.file_results if result.ocr_pages]
+
+
+def _format_page_list(pages: list[int]) -> str:
+    return ", ".join(str(page) for page in pages)
+
+
+def _format_ocr_result_line(result, *, include_warning_summary: bool = True) -> str:
+    detail = f"- `{result.relative_path}`"
+    if result.ocr_pages:
+        detail += f": OCR pages {_format_page_list(result.ocr_pages)}"
+        if result.ocr_recovered_pages:
+            detail += f" | recovered {_format_page_list(result.ocr_recovered_pages)}"
+    if include_warning_summary and result.warnings:
+        detail += f" | warnings: {'; '.join(result.warnings)}"
+    elif not result.ocr_pages and result.warnings:
+        detail += f": {'; '.join(result.warnings)}"
+    return detail
 
 
 def _confidence_counts(synthesis: DealSynthesis) -> dict[str, int]:
@@ -584,6 +637,11 @@ def _build_known_limitations(
     ocr_results = _ocr_affected_results(run_summary)
     if ocr_results:
         limitations.append(f"OCR-related extraction warnings affected {len(ocr_results)} document(s).")
+    ocr_used_results = _ocr_used_results(run_summary)
+    if ocr_used_results:
+        limitations.append(
+            f"OCR fallback was required on {len(ocr_used_results)} document(s) across {sum(len(result.ocr_pages) for result in ocr_used_results)} page(s)."
+        )
 
     low_confidence_docs = [analysis for analysis in synthesis.document_analyses if analysis.confidence == "low"]
     if low_confidence_docs:

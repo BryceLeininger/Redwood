@@ -1118,17 +1118,23 @@ def _derive_focus_areas(document: DocumentRecord) -> list[str]:
 
 def _calculate_document_confidence(document: DocumentRecord) -> tuple[str, str]:
     warnings_text = " ".join(document.warnings).lower()
-    ocr_page_warnings = sum("returned no text" in warning.lower() for warning in document.warnings)
+    ocr_pages = len(document.ocr_pages)
+    unrecovered_ocr_pages = max(0, len(document.ocr_pages) - len(document.ocr_recovered_pages))
     page_count = int(document.metadata.get("page_count", 0) or 0)
     text_length = len(document.normalized_text.strip())
 
     if "no pdf text extracted" in warnings_text or "normalized text is empty" in warnings_text or text_length == 0:
         return "low", "No usable text was extracted from the document."
 
-    if ocr_page_warnings:
-        if page_count and (ocr_page_warnings / page_count) >= 0.15:
-            return "low", f"{ocr_page_warnings} page(s) out of {page_count} had no extracted text."
-        return "medium", f"{ocr_page_warnings} page(s) had no extracted text, reducing confidence."
+    if unrecovered_ocr_pages:
+        if page_count and (unrecovered_ocr_pages / page_count) >= 0.15:
+            return "low", f"{unrecovered_ocr_pages} page(s) out of {page_count} still had no usable text after OCR fallback."
+        return "medium", f"{unrecovered_ocr_pages} page(s) still had weak or missing text after OCR fallback."
+
+    if ocr_pages:
+        if page_count and (ocr_pages / page_count) >= 0.4:
+            return "low", f"OCR fallback was required on {ocr_pages} page(s) out of {page_count}, so the document should be spot-checked manually."
+        return "medium", f"OCR fallback was required on {ocr_pages} page(s), so extraction should be spot-checked."
 
     if text_length < 500:
         return "medium", "Extracted text was limited, so conclusions are directional."

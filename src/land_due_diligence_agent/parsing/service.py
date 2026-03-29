@@ -35,6 +35,16 @@ def parse_document(path: Path, input_root: Path) -> DocumentRecord:
     normalized = normalize_text(raw_text)
     title = humanize_filename(path.stem)
     chunks = _build_chunks(title, chunk_records)
+    ocr_pages = [
+        page
+        for page in metadata.get("ocr_pages", [])
+        if isinstance(page, int)
+    ]
+    ocr_recovered_pages = [
+        page
+        for page in metadata.get("ocr_recovered_pages", [])
+        if isinstance(page, int)
+    ]
 
     if not normalized:
         warnings.append("Normalized text is empty after extraction.")
@@ -61,6 +71,8 @@ def parse_document(path: Path, input_root: Path) -> DocumentRecord:
         metadata=metadata,
         warnings=warnings,
         chunks=chunks,
+        ocr_pages=ocr_pages,
+        ocr_recovered_pages=ocr_recovered_pages,
     )
 
 
@@ -78,6 +90,7 @@ def _build_chunks(title: str, chunk_records: list[dict[str, str | int | None]]) 
                 chunk_id=chunk_id,
                 text=text,
                 page_number=page_number if isinstance(page_number, int) else None,
+                ocr_used=bool(record.get("ocr_used")),
             )
         )
     return chunks

@@ -111,10 +111,22 @@ def main(argv: list[str] | None = None) -> int:
                     relative_path=relative_path,
                     status="parsed",
                     warnings=document.warnings.copy(),
+                    ocr_pages=document.ocr_pages.copy(),
+                    ocr_recovered_pages=document.ocr_recovered_pages.copy(),
                 )
             )
             if document.warnings:
-                logger.warning("Parsed %s with warnings: %s", relative_path, "; ".join(document.warnings))
+                message = f"Parsed {relative_path}"
+                if document.ocr_pages:
+                    message += f" with OCR on page(s): {', '.join(str(page) for page in document.ocr_pages)}"
+                message += f" | warnings: {'; '.join(document.warnings)}"
+                logger.warning(message)
+            elif document.ocr_pages:
+                logger.info(
+                    "Parsed %s with OCR on page(s): %s.",
+                    relative_path,
+                    ", ".join(str(page) for page in document.ocr_pages),
+                )
             else:
                 logger.info("Parsed %s successfully.", relative_path)
         except Exception as exc:

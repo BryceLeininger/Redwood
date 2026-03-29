@@ -30,6 +30,8 @@ class OutputWriterTests(unittest.TestCase):
             title="Memo",
             raw_text="memo",
             normalized_text="memo",
+            ocr_pages=[1],
+            ocr_recovered_pages=[1],
         )
         analysis = DocumentAnalysis(
             document=document,
@@ -109,6 +111,9 @@ class OutputWriterTests(unittest.TestCase):
             file_results=[FileProcessingResult(relative_path="memo.txt", status="parsed")],
             llm_model="gpt-4.1",
         )
+        run_summary.file_results[0].ocr_pages = [1]
+        run_summary.file_results[0].ocr_recovered_pages = [1]
+        run_summary.file_results[0].warnings = ["Page 1 required OCR fallback (no text) and text was recovered."]
 
         with tempfile.TemporaryDirectory() as temp_dir:
             output_dir = Path(temp_dir)
@@ -154,7 +159,11 @@ class OutputWriterTests(unittest.TestCase):
             self.assertIn("09_investment_committee_brief.md", summary_content)
             self.assertIn("LLM Model: `gpt-4.1`", summary_content)
             self.assertIn("Analysis Mode: `full`", summary_content)
+            self.assertIn("OCR fallback was required on 1 file(s) across 1 page(s).", summary_content)
+            self.assertIn("OCR pages 1", summary_content)
             error_content = (output_dir / "08_error_report.md").read_text(encoding="utf-8")
+            self.assertIn("OCR Fallback Activity", error_content)
+            self.assertIn("OCR pages 1", error_content)
             self.assertIn("LLM Refinement Failures", error_content)
             self.assertIn("example failure detail", error_content)
 
@@ -166,6 +175,8 @@ class OutputWriterTests(unittest.TestCase):
             title="Memo",
             raw_text="memo",
             normalized_text="memo",
+            ocr_pages=[1],
+            ocr_recovered_pages=[1],
         )
         analysis = DocumentAnalysis(
             document=document,
@@ -221,6 +232,9 @@ class OutputWriterTests(unittest.TestCase):
             file_results=[FileProcessingResult(relative_path="memo.txt", status="parsed")],
             llm_model="gpt-4.1",
         )
+        run_summary.file_results[0].ocr_pages = [1]
+        run_summary.file_results[0].ocr_recovered_pages = [1]
+        run_summary.file_results[0].warnings = ["Page 1 required OCR fallback (no text) and text was recovered."]
 
         with tempfile.TemporaryDirectory() as temp_dir:
             output_dir = Path(temp_dir)
@@ -244,6 +258,7 @@ class OutputWriterTests(unittest.TestCase):
             summary_content = (output_dir / "00_run_summary.md").read_text(encoding="utf-8")
             self.assertIn("Analysis Mode: `fast`", summary_content)
             self.assertIn("Approximate LLM Calls: 1", summary_content)
+            self.assertIn("OCR fallback was required on 1 file(s) across 1 page(s).", summary_content)
 
     def test_writes_summary_and_error_report_without_synthesis(self) -> None:
         run_summary = RunSummary(

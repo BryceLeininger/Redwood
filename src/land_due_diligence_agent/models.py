@@ -24,6 +24,7 @@ class ExtractedChunk:
     chunk_id: str
     text: str
     page_number: int | None = None
+    ocr_used: bool = False
 
 
 @dataclass(slots=True)
@@ -39,6 +40,8 @@ class DocumentRecord:
     metadata: dict[str, Any] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
     chunks: list[ExtractedChunk] = field(default_factory=list)
+    ocr_pages: list[int] = field(default_factory=list)
+    ocr_recovered_pages: list[int] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -49,6 +52,8 @@ class FileProcessingResult:
     status: str
     warnings: list[str] = field(default_factory=list)
     error_message: str | None = None
+    ocr_pages: list[int] = field(default_factory=list)
+    ocr_recovered_pages: list[int] = field(default_factory=list)
 
 
 @dataclass(slots=True)

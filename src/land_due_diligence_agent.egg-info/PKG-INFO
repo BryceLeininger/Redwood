@@ -1,3 +1,18 @@
+Metadata-Version: 2.4
+Name: land-due-diligence-agent
+Version: 0.1.0
+Summary: Portable CLI prototype for land acquisition due diligence review.
+Requires-Python: >=3.11
+Description-Content-Type: text/markdown
+Requires-Dist: cryptography>=3.1
+Requires-Dist: pdf2image>=1.17.0
+Requires-Dist: openai>=1.30.0
+Requires-Dist: openpyxl>=3.1.0
+Requires-Dist: pytesseract>=0.3.10
+Requires-Dist: pypdf>=4.2.0
+Requires-Dist: python-docx>=1.1.0
+Requires-Dist: python-dotenv>=1.0.0
+
 # Land Due Diligence Agent
 
 Portable Python CLI prototype for reviewing seller-provided land acquisition diligence packages. The current priority is first-test reliability: local parsing, visible run reporting, clear output folders, and easy operator inspection.
