@@ -43,6 +43,10 @@ class RiskFinding:
     why_it_matters: str = ""
     likely_implication: str = ""
     source_documents: list[str] = field(default_factory=list)
+    anchor: str = ""
+    priority_tier: str = ""
+    gating_flags: list[str] = field(default_factory=list)
+    uncertainty_reason: str = ""
 
 
 @dataclass(slots=True)

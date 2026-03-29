@@ -32,7 +32,20 @@ class OutputWriterTests(unittest.TestCase):
         analysis = DocumentAnalysis(
             document=document,
             summary="Summary text.",
-            risks=[RiskFinding(category="Environmental Risks", severity="high", summary="Risk summary.", evidence=["Memo: evidence"])],
+            risks=[
+                RiskFinding(
+                    category="Environmental Risks",
+                    severity="high",
+                    summary="Risk summary.",
+                    evidence=["Memo: evidence"],
+                    issue="The Phase I ESA (Memo) leaves environmental follow-up open.",
+                    why_it_matters="This affects underwriting certainty.",
+                    likely_implication="Mitigation cost remains open.",
+                    anchor="The Phase I ESA (Memo)",
+                    priority_tier="primary",
+                    gating_flags=["Underwriting confidence"],
+                )
+            ],
             seller_questions=["What remediation is still outstanding?"],
             reading_priority=5,
             reading_reason="Contains high-priority environmental indicators.",
@@ -97,7 +110,15 @@ class OutputWriterTests(unittest.TestCase):
             self.assertIn("Demo Deal", content)
             self.assertIn("heuristic", content)
             self.assertIn("Most Important Conclusions", content)
+            self.assertIn("Gating Issues", content)
             self.assertIn("Known Limitations Of This Run", content)
+            key_risk_content = (output_dir / "02_key_risks.md").read_text(encoding="utf-8")
+            self.assertIn("Primary Risks (Deal-Shaping)", key_risk_content)
+            self.assertIn("Document Anchor", key_risk_content)
+            self.assertIn("Gating Impact", key_risk_content)
+            synthesis_content = (output_dir / "07_deal_synthesis.md").read_text(encoding="utf-8")
+            self.assertIn("Primary Risks (Deal-Shaping)", synthesis_content)
+            self.assertIn("Gating Issues", synthesis_content)
             summary_content = (output_dir / "00_run_summary.md").read_text(encoding="utf-8")
             self.assertIn("Files found: 1", summary_content)
             self.assertIn("run.log", summary_content)

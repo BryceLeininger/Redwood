@@ -158,6 +158,7 @@ def _build_executive_summary_markdown(
     conclusions = _build_executive_conclusions(synthesis)
     known_points = _build_known_points(synthesis)
     unresolved_points = _build_unresolved_points(synthesis)
+    gating_points = _build_gating_points(synthesis)
     decision_points = _build_decision_points(synthesis)
     lines = [
         "# Executive Summary",
@@ -195,6 +196,14 @@ def _build_executive_summary_markdown(
     lines.extend(
         [
             "",
+            "## Gating Issues",
+            "",
+        ]
+    )
+    lines.extend(f"- {item}" for item in gating_points)
+    lines.extend(
+        [
+            "",
             "## What Matters Most For The Acquisition Decision",
             "",
         ]
@@ -217,22 +226,17 @@ def _build_key_risks_markdown(synthesis: DealSynthesis) -> str:
         lines.append("No concentrated risk signals were detected from the supplied document text.")
         return "\n".join(lines) + "\n"
 
-    for risk in synthesis.key_risks:
-        lines.append(f"## {risk.category}")
-        lines.append(f"- Severity: {risk.severity}")
-        if risk.issue:
-            lines.append(f"- Issue: {risk.issue}")
-        if risk.why_it_matters:
-            lines.append(f"- Why It Matters: {risk.why_it_matters}")
-        if risk.likely_implication:
-            lines.append(f"- Likely Implication: {risk.likely_implication}")
-        lines.append(f"- Summary: {risk.summary}")
-        if risk.source_documents:
-            lines.append(f"- Primary Support: {', '.join(risk.source_documents)}")
-        if risk.evidence:
-            lines.append("- Evidence:")
-            lines.extend(f"  - {evidence}" for evidence in risk.evidence)
-        lines.append("")
+    primary_risks, secondary_risks = _split_risk_tiers(synthesis.key_risks)
+
+    lines.extend(["## Primary Risks (Deal-Shaping)", ""])
+    for risk in primary_risks:
+        lines.extend(_render_risk_block(risk, heading_level="###"))
+
+    if secondary_risks:
+        lines.extend(["## Secondary Risks (Important But Not Gating Yet)", ""])
+        for risk in secondary_risks:
+            lines.extend(_render_risk_block(risk, heading_level="###"))
+
     return "\n".join(lines).rstrip() + "\n"
 
 
@@ -305,18 +309,30 @@ def _build_missing_items_markdown(synthesis: DealSynthesis) -> str:
 
 
 def _build_deal_synthesis_markdown(synthesis: DealSynthesis) -> str:
+    primary_risks, secondary_risks = _split_risk_tiers(synthesis.key_risks)
     lines = [
         "# Deal Synthesis",
         "",
         "## Overall Read",
         synthesis.executive_summary,
         "",
-        "## Core Issues",
+        "## Primary Risks (Deal-Shaping)",
         "",
     ]
 
-    for category, summary in synthesis.category_rollup.items():
-        lines.append(f"- **{category}:** {summary}")
+    if primary_risks:
+        lines.extend(f"- **{risk.category}:** {risk.issue} {risk.likely_implication}".strip() for risk in primary_risks)
+    else:
+        lines.append("- No primary deal-shaping risk was isolated from the extracted text.")
+
+    lines.extend(["", "## Secondary Risks (Important But Not Gating Yet)", ""])
+    if secondary_risks:
+        lines.extend(f"- **{risk.category}:** {risk.issue} {risk.likely_implication}".strip() for risk in secondary_risks)
+    else:
+        lines.append("- No secondary risk was elevated beyond the primary issue set.")
+
+    lines.extend(["", "## Gating Issues", ""])
+    lines.extend(f"- {item}" for item in _build_gating_points(synthesis))
 
     return "\n".join(lines) + "\n"
 
@@ -507,8 +523,44 @@ def _build_known_limitations(
     return limitations
 
 
+def _split_risk_tiers(key_risks: list) -> tuple[list, list]:
+    primary = [risk for risk in key_risks if risk.priority_tier == "primary"] or key_risks[:3]
+    secondary = [risk for risk in key_risks if risk.priority_tier == "secondary"]
+    if not secondary and len(key_risks) > len(primary):
+        secondary = key_risks[len(primary):]
+    return primary, secondary
+
+
+def _render_risk_block(risk, *, heading_level: str) -> list[str]:
+    lines = [f"{heading_level} {risk.category}"]
+    if risk.anchor:
+        lines.append(f"- Document Anchor: {risk.anchor}")
+    lines.append(f"- Severity: {risk.severity}")
+    if risk.gating_flags:
+        lines.append(f"- Gating Impact: {', '.join(risk.gating_flags)}")
+    if risk.issue:
+        lines.append(f"- Issue: {risk.issue}")
+    if risk.why_it_matters:
+        lines.append(f"- Why It Matters: {risk.why_it_matters}")
+    if risk.likely_implication:
+        lines.append(f"- Likely Implication: {risk.likely_implication}")
+    if risk.uncertainty_reason:
+        lines.append(f"- Remaining Uncertainty: {risk.uncertainty_reason}")
+    lines.append(f"- Summary: {risk.summary}")
+    if risk.source_documents:
+        lines.append(f"- Primary Support: {', '.join(risk.source_documents)}")
+    if risk.evidence:
+        lines.append("- Evidence:")
+        lines.extend(f"  - {evidence}" for evidence in risk.evidence)
+    lines.append("")
+    return lines
+
+
 def _build_executive_conclusions(synthesis: DealSynthesis) -> list[str]:
-    conclusions = [risk.issue or risk.summary for risk in synthesis.key_risks[:5]]
+    primary_risks, _ = _split_risk_tiers(synthesis.key_risks)
+    conclusions = [risk.issue or risk.summary for risk in primary_risks[:3]]
+    if any(analysis.confidence == "low" for analysis in synthesis.document_analyses):
+        conclusions.append("At least one key cost or support file still requires manual review because extraction quality was weak.")
     if not conclusions:
         conclusions.append(synthesis.entitlement_status)
     return conclusions[:5]
@@ -516,20 +568,36 @@ def _build_executive_conclusions(synthesis: DealSynthesis) -> list[str]:
 
 def _build_known_points(synthesis: DealSynthesis) -> list[str]:
     points = [synthesis.entitlement_status]
-    focus_sets = {focus for analysis in synthesis.document_analyses for focus in analysis.focus_areas}
-    if "Title / Access Concerns" in focus_sets:
-        points.append("The package includes title materials, so access and exception issues can be checked directly rather than assumed.")
-    if "Geotechnical Risks" in focus_sets:
-        points.append("Geotechnical studies are present, so the main soils assumptions are at least partially documented.")
-    if "Flood / Drainage Issues" in focus_sets:
-        points.append("Stormwater and drainage materials are present, so civil assumptions are not being underwritten blind.")
-    if "Fee / Exaction Burden" in focus_sets:
-        points.append("A fee schedule is in the file set, providing a usable starting point for public-fee underwriting.")
+    readable_focus_sets = {
+        focus
+        for analysis in synthesis.document_analyses
+        if analysis.confidence != "low"
+        for focus in analysis.focus_areas
+    }
+    coverage = []
+    if "Title / Access Concerns" in readable_focus_sets:
+        coverage.append("title")
+    if "Environmental Risks" in readable_focus_sets:
+        coverage.append("environmental")
+    if "Geotechnical Risks" in readable_focus_sets:
+        coverage.append("geotechnical")
+    if "Flood / Drainage Issues" in readable_focus_sets:
+        coverage.append("stormwater")
+    if "Fee / Exaction Burden" in readable_focus_sets:
+        coverage.append("fee")
+    if coverage:
+        points.append(
+            f"The package includes readable {', '.join(coverage[:4])} support, so the current problem is not missing entire workstreams; it is resolving the open items inside them."
+        )
     return points[:4]
 
 
 def _build_unresolved_points(synthesis: DealSynthesis) -> list[str]:
-    points = [risk.issue for risk in synthesis.key_risks[:5] if risk.issue]
+    primary_risks, _ = _split_risk_tiers(synthesis.key_risks)
+    points = [risk.issue for risk in primary_risks[:3] if risk.issue]
+    for risk in primary_risks[:3]:
+        if risk.uncertainty_reason:
+            points.append(f"{risk.category}: {risk.uncertainty_reason}")
     low_confidence_docs = [
         analysis.document.relative_path.name
         for analysis in synthesis.document_analyses
@@ -542,10 +610,39 @@ def _build_unresolved_points(synthesis: DealSynthesis) -> list[str]:
     return points[:5]
 
 
+def _build_gating_points(synthesis: DealSynthesis) -> list[str]:
+    grouped = _group_risks_by_gate(synthesis.key_risks)
+    points: list[str] = []
+
+    if grouped["Closing"]:
+        actions = "; ".join(_build_gate_action_text(risk) for risk in grouped["Closing"][:2])
+        points.append(f"Before closing: {actions}.")
+    if grouped["Underwriting confidence"]:
+        actions = "; ".join(_build_gate_action_text(risk) for risk in grouped["Underwriting confidence"][:3])
+        if any(analysis.confidence == "low" for analysis in synthesis.document_analyses):
+            actions += "; replace unreadable budget or support files"
+        points.append(f"Before underwriting confidence: {actions}.")
+    if grouped["Vertical start"]:
+        actions = "; ".join(_build_gate_action_text(risk) for risk in grouped["Vertical start"][:3])
+        points.append(f"Before vertical start: {actions}.")
+
+    if not points and synthesis.missing_items:
+        points.append(f"Before relying on the package: obtain direct support for {', '.join(synthesis.missing_items[:2])}.")
+
+    return points[:4]
+
+
 def _build_decision_points(synthesis: DealSynthesis) -> list[str]:
-    points = [risk.likely_implication for risk in synthesis.key_risks[:5] if risk.likely_implication]
+    grouped = _group_risks_by_gate(synthesis.key_risks)
+    points: list[str] = []
+    if grouped["Closing"]:
+        points.append("Treat closing as conditional until the title, access, and other land-control issues are expressly cleared.")
+    if grouped["Underwriting confidence"]:
+        points.append("Treat land basis as provisional until cost, fee, offsite, and other buyer-facing obligations are converted into auditable support.")
+    if grouped["Vertical start"]:
+        points.append("Treat the vertical-start schedule as conditional until permit-stage, civil, utility, and offsite execution items are closed.")
     if any(analysis.confidence == "low" for analysis in synthesis.document_analyses):
-        points.append("Cost underwriting should remain provisional until unreadable or budgetary files are replaced with native support.")
+        points.append("Do not treat the current cost package as fully decision-grade until unreadable or budgetary files are replaced with native support.")
     return points[:5]
 
 
@@ -553,17 +650,22 @@ def _build_ic_overall_read(synthesis: DealSynthesis) -> str:
     if not synthesis.key_risks:
         return "The file set does not surface a concentrated issue, but the package should still be checked for completeness before it is treated as decision-ready."
 
-    top_labels = ", ".join(risk.category.lower() for risk in synthesis.key_risks[:3])
+    primary_risks, _ = _split_risk_tiers(synthesis.key_risks)
+    lead_issues = "; ".join((risk.issue or risk.summary) for risk in primary_risks[:3])
     return (
-        f"The package reads as substantive but not yet clean. The issues most likely to move the land decision are {top_labels}. "
-        f"Before treating the deal as fully underwritten, confirm that those items do not break closability, materially move basis, or slow the path to permits and execution."
+        f"The package is substantive, but it is not ready for a clean recommendation yet. {lead_issues} "
+        f"Those issues still control closing risk, land-basis reliability, and execution timing."
     )
 
 
 def _build_ic_biggest_risks(synthesis: DealSynthesis) -> list[str]:
+    primary_risks, _ = _split_risk_tiers(synthesis.key_risks)
     risks = []
-    for risk in synthesis.key_risks[:4]:
-        risks.append(f"{risk.issue} {risk.likely_implication}".strip())
+    for risk in primary_risks[:4]:
+        risk_text = f"{risk.issue} {risk.likely_implication}".strip()
+        if risk.anchor:
+            risk_text = f"{risk.anchor}: {risk_text[0].lower() + risk_text[1:]}" if risk_text else risk.anchor
+        risks.append(risk_text)
     return risks or ["No concentrated issue was elevated into a top risk."]
 
 
@@ -578,20 +680,22 @@ def _build_ic_biggest_unknowns(synthesis: DealSynthesis) -> list[str]:
     ]
     if low_confidence_docs:
         unknowns.append(f"Unreadable or weakly extracted documents still affect: {', '.join(low_confidence_docs[:2])}.")
-    if synthesis.key_risks:
-        unknowns.extend(
-            f"Need tighter confirmation on {risk.category.lower()} before relying on the current underwriting."
-            for risk in synthesis.key_risks[:2]
-        )
+    primary_risks, _ = _split_risk_tiers(synthesis.key_risks)
+    unknowns.extend(
+        f"{risk.category}: {risk.uncertainty_reason}"
+        for risk in primary_risks[:3]
+        if risk.uncertainty_reason
+    )
     return unknowns[:4] or ["No major unknown was surfaced from the current package."]
 
 
 def _build_ic_verify_points(synthesis: DealSynthesis) -> list[str]:
+    primary_risks, _ = _split_risk_tiers(synthesis.key_risks)
     verify_points = []
-    for risk in synthesis.key_risks[:4]:
+    for risk in primary_risks[:4]:
         if risk.source_documents:
             verify_points.append(
-                f"Personally review {', '.join(risk.source_documents[:2])} for the current {risk.category.lower()} issue."
+                f"Personally review {', '.join(risk.source_documents[:2])} to verify the current {risk.category.lower()} issue and whether the underwriting treatment is actually supported."
             )
     if not verify_points:
         verify_points.append("Personally review the highest-priority documents in the recommended reading order.")
@@ -599,8 +703,42 @@ def _build_ic_verify_points(synthesis: DealSynthesis) -> list[str]:
 
 
 def _build_decision_ready_assessment(synthesis: DealSynthesis) -> str:
-    if synthesis.missing_items or any(analysis.confidence == "low" for analysis in synthesis.document_analyses):
-        return "Not yet decision-ready. The package is directionally useful, but closing, cost, or execution assumptions should not be treated as fully underwritten until the open support gaps are resolved."
-    if len(synthesis.key_risks) >= 4:
-        return "Not yet fully decision-ready. The diligence package is substantive, but the current risk stack is still too open to rely on without targeted confirmation."
+    grouped = _group_risks_by_gate(synthesis.key_risks)
+    if grouped["Closing"] or synthesis.missing_items or any(analysis.confidence == "low" for analysis in synthesis.document_analyses):
+        return "Not decision-ready. The package is useful, but closing and underwriting should stay conditional until the gating title, scope, cost, and support gaps are resolved."
+    if grouped["Underwriting confidence"] or grouped["Vertical start"]:
+        return "Not fully decision-ready. The package is substantive, but the risk stack is still too open on basis and execution timing to support a final recommendation."
     return "Close to decision-ready, but still requires targeted verification of the highest-priority risks before final investment committee reliance."
+
+
+def _group_risks_by_gate(key_risks: list) -> dict[str, list]:
+    grouped = {"Closing": [], "Underwriting confidence": [], "Vertical start": []}
+    for risk in key_risks:
+        for gate in risk.gating_flags:
+            if gate in grouped:
+                grouped[gate].append(risk)
+    return grouped
+
+
+def _build_gate_action_text(risk) -> str:
+    if risk.category == "Title / Access Concerns":
+        return "clear the title and access exceptions against the current plan set"
+    if risk.category == "Entitlement Status":
+        return "close the remaining approval and permit-stage conditions"
+    if risk.category == "Geotechnical Risks":
+        return "confirm the active geotechnical recommendations are fully carried into design and budget"
+    if risk.category == "Flood / Drainage Issues":
+        return "lock the drainage and stormwater scope"
+    if risk.category == "Fee / Exaction Burden":
+        return "lock the city-confirmed fee stack"
+    if risk.category == "Offsite Obligations":
+        return "allocate every frontage and offsite obligation into a clean buyer-facing scope"
+    if risk.category == "Budget / Cost Reliability":
+        return "replace unreadable or budgetary cost support with auditable pricing"
+    if risk.category == "Utilities / Infrastructure Issues":
+        return "confirm utility capacity, will-serve assumptions, and required offsite utility work"
+    if risk.category == "Environmental Risks":
+        return "resolve the environmental and mitigation follow-up scope"
+    if risk.category == "Schedule Risks":
+        return "rebuild the critical path with only confirmed assumptions"
+    return f"resolve the current {risk.category.lower()} issue"

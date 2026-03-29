@@ -28,6 +28,7 @@ _NOISE_PHRASES = (
 )
 _RULE_BY_CATEGORY = {rule.category: rule for rule in CATEGORY_RULES}
 _MAX_KEY_RISKS = 6
+_PRIMARY_RISK_COUNT = 3
 _GENERIC_UNRESOLVED_TERMS = (
     "pending",
     "required",
@@ -59,6 +60,18 @@ _CATEGORY_BENIGN_TERMS = {
     "Entitlement Status": ("approved", "consistent with the zoning ordinance", "consistent with the zoning ordinance and general plan"),
     "Environmental Risks": ("no mapped sites were found", "no mapped sites", "no recognized environmental condition"),
     "Schedule Risks": ("turnaround times",),
+}
+_RISK_GATING_MAP = {
+    "Title / Access Concerns": ("Closing", "Underwriting confidence"),
+    "Entitlement Status": ("Underwriting confidence", "Vertical start"),
+    "Environmental Risks": ("Underwriting confidence", "Vertical start"),
+    "Flood / Drainage Issues": ("Underwriting confidence", "Vertical start"),
+    "Geotechnical Risks": ("Underwriting confidence", "Vertical start"),
+    "Offsite Obligations": ("Underwriting confidence", "Vertical start"),
+    "Fee / Exaction Burden": ("Underwriting confidence",),
+    "Budget / Cost Reliability": ("Underwriting confidence",),
+    "Utilities / Infrastructure Issues": ("Underwriting confidence", "Vertical start"),
+    "Schedule Risks": ("Underwriting confidence",),
 }
 
 
@@ -224,7 +237,10 @@ def aggregate_risks(document_analyses: list[DocumentAnalysis]) -> list[RiskFindi
             item[1].category,
         ),
     )
-    return [risk for _, risk in ordered[:_MAX_KEY_RISKS]]
+    risks = [risk for _, risk in ordered[:_MAX_KEY_RISKS]]
+    for index, risk in enumerate(risks):
+        risk.priority_tier = "primary" if index < _PRIMARY_RISK_COUNT else "secondary"
+    return risks
 
 
 def build_category_rollup(document_analyses: list[DocumentAnalysis]) -> dict[str, str]:
@@ -320,9 +336,18 @@ def build_executive_summary_draft(
 
     lead_docs = ", ".join(_select_lead_document_titles(document_analyses, limit=4))
     low_confidence_docs = [analysis.document.title for analysis in document_analyses if analysis.confidence == "low"]
+    primary_risks = [risk for risk in key_risks if risk.priority_tier == "primary"] or key_risks[:_PRIMARY_RISK_COUNT]
+    secondary_risks = [risk for risk in key_risks if risk.priority_tier == "secondary"]
     conclusions = "\n".join(f"- {conclusion}" for conclusion in _build_top_conclusions(key_risks, entitlement_status, missing_items, low_confidence_docs))
     known_points = "\n".join(f"- {point}" for point in _build_known_points(document_analyses, entitlement_status))
     unresolved_points = "\n".join(f"- {point}" for point in _build_unresolved_points(key_risks, missing_items, low_confidence_docs))
+    primary_risk_text = "\n".join(f"- {risk.summary}" for risk in primary_risks) or "- No primary deal-shaping risk was isolated from the extracted text."
+    secondary_risk_text = (
+        "\n".join(f"- {risk.summary}" for risk in secondary_risks)
+        if secondary_risks
+        else "- No secondary risk was elevated beyond the primary issue set."
+    )
+    gating_points = "\n".join(f"- {point}" for point in _build_gating_points(key_risks, missing_items, low_confidence_docs))
     decision_points = "\n".join(f"- {point}" for point in _build_decision_points(key_risks, missing_items, low_confidence_docs))
     limitation_text = (
         f"\nLow-confidence extraction affected {len(low_confidence_docs)} document(s): {', '.join(low_confidence_docs[:3])}."
@@ -339,8 +364,11 @@ def build_executive_summary_draft(
         f"Primary source documents: {lead_docs}\n"
         f"Entitlement status: {entitlement_status}\n\n"
         f"Most important conclusions:\n{conclusions}\n\n"
+        f"Primary risks (deal-shaping):\n{primary_risk_text}\n\n"
+        f"Secondary risks (important but not gating):\n{secondary_risk_text}\n\n"
         f"What appears known:\n{known_points}\n\n"
         f"What appears unresolved:\n{unresolved_points}\n\n"
+        f"Gating issues:\n{gating_points}\n\n"
         f"What matters most for the acquisition decision:\n{decision_points}"
         f"{limitation_text}{extraction_text}"
     ).strip()
@@ -350,13 +378,14 @@ def _build_aggregate_risk(
     category: str,
     ranked_entries: list[tuple[DocumentAnalysis, RiskFinding]],
 ) -> tuple[int, RiskFinding] | None:
-    lead_analysis, lead_risk = ranked_entries[0]
+    focused_entries = [entry for entry in ranked_entries if category in entry[0].focus_areas] or ranked_entries
+    lead_analysis, lead_risk = focused_entries[0]
     source_documents: list[str] = []
     evidence: list[str] = []
     evidence_text_parts: list[str] = []
     low_confidence_sources = 0
 
-    for analysis, risk in ranked_entries:
+    for analysis, risk in focused_entries:
         source_documents.append(analysis.document.title)
         if analysis.confidence == "low":
             low_confidence_sources += 1
@@ -372,10 +401,17 @@ def _build_aggregate_risk(
     if not _should_include_aggregate(category, lead_risk.severity, decision_score):
         return None
 
-    issue = _build_issue_text(category, evidence_text, source_documents, low_confidence_sources)
-    why_it_matters = _build_why_it_matters_text(category)
-    likely_implication = _build_implication_text(category, evidence_text, low_confidence_sources)
-    summary = f"{issue} {why_it_matters} Likely implication: {likely_implication}"
+    anchor = _build_anchor_text(category, lead_analysis)
+    issue = _build_issue_text(category, anchor, evidence_text, low_confidence_sources)
+    why_it_matters = _build_why_it_matters_text(category, anchor, evidence_text)
+    likely_implication = _build_implication_text(category, anchor, evidence_text, low_confidence_sources)
+    uncertainty_reason = _build_uncertainty_reason(category, evidence_text, low_confidence_sources, focused_entries)
+    gating_flags = list(_RISK_GATING_MAP.get(category, ("Underwriting confidence",)))
+
+    summary_parts = [issue, why_it_matters, f"Likely implication: {likely_implication}"]
+    if uncertainty_reason:
+        summary_parts.append(f"Remaining uncertainty: {uncertainty_reason}")
+    summary = " ".join(summary_parts)
 
     return (
         decision_score,
@@ -388,6 +424,9 @@ def _build_aggregate_risk(
             why_it_matters=why_it_matters,
             likely_implication=likely_implication,
             source_documents=unique_preserve_order(source_documents)[:3],
+            anchor=anchor,
+            gating_flags=gating_flags,
+            uncertainty_reason=uncertainty_reason,
         ),
     )
 
@@ -427,108 +466,196 @@ def _should_include_aggregate(category: str, severity: str, decision_score: int)
 
 def _build_issue_text(
     category: str,
+    anchor: str,
     evidence_text: str,
-    source_documents: list[str],
     low_confidence_sources: int,
 ) -> str:
     if category == "Title / Access Concerns":
-        return "Title materials reference access, easement, encumbrance, or survey-related items that could conflict with the current site plan and closing assumptions."
+        return f"{anchor} lists easement, encroachment, access, or survey exceptions that need to be reconciled against the current plan set before closing."
     if category == "Entitlement Status":
-        return "Core approvals appear advanced, but conditions of approval and implementation items still need to be closed before the entitlement package can be treated as execution-ready."
+        return f"{anchor} shows the core approvals are advanced, but the conditions of approval still leave permit-stage obligations open."
     if category == "Geotechnical Risks":
-        return "Geotechnical reports point to settlement, liquefaction, grading, or foundation sensitivity that could change the real site-development scope."
+        return f"{anchor} identifies liquefaction, settlement, grading, or foundation recommendations that need to be carried into design and budget assumptions."
     if category == "Flood / Drainage Issues":
-        return "Stormwater and flood-control materials indicate drainage design assumptions that may still drive engineering scope or permit conditions."
+        return f"{anchor} drives drainage, detention, and flood-control assumptions that still affect civil scope and the permit path."
     if category == "Fee / Exaction Burden":
-        return "The file set shows meaningful impact and public works fee exposure that needs to be locked before the land basis is treated as reliable."
+        return f"{anchor} shows a meaningful public-works and impact-fee load that still needs to be locked into land basis."
     if category == "Offsite Obligations":
-        return "The package suggests frontage, dedication, permit, or offsite improvement obligations may still remain with the project."
+        return f"{anchor} leaves frontage, dedication, permit, or offsite improvement scope with the project rather than fully closed out."
     if category == "Budget / Cost Reliability":
         if low_confidence_sources:
-            return "Cost certainty is weak because at least part of the site-development pricing package is unreadable or only budgetary."
-        return "Current site-development pricing still appears preliminary rather than fully converted into hard, decision-grade bids."
+            return f"{anchor} is unreadable or incomplete, so site-development pricing cannot yet be treated as decision-grade."
+        return f"{anchor} still reads as budgetary pricing rather than a fully auditable site-cost package."
     if category == "Utilities / Infrastructure Issues":
-        return "Utility planning appears tied to service, joint trench, or infrastructure assumptions that still need confirmation from the serving parties."
+        return f"{anchor} leaves service, capacity, or joint-trench scope dependent on assumptions that still need direct confirmation."
     if category == "Environmental Risks":
         if any(_keyword_present(evidence_text, term) for term in ("recognized environmental condition", "phase ii", "contamination", "remediation")):
-            return "Environmental diligence points to potential contamination or follow-up work rather than a clean no-issue file."
-        return "Environmental materials point to mitigation, compliance, or habitat-related items that may still affect execution."
+            return f"{anchor} identifies environmental follow-up rather than a clean closeout."
+        if any(_keyword_present(evidence_text, term) for term in ("wetlands", "mitigation", "habitat", "hazardous")):
+            return f"{anchor} leaves mitigation, compliance, or agency-coordination items open in the execution path."
+        return f"{anchor} is not a clean environmental closeout, and the extracted text does not resolve the remaining follow-up scope."
     if category == "Schedule Risks":
-        return "The file set still suggests timing exposure on the path from current approvals to a fully executable development program."
-    return f"{category} appears material to the acquisition decision."
+        return f"{anchor} leaves timing exposure on the path from current approvals to a fully executable development program."
+    return f"{anchor} is material to the acquisition decision."
 
 
-def _build_why_it_matters_text(category: str) -> str:
+def _build_why_it_matters_text(category: str, anchor: str, evidence_text: str) -> str:
     if category == "Title / Access Concerns":
-        return "If title exceptions or access rights do not line up with the plan set, closability, lender comfort, and buildability can all be impaired."
+        return "This goes directly to closability, lenderability, and whether the approved site plan can actually be built as shown."
     if category == "Entitlement Status":
-        return "Approved entitlements do not fully de-risk the deal if permit-stage conditions, dedications, or implementation triggers are still open."
+        return "Approved land use actions do not de-risk the deal if permit-stage conditions, dedications, and implementation triggers are still open."
     if category == "Geotechnical Risks":
-        return "Soils-driven scope typically flows directly into grading, retaining, foundation design, contingency, and sometimes yield or layout."
+        return "Soils recommendations flow straight into grading quantities, retaining, foundation design, contingency, and sometimes yield."
     if category == "Flood / Drainage Issues":
-        return "Drainage and flood constraints can push both engineering complexity and permit timing, especially if detention or offsite work is required."
+        return "Drainage scope affects both engineering cost and how quickly the project can clear civil and public-works review."
     if category == "Fee / Exaction Burden":
-        return "Unconfirmed fees move directly into land basis and can change materially before permits if the schedule slips."
+        return "Fee exposure moves directly into land basis and can reset the deal if underwriting is using stale assumptions."
     if category == "Offsite Obligations":
-        return "Remaining frontage or offsite obligations can add real cost and can hold up vertical execution if they are not clearly allocated."
+        return "Uncleared frontage and offsite work add real dollars before vertical construction and can hold up permit release."
     if category == "Budget / Cost Reliability":
-        return "A land acquisition decision is materially weaker when the cost package is still preliminary or cannot be fully read and audited."
+        return "Acquisition underwriting is not reliable when a meaningful part of the site-cost package cannot be audited back to readable support."
     if category == "Utilities / Infrastructure Issues":
-        return "Utility constraints can delay first permits or vertical start and can also create additional offsite and underground cost."
+        return "Utility assumptions govern first permits, underground scope, and whether offsite infrastructure cost is still hiding outside the budget."
     if category == "Environmental Risks":
-        return "Environmental follow-up can create third-party workstreams, mitigation cost, and closing or execution conditions."
+        if any(_keyword_present(evidence_text, term) for term in ("recognized environmental condition", "phase ii", "contamination", "remediation")):
+            return "Environmental follow-up creates direct diligence scope, consultant cost, and potential closing or agency conditions."
+        return "Environmental and habitat follow-up can still affect mitigation scope, agency timing, and execution certainty."
     if category == "Schedule Risks":
-        return "Timing risk matters because carry, option structure, and fee exposure can move quickly if the critical path slips."
+        return "Schedule drift changes carry, fee timing, and the window for locking approvals and bids."
     return "It has direct implications for acquisition underwriting and execution."
 
 
-def _build_implication_text(category: str, evidence_text: str, low_confidence_sources: int) -> str:
+def _build_implication_text(category: str, anchor: str, evidence_text: str, low_confidence_sources: int) -> str:
     if category == "Title / Access Concerns":
-        return "Closability and site-plan execution risk until title/access items are fully cleared."
+        return "Closing should not be treated as clean until each title and access item is cured, endorsed, or designed around."
     if category == "Entitlement Status":
-        return "Permit timing and execution risk until remaining conditions or implementation items are closed."
+        return "Permit timing and vertical start should be treated as conditional until the remaining approval items are closed."
     if category == "Geotechnical Risks":
-        return "Higher grading and foundation cost, additional engineering iterations, and larger contingency."
+        return "Expect pressure on grading, retaining, foundation scope, and contingency."
     if category == "Flood / Drainage Issues":
-        return "Potential added stormwater/offsite work, slower permits, and site-engineering scope creep."
+        return "Expect further civil iteration and potential permit drag until the drainage assumptions are fully locked."
     if category == "Fee / Exaction Burden":
-        return "Pressure on land basis and reduced cost certainty before permit issuance."
+        return "Land basis remains exposed to fee movement until the city-confirmed fee stack is locked."
     if category == "Offsite Obligations":
-        return "Added pre-vertical cost and possible timing drag if buyer-facing obligations remain."
+        return "Basis is exposed to additional frontage and offsite cost, and vertical timing remains open until the obligation list is closed."
     if category == "Budget / Cost Reliability":
         if low_confidence_sources:
-            return "Underwriting risk because a meaningful part of the cost package is not yet decision-grade."
-        return "Cost-overrun and renegotiation risk if preliminary site numbers are being treated as firm."
+            return "Current site cost numbers should be treated as provisional, not final underwriting support."
+        return "Cost certainty remains weak until budgetary pricing is replaced with auditable bids or clearly bounded assumptions."
     if category == "Utilities / Infrastructure Issues":
-        return "Timing and cost risk if service, capacity, or joint trench assumptions prove incomplete."
+        return "Service timing and underground or offsite infrastructure cost remain open."
     if category == "Environmental Risks":
-        return "Potential added diligence scope, mitigation cost, or agency follow-up before execution."
+        if any(_keyword_present(evidence_text, term) for term in ("recognized environmental condition", "phase ii", "contamination", "remediation")):
+            return "Buyer diligence scope, mitigation cost, and agency signoff remain open."
+        return "Execution still depends on clearing environmental or habitat follow-up without adding new mitigation scope."
     if category == "Schedule Risks":
-        return "Longer hold period and more exposure to fee, carry, and market timing changes."
+        return "Hold period exposure increases if the current approval and permit path slips."
     return "Acquisition risk requiring direct verification."
 
 
+def _build_anchor_text(category: str, analysis: DocumentAnalysis) -> str:
+    document = analysis.document
+    title = document.title
+    title_lower = title.lower()
+    path_text = document.relative_path.as_posix().lower()
+
+    if category == "Title / Access Concerns":
+        if "survey" in path_text or "survey" in title_lower:
+            return f"The survey file ({title})"
+        return f"The preliminary title report ({title})" if "title" in title_lower or "prelim" in title_lower else f"The title file ({title})"
+    if category == "Environmental Risks":
+        if "phase i" in title_lower or "phase i" in path_text:
+            return f"The Phase I ESA ({title})"
+        if "phase ii" in title_lower or "phase ii" in path_text:
+            return f"The Phase II environmental report ({title})"
+        if "habitat" in title_lower or "biological" in title_lower or "mitigation" in title_lower:
+            return f"The habitat or biological memo ({title})"
+        return f"The environmental report ({title})"
+    if category == "Flood / Drainage Issues":
+        if "storm water" in title_lower or "stormwater" in title_lower:
+            return f"The stormwater control plan ({title})"
+        if "drainage" in title_lower:
+            return f"The drainage study ({title})"
+        return f"The flood or drainage file ({title})"
+    if category == "Geotechnical Risks":
+        if "pavement" in title_lower:
+            return f"The pavement design letter ({title})"
+        return f"The geotechnical report ({title})"
+    if category == "Offsite Obligations":
+        if "condition" in title_lower or "resolution" in title_lower:
+            return f"The approval conditions file ({title})"
+        if "storm water" in title_lower or "stormwater" in title_lower:
+            return f"The stormwater control plan ({title})"
+        return f"The offsite obligation file ({title})"
+    if category == "Fee / Exaction Burden":
+        return f"The fee schedule ({title})"
+    if category == "Budget / Cost Reliability":
+        return f"The budget or pricing file ({title})"
+    if category == "Utilities / Infrastructure Issues":
+        if "joint trench" in title_lower:
+            return f"The joint-trench file ({title})"
+        return f"The utility file ({title})"
+    if category == "Entitlement Status":
+        if "condition" in title_lower:
+            return f"The conditions of approval ({title})"
+        if "permit" in title_lower or "plan" in title_lower:
+            return f"The design permit plans ({title})"
+        if "resolution" in title_lower:
+            return f"The entitlement resolution ({title})"
+        return f"The entitlement file ({title})"
+    if category == "Schedule Risks":
+        return f"The approval or permit file ({title})"
+    return f"The supporting file ({title})"
+
+
+def _build_uncertainty_reason(
+    category: str,
+    evidence_text: str,
+    low_confidence_sources: int,
+    entries: list[tuple[DocumentAnalysis, RiskFinding]],
+) -> str:
+    if low_confidence_sources:
+        return "At least one supporting file extracted poorly, so the exact scope still needs manual review."
+    if category == "Environmental Risks" and not any(
+        _keyword_present(evidence_text, term)
+        for term in ("recognized environmental condition", "phase ii", "contamination", "remediation", "wetlands", "mitigation", "habitat")
+    ):
+        return "The extracted environmental text does not clearly distinguish contamination, mitigation, or general compliance follow-up."
+    if category == "Flood / Drainage Issues" and not any(
+        _keyword_present(evidence_text, term)
+        for term in ("stormwater", "drainage", "detention", "offsite drainage", "100-year", "fema")
+    ):
+        return "The drainage conclusion is driven by plan notes and needs direct civil review to confirm the active scope."
+    if category == "Offsite Obligations" and not any(
+        _keyword_present(evidence_text, term)
+        for term in ("frontage", "dedicated", "offsite", "reimbursement", "encroachment permit", "improvement plan")
+    ):
+        return "The supporting files do not yet tie the obligation list into one clean buyer-facing scope memo."
+    return ""
+
+
 def _build_negotiation_question(risk: RiskFinding) -> str:
+    source_text = ", ".join(risk.source_documents[:2])
     if risk.category == "Title / Access Concerns":
-        return "Please mark up the title package and survey with every exception, easement, encroachment, and access right that affects the current plan set, and identify what must be cured, endorsed, or redesigned before closing."
+        return f"Please mark up {source_text or 'the preliminary title report and survey'} against the current plan set, and identify every exception, easement, encroachment, and access right that must be cured, endorsed, or redesigned before closing."
     if risk.category == "Entitlement Status":
-        return "Please provide the live conditions-of-approval tracker and identify every remaining item required before map recordation, grading permit, building permit, or vertical start."
+        return f"Please provide the live conditions-of-approval tracker tied to {source_text or 'the entitlement package'}, and identify every item still open before map recordation, grading permit, building permit, and vertical start."
     if risk.category == "Geotechnical Risks":
-        return "Please confirm which geotechnical recommendations are currently driving grading and foundation design, and state whether liquefaction, settlement, overexcavation, and retaining assumptions are fully carried in the site budget."
+        return f"Please confirm which recommendations in {source_text or 'the geotechnical reports'} are actually driving grading and foundation design, and state whether liquefaction, settlement, overexcavation, and retaining assumptions are fully carried in the site budget."
     if risk.category == "Flood / Drainage Issues":
-        return "Please identify every unresolved stormwater, floodplain, detention, or offsite drainage obligation that could delay permits or add civil scope beyond the current underwriting."
+        return f"Please reconcile {source_text or 'the stormwater and drainage files'} into a single scope memo identifying every unresolved stormwater, floodplain, detention, and offsite drainage item still affecting permit issuance or civil cost."
     if risk.category == "Fee / Exaction Burden":
-        return "Please provide the fee matrix currently used in underwriting, identify which figures are confirmed with the city, and quantify exposure to fee updates before permit issuance."
+        return f"Please provide the underwriting fee matrix tied to {source_text or 'the fee schedule'}, identify what is city-confirmed versus estimated, and quantify the exposure if permits slip."
     if risk.category == "Offsite Obligations":
-        return "Please identify every remaining frontage, dedication, permit, guarantee, reimbursement, or offsite improvement obligation that survives closing and state who is expected to pay for each item."
+        return f"Please deliver a closing checklist built off {source_text or 'the offsite and approval files'} that identifies every remaining frontage, dedication, permit, guarantee, reimbursement, and offsite improvement obligation, who pays it, and when it hits the schedule."
     if risk.category == "Budget / Cost Reliability":
-        return "Please break out which site-development numbers are hard bids versus budgetary pricing, identify the largest open contingencies, and replace any unreadable budget files with native copies."
+        return f"Please break out which site-development numbers in {source_text or 'the current pricing package'} are hard bids versus budgetary allowances, identify the largest open contingencies, and replace any unreadable files with native copies."
     if risk.category == "Utilities / Infrastructure Issues":
-        return "Please confirm all will-serve and utility-capacity assumptions, required offsite extensions, and joint-trench scope, and identify any serving-agency approvals that are not yet in hand."
+        return f"Please reconcile {source_text or 'the utility files'} into a utility status memo stating all will-serve assumptions, offsite extensions, joint-trench scope, and serving-agency approvals that are not yet in hand."
     if risk.category == "Environmental Risks":
-        return "Please confirm whether the environmental package identified any RECs, mitigation obligations, habitat constraints, or follow-up agency work that is still open, and state who bears the cost and timing risk."
+        return f"Please use {source_text or 'the environmental package'} to state whether any REC, mitigation obligation, habitat constraint, or agency follow-up item remains open, and identify who bears the cost, schedule, and closing risk."
     if risk.category == "Schedule Risks":
-        return "Please provide the current critical-path schedule showing remaining approvals, utility releases, offsite triggers, and the assumptions required to hit first permit and vertical-start dates."
+        return f"Please provide the current critical-path schedule tied back to {source_text or 'the approval package'}, showing remaining approvals, utility releases, offsite triggers, and the assumptions required to hit first permit and vertical-start dates."
     return f"Please address the current {risk.category.lower()} issue in a form that can be underwritten at closing."
 
 
@@ -539,14 +666,15 @@ def _build_top_conclusions(
     low_confidence_docs: list[str],
 ) -> list[str]:
     conclusions: list[str] = []
+    primary_risks = [risk for risk in key_risks if risk.priority_tier == "primary"] or key_risks[:_PRIMARY_RISK_COUNT]
     if key_risks:
-        for risk in key_risks[:4]:
+        for risk in primary_risks[:3]:
             conclusions.append(risk.issue or risk.summary)
     else:
         conclusions.append(entitlement_status)
 
     if low_confidence_docs:
-        conclusions.append("Cost certainty remains weaker than the rest of the file set because at least one budget document could not be fully read.")
+        conclusions.append("Cost certainty is not fully underwritten because at least one budget document could not be read cleanly.")
 
     if missing_items:
         conclusions.append(f"Decision-readiness is limited until the package is supplemented with: {', '.join(missing_items[:2])}.")
@@ -557,15 +685,27 @@ def _build_top_conclusions(
 def _build_known_points(document_analyses: list[DocumentAnalysis], entitlement_status: str) -> list[str]:
     points = [entitlement_status]
 
-    focus_sets = {focus for analysis in document_analyses for focus in analysis.focus_areas}
-    if "Title / Access Concerns" in focus_sets:
-        points.append("The file set includes a title package, which means title/access issues can be reviewed rather than assumed.")
-    if "Geotechnical Risks" in focus_sets:
-        points.append("Multiple geotechnical reports are present, so soils and foundation assumptions are at least partially documented.")
-    if "Flood / Drainage Issues" in focus_sets:
-        points.append("Stormwater and drainage materials are present, so civil assumptions are not being underwritten blind.")
-    if "Fee / Exaction Burden" in focus_sets:
-        points.append("A fee schedule is in the package, giving a starting point for public-works and impact-fee underwriting.")
+    readable_focus_sets = {
+        focus
+        for analysis in document_analyses
+        if analysis.confidence != "low"
+        for focus in analysis.focus_areas
+    }
+    coverage_labels: list[str] = []
+    if "Title / Access Concerns" in readable_focus_sets:
+        coverage_labels.append("title")
+    if "Environmental Risks" in readable_focus_sets:
+        coverage_labels.append("environmental")
+    if "Geotechnical Risks" in readable_focus_sets:
+        coverage_labels.append("geotechnical")
+    if "Flood / Drainage Issues" in readable_focus_sets:
+        coverage_labels.append("stormwater")
+    if "Fee / Exaction Burden" in readable_focus_sets:
+        coverage_labels.append("fee")
+    if coverage_labels:
+        points.append(
+            f"The package includes readable {', '.join(coverage_labels[:4])} support, so the remaining issue is closure of open items rather than a total lack of core diligence."
+        )
 
     return unique_preserve_order(points)[:4]
 
@@ -575,7 +715,11 @@ def _build_unresolved_points(
     missing_items: list[str],
     low_confidence_docs: list[str],
 ) -> list[str]:
-    points = [risk.issue for risk in key_risks[:4] if risk.issue]
+    primary_risks = [risk for risk in key_risks if risk.priority_tier == "primary"] or key_risks[:_PRIMARY_RISK_COUNT]
+    points = [risk.issue for risk in primary_risks[:3] if risk.issue]
+    for risk in primary_risks[:3]:
+        if risk.uncertainty_reason:
+            points.append(f"{risk.category}: {risk.uncertainty_reason}")
     if low_confidence_docs:
         points.append(f"Low-confidence extraction remains on: {', '.join(low_confidence_docs[:2])}.")
     if missing_items:
@@ -583,17 +727,83 @@ def _build_unresolved_points(
     return unique_preserve_order(points)[:5]
 
 
+def _build_gating_points(
+    key_risks: list[RiskFinding],
+    missing_items: list[str],
+    low_confidence_docs: list[str],
+) -> list[str]:
+    points: list[str] = []
+    grouped = _group_risks_by_gate(key_risks)
+
+    if grouped["Closing"]:
+        actions = "; ".join(_build_gate_action_text(risk) for risk in grouped["Closing"][:2])
+        points.append(f"Before closing: {actions}.")
+    if grouped["Underwriting confidence"]:
+        actions = "; ".join(_build_gate_action_text(risk) for risk in grouped["Underwriting confidence"][:3])
+        if low_confidence_docs:
+            actions += "; replace unreadable budget or support files"
+        points.append(f"Before underwriting confidence: {actions}.")
+    if grouped["Vertical start"]:
+        actions = "; ".join(_build_gate_action_text(risk) for risk in grouped["Vertical start"][:3])
+        points.append(f"Before vertical start: {actions}.")
+
+    if not points and missing_items:
+        points.append(f"Before relying on the package: obtain direct support for {', '.join(missing_items[:2])}.")
+
+    return unique_preserve_order(points)[:4]
+
+
 def _build_decision_points(
     key_risks: list[RiskFinding],
     missing_items: list[str],
     low_confidence_docs: list[str],
 ) -> list[str]:
-    points = [risk.likely_implication for risk in key_risks[:4] if risk.likely_implication]
+    points: list[str] = []
+    grouped = _group_risks_by_gate(key_risks)
+    if grouped["Closing"]:
+        points.append("Treat closing as conditional until the title, access, and other pre-closing land-control issues are expressly cleared.")
+    if grouped["Underwriting confidence"]:
+        points.append("Treat land basis as provisional until cost, fee, offsite, and other buyer-facing obligations are converted into auditable support.")
+    if grouped["Vertical start"]:
+        points.append("Treat the vertical-start schedule as conditional until permit-stage, civil, utility, and offsite execution items are closed.")
     if low_confidence_docs:
         points.append("Do not treat the current cost package as fully decision-grade until unreadable or budgetary files are replaced with native support.")
     if missing_items:
         points.append("Underwriting should remain provisional where required supporting files are still missing or only indirectly referenced.")
     return unique_preserve_order(points)[:5]
+
+
+def _group_risks_by_gate(key_risks: list[RiskFinding]) -> dict[str, list[RiskFinding]]:
+    grouped = {"Closing": [], "Underwriting confidence": [], "Vertical start": []}
+    for risk in key_risks:
+        for gate in risk.gating_flags:
+            if gate in grouped:
+                grouped[gate].append(risk)
+    return grouped
+
+
+def _build_gate_action_text(risk: RiskFinding) -> str:
+    if risk.category == "Title / Access Concerns":
+        return "clear the title and access exceptions against the current plan set"
+    if risk.category == "Entitlement Status":
+        return "close the remaining approval and permit-stage conditions"
+    if risk.category == "Geotechnical Risks":
+        return "confirm the active geotechnical recommendations are fully carried into design and budget"
+    if risk.category == "Flood / Drainage Issues":
+        return "lock the drainage and stormwater scope"
+    if risk.category == "Fee / Exaction Burden":
+        return "lock the city-confirmed fee stack"
+    if risk.category == "Offsite Obligations":
+        return "allocate every frontage and offsite obligation into a clean buyer-facing scope"
+    if risk.category == "Budget / Cost Reliability":
+        return "replace unreadable or budgetary cost support with auditable pricing"
+    if risk.category == "Utilities / Infrastructure Issues":
+        return "confirm utility capacity, will-serve assumptions, and required offsite utility work"
+    if risk.category == "Environmental Risks":
+        return "resolve the environmental and mitigation follow-up scope"
+    if risk.category == "Schedule Risks":
+        return "rebuild the critical path with only confirmed assumptions"
+    return f"resolve the current {risk.category.lower()} issue"
 
 
 def _derive_focus_areas(document: DocumentRecord) -> list[str]:

@@ -145,10 +145,13 @@ class OpenAIProvider(LLMProvider):
     ) -> str:
         rollup_text = "\n".join(f"- {category}: {summary}" for category, summary in category_rollup.items())
         risk_text = "\n".join(
-            f"- {risk.category} ({risk.severity})\n"
+            f"- {risk.category} ({risk.severity}, tier={risk.priority_tier or 'unspecified'})\n"
+            f"  anchor: {risk.anchor or 'Not specified'}\n"
             f"  issue: {risk.issue or risk.summary}\n"
             f"  why it matters: {risk.why_it_matters or 'Not specified'}\n"
-            f"  likely implication: {risk.likely_implication or 'Not specified'}"
+            f"  likely implication: {risk.likely_implication or 'Not specified'}\n"
+            f"  gating: {', '.join(risk.gating_flags) or 'None'}\n"
+            f"  uncertainty: {risk.uncertainty_reason or 'None'}"
             for risk in key_risks
         )
         if not risk_text:
@@ -157,15 +160,16 @@ class OpenAIProvider(LLMProvider):
         if not missing_text:
             missing_text = "- No obvious diligence gaps detected from keyword coverage."
         prompt_intro = (
-            "Write a concise, investment-oriented overall read for a land acquisition diligence review. "
-            "Use two short paragraphs at most. Lead with the most important conclusions, avoid generic phrases, "
-            "state what appears known versus unresolved, and emphasize what matters most for closing, cost certainty, timing, and execution. "
+            "Write a concise overall read for a land acquisition manager preparing a recommendation. "
+            "Use two short paragraphs at most. Lead with the top 2-3 deal-shaping issues. Anchor each issue to the cited document or document type when possible. "
+            "Do not use generic phrases like 'mixed picture' or 'the package suggests'. Avoid 'may' and 'could' unless uncertainty comes from missing data, OCR limits, or incomplete reports. "
+            "Make clear what is known, what remains unresolved, and what is gating before closing, underwriting confidence, or vertical start. "
             "Do not simply list diligence categories."
         )
         if compact:
             prompt_intro = (
                 "Write one short, decisive overall read for a land acquisition decision-maker. "
-                "Keep only the highest-priority conclusions and unresolved issues. Do not use generic filler."
+                "Keep only the highest-priority, document-anchored conclusions and unresolved gating issues. Do not use generic filler."
             )
         return (
             f"{prompt_intro}\n\n"
