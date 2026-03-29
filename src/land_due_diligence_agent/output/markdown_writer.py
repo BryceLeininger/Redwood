@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+from collections import Counter
 import json
 from pathlib import Path
 
@@ -29,28 +31,48 @@ def write_markdown_outputs(
     ]
 
     if synthesis is not None:
+        executive_summary_content = _build_executive_summary_markdown(
+            synthesis,
+            run_summary.llm_provider,
+            run_summary,
+        )
+        key_risks_content = _build_key_risks_markdown(synthesis, run_summary.analysis_mode)
+        seller_questions_content = _build_seller_questions_markdown(synthesis, run_summary.analysis_mode)
         files.extend(
             [
-                (
-                    output_dir / "01_executive_summary.md",
-                    _build_executive_summary_markdown(synthesis, run_summary.llm_provider, run_summary),
-                ),
-                (output_dir / "02_key_risks.md", _build_key_risks_markdown(synthesis, run_summary.analysis_mode)),
-                (output_dir / "04_seller_questions.md", _build_seller_questions_markdown(synthesis, run_summary.analysis_mode)),
+                (output_dir / "01_executive_summary.md", executive_summary_content),
+                (output_dir / "02_key_risks.md", key_risks_content),
+                (output_dir / "04_seller_questions.md", seller_questions_content),
             ]
         )
         if run_summary.analysis_mode == "full":
+            reading_order_content = _build_reading_order_markdown(synthesis)
+            document_summaries_content = _build_document_summaries_markdown(synthesis)
+            missing_items_content = _build_missing_items_markdown(synthesis)
+            deal_synthesis_content = _build_deal_synthesis_markdown(synthesis)
+            ic_brief_content = _build_investment_committee_brief_markdown(synthesis)
+            issue_analysis_content = _build_issue_analysis_markdown(synthesis)
+            roadmap_content = _build_further_diligence_roadmap_markdown(synthesis)
+            debug_content = _build_issue_registry_debug_markdown(
+                synthesis,
+                section_texts={
+                    "01_executive_summary.md": executive_summary_content,
+                    "02_key_risks.md": key_risks_content,
+                    "07_deal_synthesis.md": deal_synthesis_content,
+                    "13_further_diligence_roadmap.md": roadmap_content,
+                },
+            )
             files.extend(
                 [
-                    (output_dir / "03_recommended_reading_order.md", _build_reading_order_markdown(synthesis)),
-                    (output_dir / "05_document_summaries.md", _build_document_summaries_markdown(synthesis)),
-                    (output_dir / "06_missing_diligence_items.md", _build_missing_items_markdown(synthesis)),
-                    (output_dir / "07_deal_synthesis.md", _build_deal_synthesis_markdown(synthesis)),
-                    (output_dir / "09_investment_committee_brief.md", _build_investment_committee_brief_markdown(synthesis)),
-                    (output_dir / "10_issue_analysis.md", _build_issue_analysis_markdown(synthesis)),
-                    (output_dir / "11_issue_registry_debug.md", _build_issue_registry_debug_markdown(synthesis)),
+                    (output_dir / "03_recommended_reading_order.md", reading_order_content),
+                    (output_dir / "05_document_summaries.md", document_summaries_content),
+                    (output_dir / "06_missing_diligence_items.md", missing_items_content),
+                    (output_dir / "07_deal_synthesis.md", deal_synthesis_content),
+                    (output_dir / "09_investment_committee_brief.md", ic_brief_content),
+                    (output_dir / "10_issue_analysis.md", issue_analysis_content),
+                    (output_dir / "11_issue_registry_debug.md", debug_content),
                     (output_dir / "12_reviewer_feedback_template.json", _build_reviewer_feedback_template_json(synthesis)),
-                    (output_dir / "13_further_diligence_roadmap.md", _build_further_diligence_roadmap_markdown(synthesis)),
+                    (output_dir / "13_further_diligence_roadmap.md", roadmap_content),
                 ]
             )
 
@@ -199,7 +221,6 @@ def _build_executive_summary_markdown(
     limitations = _build_known_limitations(run_summary, synthesis)
     top_issues = _selected_issues(synthesis, "01_executive_summary.md", default_count=4)
     registry = synthesis.canonical_issue_registry
-    overall_read = normalize_text(synthesis.executive_summary)
     lines = [
         "# Executive Summary",
         "",
@@ -213,48 +234,25 @@ def _build_executive_summary_markdown(
         "",
         f"**Recommendation Posture:** {synthesis.recommendation.posture}",
         "",
-        "## Overall Read",
+        "## Conclusions",
         "",
-        overall_read,
     ]
     lines.extend(
         [
-            "",
-            "## What This Package Actually Tells Us",
-            "",
+            f"- Package read: {registry.package_quality or 'adequate'}.",
+            f"- Confidence in initial read: {registry.confidence_in_initial_read}.",
+            f"- Overall read: {_compress_statement(synthesis.executive_summary or synthesis.entitlement_status, max_words=18)}",
         ]
     )
-    lines.extend(
-        f"- {item}"
-        for item in (
-            registry.front_end_known_points
-            or _build_executive_bullets(synthesis, top_issues)
-        )[:5]
-    )
-    lines.extend(
-        [
-            "",
-            "## Biggest Flags",
-            "",
-        ]
-    )
+    lines.extend(["", "## Biggest Flags", ""])
     if top_issues:
         for issue in top_issues:
-            lines.append(
-                f"- [{issue.front_end_flag.upper()}] {issue.title}: {issue.why_it_matters} "
-                f"Normality: {issue.normality_classification}. Why now: {issue.why_now}."
-            )
+            lines.append(f"- [{issue.front_end_flag.upper()}] {issue.title}.")
     else:
         lines.append("- No concentrated red or yellow flag was elevated from the current package.")
+    lines.extend(["", "## Biggest Blind Spots", ""])
     lines.extend(
-        [
-            "",
-            "## Biggest Blind Spots",
-            "",
-        ]
-    )
-    lines.extend(
-        f"- {item}"
+        f"- {_compress_statement(item, max_words=18)}"
         for item in (
             registry.front_end_unresolved_points
             or ["No major blind spot was isolated beyond the current issue set."]
@@ -264,14 +262,12 @@ def _build_executive_summary_markdown(
         lines.extend(
             [
                 "",
-                "## What To Read First",
+                "## Read First",
                 "",
             ]
         )
-        lines.append(f"- Package Quality: {registry.package_quality or 'adequate'}")
-        lines.append(f"- Confidence In Initial Read: {registry.confidence_in_initial_read}")
         lines.extend(
-            f"- {item.title} (`{item.relative_path}`): {item.reason}"
+            f"- {_read_first_line(item)}"
             for item in synthesis.recommended_reading_order
             if item.bucket == "must read personally"
         )
@@ -284,7 +280,7 @@ def _build_executive_summary_markdown(
             "",
         ]
     )
-    lines.extend(f"- {item}" for item in limitations)
+    lines.extend(f"- {_compress_statement(item, max_words=18)}" for item in limitations)
     return "\n".join(lines) + "\n"
 
 
@@ -418,52 +414,55 @@ def _build_issue_analysis_markdown(synthesis: DealSynthesis) -> str:
             lines.append(f"- Source: {', '.join(issue.source_documents)}")
         lines.append("")
         lines.append("### Front-End Read")
-        lines.append(f"- Flag Reason: {issue.front_end_flag_reason}")
-        lines.append(f"- Information Read: {issue.information_status_reason}")
-        lines.append(f"- Routine vs Unusual Read: {issue.unusualness_rationale}")
+        lines.append(f"- Status: {_issue_status_line(issue)}")
+        lines.append(f"- Flag Reason: {_compress_statement(issue.front_end_flag_reason, max_words=20)}")
+        lines.append(f"- Information Read: {_compress_statement(issue.information_status_reason, max_words=20)}")
+        lines.append(f"- Routine vs Unusual Read: {_compress_statement(issue.unusualness_rationale, max_words=18)}")
         lines.append(f"- Process Friction: {'Yes' if issue.process_friction_flag else 'No'}")
         if issue.blocking_reason:
-            lines.append(f"- Blocking Read: {issue.blocking_reason}")
+            lines.append(f"- Blocking Read: {_compress_statement(issue.blocking_reason, max_words=20)}")
         lines.append("")
         lines.append("### Core Facts")
         if issue.core_facts:
-            lines.extend(f"- {fact}" for fact in issue.core_facts[:4])
+            lines.extend(f"- {_compress_statement(fact, max_words=18)}" for fact in issue.core_facts[:4])
         else:
             lines.append("- No concentrated fact pattern was isolated in this lane.")
         lines.append("")
         lines.append("### Best Evidence")
         if issue.best_evidence:
-            lines.extend(f"- {evidence}" for evidence in issue.best_evidence[:3])
+            lines.extend(f"- {_compress_statement(evidence, max_words=18)}" for evidence in issue.best_evidence[:3])
         else:
             lines.append("- No short-form evidence snippet was captured.")
         lines.append("")
         lines.append("### Unresolved Questions")
         if issue.open_questions:
-            lines.extend(f"- {question}" for question in issue.open_questions[:4])
+            lines.extend(f"- {_compress_statement(question, max_words=18)}" for question in issue.open_questions[:4])
         else:
             lines.append("- No unresolved question was isolated beyond the current cited facts.")
         lines.append("")
         lines.append("### Missing Document / Confirmation")
-        lines.append(f"- {issue.missing_confirmation or 'No additional missing confirmation was isolated beyond the cited support.'}")
+        lines.append(
+            f"- {_compress_statement(issue.missing_confirmation, max_words=18) if issue.missing_confirmation else 'No additional missing confirmation was isolated beyond the cited support.'}"
+        )
         lines.append("")
         lines.append("### Suggested Next Research Step")
         if issue.research_agenda:
             for step in issue.research_agenda[:2]:
-                lines.append(f"- Verify: {step.verify_what}")
-                lines.append(f"- Request: {step.request_item}")
-                lines.append(f"- Best Source: {step.likely_source}")
+                lines.append(f"- Verify: {_compress_statement(step.verify_what, max_words=16)}")
+                lines.append(f"- Request: {_compress_statement(_request_action_text(step.request_item), max_words=16)}")
+                lines.append(f"- Best Source: {_compress_statement(step.likely_source, max_words=12)}")
                 lines.append(f"- When: {step.timing}")
         else:
             lines.append("- No separate research step was elevated for this issue.")
         lines.append("")
         lines.append("### Why It Matters")
-        lines.append(f"- {issue.why_it_matters}")
+        lines.append(f"- {_compress_statement(issue.why_it_matters, max_words=18)}")
         lines.append("")
         lines.append("### Likely Implication")
-        lines.append(f"- {issue.likely_implication}")
+        lines.append(f"- {_compress_statement(issue.likely_implication, max_words=18)}")
         lines.append("")
         lines.append("### What Would Resolve It")
-        lines.append(f"- {issue.what_would_resolve_it}")
+        lines.append(f"- {_compress_statement(issue.what_would_resolve_it, max_words=18)}")
         lines.append("")
         lines.append("### Dependency Read")
         lines.append(f"- Dependency Type: {issue.dependency_type or 'n/a'}")
@@ -484,12 +483,12 @@ def _build_issue_analysis_markdown(synthesis: DealSynthesis) -> str:
             lines.append(f"- Critical Path Read: {issue.critical_path_reason}")
         lines.append("")
         lines.append("### Downstream Consequences")
-        lines.append(f"- Cost: {issue.likely_cost_effect or 'None isolated.'}")
-        lines.append(f"- Schedule: {issue.likely_schedule_effect or 'None isolated.'}")
-        lines.append(f"- Yield / Product: {issue.likely_yield_or_product_effect or 'None isolated.'}")
-        lines.append(f"- Closing: {issue.likely_closing_effect or 'None isolated.'}")
-        lines.append(f"- Structure: {issue.likely_structure_effect or 'None isolated.'}")
-        lines.append(f"- Underwriting: {issue.likely_underwriting_effect or 'None isolated.'}")
+        lines.append(f"- Cost: {_compress_statement(issue.likely_cost_effect, max_words=16) if issue.likely_cost_effect else 'None isolated.'}")
+        lines.append(f"- Schedule: {_compress_statement(issue.likely_schedule_effect, max_words=16) if issue.likely_schedule_effect else 'None isolated.'}")
+        lines.append(f"- Yield / Product: {_compress_statement(issue.likely_yield_or_product_effect, max_words=16) if issue.likely_yield_or_product_effect else 'None isolated.'}")
+        lines.append(f"- Closing: {_compress_statement(issue.likely_closing_effect, max_words=16) if issue.likely_closing_effect else 'None isolated.'}")
+        lines.append(f"- Structure: {_compress_statement(issue.likely_structure_effect, max_words=16) if issue.likely_structure_effect else 'None isolated.'}")
+        lines.append(f"- Underwriting: {_compress_statement(issue.likely_underwriting_effect, max_words=16) if issue.likely_underwriting_effect else 'None isolated.'}")
         lines.append("")
         if issue.precedent_summary.sample_size:
             lines.append("### Precedent Read")
@@ -504,13 +503,13 @@ def _build_issue_analysis_markdown(synthesis: DealSynthesis) -> str:
                         for label, count in sorted(issue.precedent_summary.outcome_stats.items())
                     )
                 )
-            lines.append(f"- Typical Impact: {issue.precedent_summary.typical_impact}")
-            lines.append(f"- Resolution Pattern: {issue.precedent_summary.resolution_pattern}")
+            lines.append(f"- Typical Impact: {_compress_statement(issue.precedent_summary.typical_impact, max_words=12)}")
+            lines.append(f"- Resolution Pattern: {_compress_statement(issue.precedent_summary.resolution_pattern, max_words=16)}")
             lines.append(
                 f"- Calibration: {issue.precedent_summary.confidence_adjustment} "
                 f"({issue.precedent_summary.score_adjustment:+d} priority points)"
             )
-            lines.append(f"- Read: {issue.precedent_summary.reasoning}")
+            lines.append(f"- Read: {_compress_statement(issue.precedent_summary.reasoning, max_words=18)}")
             lines.append("")
 
     return "\n".join(lines).rstrip() + "\n"
@@ -559,69 +558,19 @@ def _build_missing_items_markdown(synthesis: DealSynthesis) -> str:
 
 
 def _build_deal_synthesis_markdown(synthesis: DealSynthesis) -> str:
-    registry = synthesis.canonical_issue_registry
     lines = [
         "# Deal Synthesis",
         "",
-        "## Overall Read",
-        normalize_text(synthesis.executive_summary),
-        "",
-        "## What This Package Really Tells Us",
+        "## Initial Judgment",
         "",
     ]
-    lines.extend(
-        f"- {item}"
-        for item in (registry.front_end_known_points or ["No concentrated known point was isolated from the current package."])
-    )
-
-    lines.extend(["", "## What Appears Unresolved", ""])
-    lines.extend(
-        f"- {item}"
-        for item in (registry.front_end_unresolved_points or ["No major unresolved point was isolated beyond the current issue set."])
-    )
-
-    lines.extend(["", "## What Appears Elevated Or Unusual", ""])
-    lines.extend(
-        f"- {item}"
-        for item in (registry.front_end_elevated_points or ["No unusually elevated issue was isolated beyond routine front-end friction."])
-    )
-
-    lines.extend(["", "## What Looks Routine", ""])
-    lines.extend(
-        f"- {item}"
-        for item in (registry.front_end_routine_points or ["No routine-only item was worth calling out separately."])
-    )
-
-    lines.extend(["", "## Central Pattern", ""])
-    lines.append(f"- Central Risk Pattern: {registry.central_risk_pattern or 'No central pattern isolated.'}")
-    lines.append(f"- Cluster Pattern: {registry.cluster_pattern or 'No cluster pattern isolated.'}")
-    lines.append(f"- Deal Type: {registry.fragility_classification or 'n/a'}")
-    lines.append(f"- Package Read: {registry.package_quality or 'credible'}")
-    lines.append(f"- Why: {registry.package_quality_reason or 'No package-quality rationale was generated.'}")
-    lines.append(f"- Confidence In Initial Read: {registry.confidence_in_initial_read}")
-    lines.append(f"- Concern Pattern: {registry.concern_pattern or 'No concern pattern was generated.'}")
-
-    lines.extend(["", "## Root-Cause Clusters", ""])
-    lines.extend(_render_issue_clusters(synthesis))
-
-    lines.extend(["", "## Real Critical Path", ""])
-    lines.append(f"- {registry.critical_path_summary or 'No critical path summary was isolated.'}")
-    lines.extend(f"- {item}" for item in _build_gating_issue_lines(synthesis))
-
-    lines.extend(["", "## What Most Deserves Attention Now", ""])
-    lines.extend(
-        f"- {item}"
-        for item in (registry.front_end_attention_now_points or ["No issue was isolated as an immediate attention item."])
-    )
-
-    lines.extend(["", "## What Most Deserves Deeper Work", ""])
-    lines.extend(
-        f"- {item}"
-        for item in (registry.front_end_deeper_work or ["No focused next-step work item was isolated beyond the current issue set."])
-    )
-
-    lines.extend(["", "## Potential Contradictions / Tensions", ""])
-    lines.extend(_render_contradictions(synthesis.contradictions))
+    lines.extend(f"- {item}" for item in _build_synthesis_judgment_lines(synthesis))
+    lines.extend(["", "## Routine Vs Elevated", ""])
+    lines.extend(f"- {item}" for item in _build_routine_vs_elevated_lines(synthesis))
+    lines.extend(["", "## Critical Path", ""])
+    lines.extend(f"- {item}" for item in _build_synthesis_critical_path_lines(synthesis))
+    lines.extend(["", "## What Changes Confidence", ""])
+    lines.extend(f"- {item}" for item in _build_confidence_change_lines(synthesis))
 
     return "\n".join(lines) + "\n"
 
@@ -684,7 +633,11 @@ def _build_investment_committee_brief_markdown(synthesis: DealSynthesis) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _build_issue_registry_debug_markdown(synthesis: DealSynthesis) -> str:
+def _build_issue_registry_debug_markdown(
+    synthesis: DealSynthesis,
+    *,
+    section_texts: dict[str, str] | None = None,
+) -> str:
     registry = synthesis.canonical_issue_registry
     lines = ["# Issue Registry Debug", ""]
     lines.extend(
@@ -933,6 +886,30 @@ def _build_issue_registry_debug_markdown(synthesis: DealSynthesis) -> str:
         lines.append("- No document analyses were available.")
     lines.append("")
 
+    if section_texts:
+        discipline = _output_discipline_snapshot(section_texts)
+        lines.extend(["## Output Discipline", ""])
+        lines.append(f"- Repeated Phrases Across Sections: {discipline['repeated_phrase_count']}")
+        lines.append(f"- Average Sentence Length: {discipline['avg_sentence_length']} words")
+        lines.append(f"- Hedge Density: {discipline['hedge_density']} per 100 words")
+        lines.append(f"- Compression Score: {discipline['compression_score']}")
+        repeated_phrases = discipline["repeated_phrases"]
+        if repeated_phrases:
+            lines.append("- Repeated Phrases:")
+            for phrase, section_names in list(repeated_phrases.items())[:5]:
+                lines.append(f"  - {phrase} | sections={', '.join(section_names)}")
+        else:
+            lines.append("- Repeated Phrases: None")
+        lines.append("- By Section:")
+        for section_name, metrics in discipline["by_section"].items():
+            lines.append(
+                "  - "
+                f"{section_name}: avg sentence length={metrics['avg_sentence_length']} | "
+                f"hedge density={metrics['hedge_density']} | "
+                f"compression score={metrics['compression_score']}"
+            )
+        lines.append("")
+
     evaluator = registry.evaluator_result
     lines.extend(["## Evaluator", ""])
     lines.append(f"- Redundancy Score: {evaluator.redundancy_score}")
@@ -976,35 +953,15 @@ def _build_further_diligence_roadmap_markdown(synthesis: DealSynthesis) -> str:
     roadmap = synthesis.further_diligence_roadmap
     lines = ["# Further Diligence Roadmap", ""]
     lines.extend(["## Investigate Immediately", ""])
-    lines.extend(f"- {item}" for item in roadmap.investigate_immediately or ["No issue was elevated to immediate investigation."])
+    lines.extend(f"- {item}" for item in _roadmap_investigate_lines(synthesis, roadmap))
     lines.extend(["", "## Request / Verify Soon", ""])
-    lines.extend(f"- {item}" for item in roadmap.request_or_verify_soon or ["No near-term request or verification item was isolated."])
+    lines.extend(f"- {item}" for item in _roadmap_request_lines(synthesis, roadmap))
     lines.extend(["", "## Read Personally", ""])
-    lines.extend(f"- {item}" for item in roadmap.read_personally or ["No must-read document was isolated."])
+    lines.extend(f"- {item}" for item in _roadmap_read_lines(synthesis, roadmap))
     lines.extend(["", "## Monitor Later", ""])
-    lines.extend(f"- {item}" for item in roadmap.monitor_later or ["No monitor-later item was isolated."])
+    lines.extend(f"- {item}" for item in _roadmap_monitor_lines(synthesis, roadmap))
     lines.extend(["", "## Likely Routine Unless Other Evidence Changes View", ""])
-    lines.extend(
-        f"- {item}"
-        for item in roadmap.likely_routine_unless_changed or ["No issue was explicitly classified as likely routine."]
-    )
-    lines.extend(["", "## Top Real Flags To Investigate", ""])
-    lines.extend(f"- {item}" for item in roadmap.top_real_flags or ["No concentrated real flag was isolated."])
-    lines.extend(["", "## Top Missing Items To Request", ""])
-    lines.extend(f"- {item}" for item in roadmap.top_missing_items_to_request or ["No material missing item was isolated."])
-    lines.extend(["", "## Top Contradictions To Resolve", ""])
-    lines.extend(f"- {item}" for item in roadmap.top_contradictions_to_resolve or ["No material contradiction was isolated."])
-    lines.extend(["", "## Top Stale Materials To Refresh", ""])
-    lines.extend(f"- {item}" for item in roadmap.top_stale_materials_to_refresh or ["No stale material was isolated."])
-    lines.extend(["", "## Top Public / Consultant / Internal Research Items", ""])
-    lines.extend(
-        f"- {item}"
-        for item in roadmap.top_public_consultant_internal_research or ["No separate research item was isolated."]
-    )
-    lines.extend(["", "## Top Documents To Read First", ""])
-    lines.extend(f"- {item}" for item in roadmap.top_documents_to_read_first or ["No must-read document was isolated."])
-    lines.extend(["", "## Suggested Order Of Follow-Up Diligence", ""])
-    lines.extend(f"- {item}" for item in roadmap.follow_up_order or ["No follow-up order was generated."])
+    lines.extend(f"- {item}" for item in _roadmap_routine_lines(synthesis, roadmap))
     return "\n".join(lines) + "\n"
 
 
@@ -1054,6 +1011,269 @@ def _format_percentage(value: float | None) -> str:
     return f"{value:.0%}"
 
 
+HEDGE_WORDS = {"may", "could", "might", "possibly", "potentially", "appears", "seems", "suggests"}
+FILLER_PHRASES = (
+    "it is important to note that",
+    "it is important to note",
+    "this suggests that",
+    "this indicates that",
+    "the fact that",
+)
+
+
+def _clean_output_text(text: str) -> str:
+    return re.sub(r"\s+", " ", normalize_text(text or "")).strip()
+
+
+def _ensure_terminal_punctuation(text: str) -> str:
+    text = text.strip()
+    if not text:
+        return ""
+    if text.endswith((".", "!", "?")):
+        return text
+    return f"{text}."
+
+
+def _trim_words(text: str, *, max_words: int) -> str:
+    words = text.split()
+    if len(words) <= max_words:
+        return text
+    trimmed = " ".join(words[:max_words]).rstrip(",;:")
+    return _ensure_terminal_punctuation(trimmed)
+
+
+def _strip_markdown(text: str) -> str:
+    text = re.sub(r"`([^`]*)`", r"\1", text)
+    text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
+    return re.sub(r"[*_#>-]", "", text).strip()
+
+
+def _collapse_hedges(text: str) -> str:
+    text = re.sub(r"\b(could|may|might)\s+(potentially|possibly)\b", r"\1", text, flags=re.IGNORECASE)
+    text = re.sub(r"\b(possibly|potentially)\b", "", text, flags=re.IGNORECASE)
+    words = text.split()
+    if not words:
+        return ""
+    kept_words: list[str] = []
+    hedge_seen = False
+    for word in words:
+        normalized = re.sub(r"[^a-z]", "", word.lower())
+        if normalized in HEDGE_WORDS:
+            if hedge_seen:
+                continue
+            hedge_seen = True
+        kept_words.append(word)
+    return re.sub(r"\s+", " ", " ".join(kept_words)).strip()
+
+
+def _compress_statement(
+    text: str,
+    *,
+    max_words: int,
+    max_sentences: int = 1,
+    single_idea: bool = True,
+) -> str:
+    compressed = _clean_output_text(text)
+    if not compressed:
+        return ""
+    compressed = re.sub(r"\bp\.\s+(\d)", r"p.~\1", compressed, flags=re.IGNORECASE)
+    for phrase in FILLER_PHRASES:
+        compressed = re.sub(re.escape(phrase), "", compressed, flags=re.IGNORECASE)
+    compressed = re.sub(r"\bwhich suggests\b", "and", compressed, flags=re.IGNORECASE)
+    compressed = re.sub(r"\bappears to be\b", "is", compressed, flags=re.IGNORECASE)
+    compressed = re.sub(r"\bseems to be\b", "is", compressed, flags=re.IGNORECASE)
+    compressed = _collapse_hedges(compressed)
+    sentences = [
+        segment.strip()
+        for segment in re.split(r"(?<=[.!?])\s+", compressed)
+        if segment.strip()
+    ]
+    compressed = " ".join(sentences[:max_sentences]) if sentences else compressed
+    if single_idea and ";" in compressed:
+        compressed = compressed.split(";", 1)[0].strip()
+    compressed = re.sub(r"\s+", " ", compressed).strip(" ,;:")
+    compressed = compressed.replace("p.~", "p. ")
+    compressed = _trim_words(compressed, max_words=max_words)
+    return _ensure_terminal_punctuation(compressed)
+
+
+def _request_action_text(request_text: str) -> str:
+    action = _clean_output_text(request_text).rstrip(".")
+    if not action:
+        return ""
+    if re.match(r"^provide\b", action, flags=re.IGNORECASE):
+        action = re.sub(r"^provide\b", "Request", action, count=1, flags=re.IGNORECASE)
+    elif re.match(r"^send\b", action, flags=re.IGNORECASE):
+        action = re.sub(r"^send\b", "Request", action, count=1, flags=re.IGNORECASE)
+    elif re.match(r"^share\b", action, flags=re.IGNORECASE):
+        action = re.sub(r"^share\b", "Request", action, count=1, flags=re.IGNORECASE)
+    elif re.match(r"^(confirm|reconcile|refresh|review|read|monitor|obtain|resolve|request)\b", action, flags=re.IGNORECASE):
+        action = action[0].upper() + action[1:]
+    else:
+        action = f"Request {action[0].lower() + action[1:]}"
+    return _ensure_terminal_punctuation(action)
+
+
+def _issue_status_line(issue: CanonicalIssue) -> str:
+    if not issue.front_end_flag:
+        return "Issue under review."
+    if issue.front_end_flag == "document gap":
+        return "Gap, not a confirmed risk."
+    if issue.front_end_flag == "stale-information concern":
+        return "Stale support; refresh before relying on it."
+    if issue.front_end_flag == "conflict / contradiction concern":
+        return "Conflict exists across the current documents."
+    if issue.front_end_flag == "routine item" or issue.normality_classification == "routine":
+        return "Routine process item."
+    return f"{issue.front_end_flag.title()}."
+
+
+def _issue_next_step(issue: CanonicalIssue) -> str:
+    if issue.research_agenda:
+        return _compress_statement(
+            _request_action_text(issue.research_agenda[0].request_item),
+            max_words=18,
+        )
+    if issue.missing_confirmation:
+        return _compress_statement(_request_action_text(issue.missing_confirmation), max_words=18)
+    return ""
+
+
+def _read_first_line(recommendation) -> str:
+    return _compress_statement(
+        f"Read {recommendation.title} (`{recommendation.relative_path}`) first.",
+        max_words=12,
+    )
+
+
+def _body_sentences(text: str) -> list[str]:
+    sentences: list[str] = []
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        clean = _strip_markdown(line)
+        if not clean:
+            continue
+        for segment in re.split(r"(?<=[.!?])\s+|;\s+", clean):
+            segment = segment.strip()
+            if segment:
+                sentences.append(segment)
+    return sentences
+
+
+def _discipline_metrics(text: str) -> dict[str, float | int]:
+    sentences = _body_sentences(text)
+    word_counts = [len(re.findall(r"\b[\w/-]+\b", sentence)) for sentence in sentences if sentence]
+    total_words = sum(word_counts)
+    hedge_count = sum(
+        1
+        for sentence in sentences
+        for word in re.findall(r"\b[a-z]+\b", sentence.lower())
+        if word in HEDGE_WORDS
+    )
+    avg_sentence_length = round(total_words / len(word_counts), 1) if word_counts else 0.0
+    long_sentence_count = sum(1 for count in word_counts if count > 24)
+    hedge_density = round((hedge_count / total_words) * 100, 2) if total_words else 0.0
+    compression_score = max(
+        0,
+        100
+        - max(0, int(avg_sentence_length - 16) * 3)
+        - min(24, hedge_count * 4)
+        - min(20, long_sentence_count * 5),
+    )
+    return {
+        "sentence_count": len(word_counts),
+        "avg_sentence_length": avg_sentence_length,
+        "hedge_count": hedge_count,
+        "hedge_density": hedge_density,
+        "compression_score": compression_score,
+    }
+
+
+def _repeated_explanatory_phrases(section_texts: dict[str, str]) -> dict[str, list[str]]:
+    ignored_prefixes = (
+        "deal:",
+        "provider:",
+        "mode:",
+        "entitlement status:",
+        "recommendation posture:",
+        "flag:",
+        "source:",
+        "timing:",
+        "package read:",
+        "confidence in initial read:",
+    )
+    phrase_sections: dict[str, set[str]] = {}
+    for section_name, text in section_texts.items():
+        seen_in_section: set[str] = set()
+        for raw_line in text.splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            clean = _strip_markdown(line)
+            if not clean:
+                continue
+            for phrase in re.split(r"[.:;]", clean):
+                normalized_phrase = _clean_output_text(phrase).lower()
+                if len(normalized_phrase.split()) < 5:
+                    continue
+                if normalized_phrase.startswith("no "):
+                    continue
+                if normalized_phrase.startswith(ignored_prefixes):
+                    continue
+                seen_in_section.add(normalized_phrase)
+        for phrase in seen_in_section:
+            phrase_sections.setdefault(phrase, set()).add(section_name)
+    return {
+        phrase: sorted(section_names)
+        for phrase, section_names in phrase_sections.items()
+        if len(section_names) > 1
+    }
+
+
+def _output_discipline_snapshot(section_texts: dict[str, str]) -> dict[str, object]:
+    metrics_by_section = {
+        section_name: _discipline_metrics(text)
+        for section_name, text in section_texts.items()
+    }
+    repeated_phrases = _repeated_explanatory_phrases(section_texts)
+    aggregate_sentences = sum(metrics["sentence_count"] for metrics in metrics_by_section.values())
+    aggregate_avg = (
+        round(
+            sum(metrics["avg_sentence_length"] * metrics["sentence_count"] for metrics in metrics_by_section.values())
+            / aggregate_sentences,
+            1,
+        )
+        if aggregate_sentences
+        else 0.0
+    )
+    aggregate_hedges = sum(metrics["hedge_count"] for metrics in metrics_by_section.values())
+    aggregate_words = sum(
+        sum(len(re.findall(r"\b[\w/-]+\b", sentence)) for sentence in _body_sentences(text))
+        for text in section_texts.values()
+    )
+    aggregate_hedge_density = round((aggregate_hedges / aggregate_words) * 100, 2) if aggregate_words else 0.0
+    aggregate_score = max(
+        0,
+        round(
+            (
+                sum(metrics["compression_score"] for metrics in metrics_by_section.values())
+                / max(len(metrics_by_section), 1)
+            )
+            - min(20, len(repeated_phrases) * 4)
+        ),
+    )
+    return {
+        "repeated_phrases": repeated_phrases,
+        "repeated_phrase_count": len(repeated_phrases),
+        "avg_sentence_length": aggregate_avg,
+        "hedge_density": aggregate_hedge_density,
+        "compression_score": aggregate_score,
+        "by_section": metrics_by_section,
+    }
+
+
 def _selected_issues(
     synthesis: DealSynthesis,
     output_name: str,
@@ -1087,35 +1307,19 @@ def _selected_issues(
 
 def _render_canonical_issue_risk_block(issue: CanonicalIssue, *, index: int) -> list[str]:
     lines = [f"### {index}. {issue.title}"]
-    lines.append(f"- Flag Grade: {issue.front_end_flag}")
-    lines.append(f"- Normality: {issue.normality_classification}")
-    lines.append(f"- Why Now: {issue.why_now}")
+    lines.append(f"- Flag: {_issue_status_line(issue)}")
+    lines.append(f"- Why It Matters: {_compress_statement(issue.why_it_matters, max_words=16)}")
     if issue.core_facts:
-        lines.append(f"- Core Fact: {issue.core_facts[0]}")
-    lines.append(f"- Why It Matters: {issue.why_it_matters}")
-    lines.append(f"- Likely Implication: {issue.likely_implication}")
-    lines.append(f"- Why This Is Elevated: {issue.front_end_flag_reason}")
-    lines.append(f"- Routine Vs Unusual Read: {issue.unusualness_rationale}")
-    lines.append(f"- Unresolved Question: {issue.open_questions[0] if issue.open_questions else 'No specific unresolved question was isolated.'}")
-    lines.append(f"- Missing Document / Confirmation: {issue.missing_confirmation or 'No separate missing confirmation was isolated.'}")
-    if issue.research_agenda:
-        step = issue.research_agenda[0]
-        lines.append(
-            f"- Suggested Next Research Step: Verify {step.verify_what}; request {step.request_item}; use {step.likely_source} ({step.timing})."
-        )
-    if issue.dependency_type:
-        lines.append(f"- Dependency Type: {issue.dependency_type}")
-    lines.append(f"- Critical Path Read: {issue.blocker_classification} | {issue.schedule_impact_classification}")
-    if issue.blocking_reason:
-        lines.append(f"- Why This Label: {issue.blocking_reason}")
-    blocked = _issue_blocks(issue)
-    if blocked:
-        lines.append(f"- What It Blocks: {blocked}")
-    lines.append(f"- What Would Resolve It: {issue.what_would_resolve_it}")
-    lines.append(f"- Decision Action: {issue.decision_action}")
-    if issue.gating_flags:
-        lines.append(f"- Gating Impact: {', '.join(issue.gating_flags)}")
-    lines.append(f"- Confidence: {issue.confidence}")
+        lines.append(f"- Fact: {_compress_statement(issue.core_facts[0], max_words=16)}")
+    if issue.normality_classification not in {"routine", "unknown"} and issue.unusualness_rationale:
+        lines.append(f"- Read: {_compress_statement(issue.unusualness_rationale, max_words=14)}")
+    if issue.why_now and issue.why_now != "unclear":
+        lines.append(f"- Timing: {_compress_statement(issue.why_now, max_words=8)}")
+    next_step = _issue_next_step(issue)
+    if next_step:
+        lines.append(f"- Next: {next_step}")
+    elif issue.what_would_resolve_it:
+        lines.append(f"- Next: {_compress_statement(issue.what_would_resolve_it, max_words=16)}")
     source = _format_citations(issue.citations[:3]) or ", ".join(issue.source_documents[:3])
     if source:
         lines.append(f"- Source: {source}")
@@ -1170,6 +1374,164 @@ def _build_pattern_lines(synthesis: DealSynthesis, issues: list[CanonicalIssue])
             f"The deal can continue under a '{posture}' posture, but only if the lead issues are resolved in the order shown."
         )
     return pattern_lines[:3]
+
+
+def _build_synthesis_judgment_lines(synthesis: DealSynthesis) -> list[str]:
+    registry = synthesis.canonical_issue_registry
+    lines = [
+        f"Package read: {registry.package_quality or 'adequate'}.",
+        f"Confidence in initial read: {registry.confidence_in_initial_read}.",
+    ]
+    if registry.central_risk_pattern:
+        lines.append(_compress_statement(registry.central_risk_pattern, max_words=18))
+    elif synthesis.executive_summary:
+        lines.append(_compress_statement(synthesis.executive_summary, max_words=18))
+    if registry.package_quality_reason:
+        lines.append(_compress_statement(registry.package_quality_reason, max_words=18))
+    elif registry.concern_pattern:
+        lines.append(_compress_statement(registry.concern_pattern, max_words=18))
+    return _unique_list(lines)[:4]
+
+
+def _build_routine_vs_elevated_lines(synthesis: DealSynthesis) -> list[str]:
+    issues = synthesis.canonical_issue_registry.issues
+    if not issues:
+        return ["No routine or elevated pattern was isolated from the current package."]
+    normality_counts = Counter(issue.normality_classification or "unknown" for issue in issues)
+    elevated_count = sum(
+        normality_counts.get(label, 0)
+        for label in ("mildly elevated", "elevated", "unusual")
+    )
+    routine_count = normality_counts.get("routine", 0)
+    lines: list[str] = []
+    if elevated_count:
+        if synthesis.canonical_issue_registry.issue_clusters:
+            cluster_labels = ", ".join(cluster.label for cluster in synthesis.canonical_issue_registry.issue_clusters[:2])
+            lines.append(_compress_statement(f"Elevated concern is concentrated in {cluster_labels}.", max_words=16))
+        else:
+            lines.append("Elevated concern is concentrated in a small issue set, not spread across every diligence lane.")
+    else:
+        lines.append("No unusually elevated issue set was isolated beyond routine package review.")
+    if routine_count:
+        lines.append("Routine friction is present, but it sits outside the real critical path.")
+    else:
+        lines.append("Routine process noise is not the main story in this package.")
+    return _unique_list(lines)[:3]
+
+
+def _build_synthesis_critical_path_lines(synthesis: DealSynthesis) -> list[str]:
+    registry = synthesis.canonical_issue_registry
+    lines = [
+        _compress_statement(
+            registry.critical_path_summary or "No critical-path issue was isolated from the current package.",
+            max_words=18,
+        )
+    ]
+    if registry.blocker_issue_ids:
+        lines.append("The main gating path is the blocker set, not routine coordination.")
+    elif registry.sequencing_issue_ids:
+        lines.append("The main path is sequencing-driven rather than blocked outright.")
+    if registry.fragility_classification:
+        lines.append(_compress_statement(f"Deal type: {registry.fragility_classification}.", max_words=10))
+    return _unique_list(lines)[:3]
+
+
+def _build_confidence_change_lines(synthesis: DealSynthesis) -> list[str]:
+    registry = synthesis.canonical_issue_registry
+    lines = [
+        _compress_statement(
+            f"Confidence changes once {unlock}.",
+            max_words=18,
+        )
+        for unlock in registry.confidence_unlocks[:3]
+    ]
+    if not lines and registry.front_end_unresolved_points:
+        lines.extend(
+            _compress_statement(f"Confidence changes once {point}.", max_words=18)
+            for point in registry.front_end_unresolved_points[:2]
+        )
+    if synthesis.contradictions:
+        lines.append("Confidence changes once the controlling document conflicts are resolved.")
+    if not lines:
+        lines.append("No single confirmation was isolated as the main confidence unlock.")
+    return _unique_list(lines)[:4]
+
+
+def _roadmap_investigate_lines(synthesis: DealSynthesis, roadmap) -> list[str]:
+    items = [
+        _issue_next_step(issue)
+        for issue in synthesis.canonical_issue_registry.issues
+        if issue.why_now == "investigate now" and _issue_next_step(issue)
+    ]
+    items.extend(
+        _compress_statement(f"Resolve the conflict: {finding.description}", max_words=16)
+        for finding in synthesis.contradictions[:2]
+    )
+    if not items:
+        items = [
+            _compress_statement(item, max_words=16)
+            for item in roadmap.investigate_immediately[:4]
+        ]
+    return _unique_list(items)[:5] or ["No issue was elevated to immediate investigation."]
+
+
+def _roadmap_request_lines(synthesis: DealSynthesis, roadmap) -> list[str]:
+    items = [
+        _compress_statement(_request_action_text(assessment.recommended_request), max_words=16)
+        for assessment in synthesis.omission_assessments
+        if assessment.front_end_status in {"missing and important", "stale and potentially unreliable", "conflicting across documents"}
+        and assessment.recommended_request
+    ]
+    items.extend(
+        _issue_next_step(issue)
+        for issue in synthesis.canonical_issue_registry.issues
+        if issue.why_now in {"investigate after initial read", "investigate before underwriting"} and _issue_next_step(issue)
+    )
+    if not items:
+        items = [
+            _compress_statement(item, max_words=16)
+            for item in roadmap.request_or_verify_soon[:4]
+        ]
+    return _unique_list(items)[:5] or ["No near-term request or verification item was isolated."]
+
+
+def _roadmap_read_lines(synthesis: DealSynthesis, roadmap) -> list[str]:
+    items = [
+        _read_first_line(recommendation)
+        for recommendation in synthesis.recommended_reading_order
+        if recommendation.bucket == "must read personally"
+    ]
+    if not items:
+        items = [_compress_statement(item, max_words=12) for item in roadmap.read_personally[:3]]
+    return _unique_list(items)[:4] or ["No must-read document was isolated."]
+
+
+def _roadmap_monitor_lines(synthesis: DealSynthesis, roadmap) -> list[str]:
+    items = [
+        _compress_statement(f"Monitor {issue.title.lower()}.", max_words=12)
+        for issue in synthesis.canonical_issue_registry.issues
+        if issue.why_now == "monitor unless other signals worsen"
+    ]
+    if not items:
+        items = [_compress_statement(item, max_words=12) for item in roadmap.monitor_later[:4]]
+    return _unique_list(items)[:4] or ["No monitor-later item was isolated."]
+
+
+def _roadmap_routine_lines(synthesis: DealSynthesis, roadmap) -> list[str]:
+    items = [
+        _compress_statement(
+            f"Treat {issue.title.lower()} as routine unless the support is contradicted.",
+            max_words=16,
+        )
+        for issue in synthesis.canonical_issue_registry.issues
+        if issue.why_now == "likely routine unless contradicted" or issue.normality_classification == "routine"
+    ]
+    if not items:
+        items = [
+            _compress_statement(item, max_words=16)
+            for item in roadmap.likely_routine_unless_changed[:4]
+        ]
+    return _unique_list(items)[:4] or ["No issue was explicitly classified as likely routine."]
 
 
 def _build_error_report_markdown(
@@ -1414,12 +1776,12 @@ def _render_contradictions(contradictions: list) -> list[str]:
     lines: list[str] = []
     for index, finding in enumerate(contradictions, start=1):
         lines.append(f"### Tension {index}")
-        lines.append(f"- Description: {finding.description}")
+        lines.append(f"- Conflict: {_compress_statement(finding.description, max_words=16)}")
         if finding.citations:
             lines.append(f"- Documents: {_format_citations(finding.citations)}")
         elif finding.source_documents:
             lines.append(f"- Documents: {', '.join(finding.source_documents)}")
-        lines.append(f"- Why It Matters: {finding.why_it_matters}")
+        lines.append(f"- Why It Matters: {_compress_statement(finding.why_it_matters, max_words=14)}")
         lines.append("")
     return lines
 

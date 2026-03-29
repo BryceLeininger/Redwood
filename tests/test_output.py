@@ -37,7 +37,11 @@ from land_due_diligence_agent.models import (
     RunSummary,
     StructuredFact,
 )
-from land_due_diligence_agent.output.markdown_writer import write_markdown_outputs
+from land_due_diligence_agent.output.markdown_writer import (
+    _compress_statement,
+    _output_discipline_snapshot,
+    write_markdown_outputs,
+)
 
 
 class OutputWriterTests(unittest.TestCase):
@@ -396,31 +400,26 @@ class OutputWriterTests(unittest.TestCase):
             content = (output_dir / "01_executive_summary.md").read_text(encoding="utf-8")
             self.assertIn("Demo Deal", content)
             self.assertIn("heuristic", content)
-            self.assertIn("What This Package Actually Tells Us", content)
+            self.assertIn("## Conclusions", content)
             self.assertIn("Biggest Flags", content)
             self.assertIn("Biggest Blind Spots", content)
-            self.assertIn("What To Read First", content)
+            self.assertIn("Read First", content)
             self.assertIn("Known Limitations Of This Run", content)
             self.assertIn("Recommendation Posture", content)
+            self.assertNotIn("Why It Matters", content)
             key_risk_content = (output_dir / "02_key_risks.md").read_text(encoding="utf-8")
             self.assertIn("Ranked Issues", key_risk_content)
-            self.assertIn("Flag Grade", key_risk_content)
-            self.assertIn("Core Fact", key_risk_content)
+            self.assertIn("Flag:", key_risk_content)
             self.assertIn("Why It Matters", key_risk_content)
-            self.assertIn("Missing Document / Confirmation", key_risk_content)
-            self.assertIn("Suggested Next Research Step", key_risk_content)
-            self.assertIn("Gating Impact", key_risk_content)
+            self.assertIn("Next:", key_risk_content)
             self.assertIn("Source: Memo p. 1", key_risk_content)
             self.assertIn("Potential Contradictions / Tensions", key_risk_content)
             synthesis_content = (output_dir / "07_deal_synthesis.md").read_text(encoding="utf-8")
-            self.assertIn("What This Package Really Tells Us", synthesis_content)
-            self.assertIn("What Appears Unresolved", synthesis_content)
-            self.assertIn("What Looks Routine", synthesis_content)
-            self.assertIn("Central Pattern", synthesis_content)
-            self.assertIn("Root-Cause Clusters", synthesis_content)
-            self.assertIn("Real Critical Path", synthesis_content)
-            self.assertIn("Potential Contradictions / Tensions", synthesis_content)
-            self.assertIn("What Most Deserves Deeper Work", synthesis_content)
+            self.assertIn("Initial Judgment", synthesis_content)
+            self.assertIn("Routine Vs Elevated", synthesis_content)
+            self.assertIn("Critical Path", synthesis_content)
+            self.assertIn("What Changes Confidence", synthesis_content)
+            self.assertNotIn("### 1.", synthesis_content)
             ic_content = (output_dir / "09_investment_committee_brief.md").read_text(encoding="utf-8")
             self.assertIn("Recommendation", ic_content)
             self.assertIn("Package Read", ic_content)
@@ -451,6 +450,10 @@ class OutputWriterTests(unittest.TestCase):
             self.assertIn("Package Quality Inputs", debug_content)
             self.assertIn("Reading Priority Debug", debug_content)
             self.assertIn("Omission Front-End Classification", debug_content)
+            self.assertIn("Output Discipline", debug_content)
+            self.assertIn("Repeated Phrases Across Sections", debug_content)
+            self.assertIn("Average Sentence Length", debug_content)
+            self.assertIn("Compression Score", debug_content)
             self.assertIn("Precedent Summary", debug_content)
             self.assertIn("Retrieved Precedent Matches", debug_content)
             self.assertIn("precedent=+6", debug_content)
@@ -462,9 +465,34 @@ class OutputWriterTests(unittest.TestCase):
             self.assertIn("Investigate Immediately", roadmap_content)
             self.assertIn("Read Personally", roadmap_content)
             self.assertIn("Likely Routine Unless Other Evidence Changes View", roadmap_content)
-            self.assertIn("Top Real Flags To Investigate", roadmap_content)
-            self.assertIn("Top Missing Items To Request", roadmap_content)
-            self.assertIn("Top Documents To Read First", roadmap_content)
+            self.assertNotIn("Top Real Flags To Investigate", roadmap_content)
+            self.assertNotIn("Top Missing Items To Request", roadmap_content)
+            self.assertNotIn("Top Documents To Read First", roadmap_content)
+            self.assertNotIn("Why it matters", roadmap_content)
+            self.assertNotIn("What it blocks", roadmap_content)
+            self.assertNotIn(
+                "Environmental scope still affects underwriting confidence.",
+                content,
+            )
+            self.assertNotIn(
+                "Environmental scope still affects underwriting confidence.",
+                synthesis_content,
+            )
+            self.assertNotIn(
+                "Environmental scope still affects underwriting confidence.",
+                roadmap_content,
+            )
+            snapshot = _output_discipline_snapshot(
+                {
+                    "01_executive_summary.md": content,
+                    "02_key_risks.md": key_risk_content,
+                    "07_deal_synthesis.md": synthesis_content,
+                    "13_further_diligence_roadmap.md": roadmap_content,
+                }
+            )
+            self.assertLessEqual(snapshot["repeated_phrase_count"], 1)
+            self.assertLessEqual(snapshot["avg_sentence_length"], 18)
+            self.assertLessEqual(snapshot["hedge_density"], 1.0)
             feedback_rows = json.loads((output_dir / "12_reviewer_feedback_template.json").read_text(encoding="utf-8"))
             self.assertEqual(feedback_rows[0]["issue_id"], "environmental-followup")
             self.assertEqual(
@@ -628,12 +656,22 @@ class OutputWriterTests(unittest.TestCase):
             self.assertNotIn("Decision Framing", content)
             key_risk_content = (output_dir / "02_key_risks.md").read_text(encoding="utf-8")
             self.assertIn("Ranked Issues", key_risk_content)
-            self.assertIn("What Would Resolve It", key_risk_content)
+            self.assertIn("Next:", key_risk_content)
             self.assertNotIn("Potential Contradictions / Tensions", key_risk_content)
             summary_content = (output_dir / "00_run_summary.md").read_text(encoding="utf-8")
             self.assertIn("Analysis Mode: `fast`", summary_content)
             self.assertIn("Approximate LLM Calls: 1", summary_content)
             self.assertIn("OCR fallback was required on 1 file(s) across 1 page(s).", summary_content)
+
+    def test_compression_helper_limits_hedges_and_length(self) -> None:
+        text = "This could potentially indicate a possible risk to schedule and could possibly delay approvals."
+        compressed = _compress_statement(text, max_words=10)
+
+        self.assertLessEqual(len(compressed.split()), 10)
+        self.assertNotIn("potentially", compressed.lower())
+        self.assertNotIn("possibly", compressed.lower())
+        hedge_count = sum(word in {"may", "could", "might"} for word in compressed.lower().split())
+        self.assertLessEqual(hedge_count, 1)
 
     def test_writes_summary_and_error_report_without_synthesis(self) -> None:
         run_summary = RunSummary(
