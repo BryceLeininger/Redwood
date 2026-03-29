@@ -144,20 +144,28 @@ class OpenAIProvider(LLMProvider):
         compact: bool = False,
     ) -> str:
         rollup_text = "\n".join(f"- {category}: {summary}" for category, summary in category_rollup.items())
-        risk_text = "\n".join(f"- {risk.category} ({risk.severity}): {risk.summary}" for risk in key_risks)
+        risk_text = "\n".join(
+            f"- {risk.category} ({risk.severity})\n"
+            f"  issue: {risk.issue or risk.summary}\n"
+            f"  why it matters: {risk.why_it_matters or 'Not specified'}\n"
+            f"  likely implication: {risk.likely_implication or 'Not specified'}"
+            for risk in key_risks
+        )
         if not risk_text:
             risk_text = "- No concentrated risk signals detected."
         missing_text = "\n".join(f"- {item}" for item in missing_items)
         if not missing_text:
             missing_text = "- No obvious diligence gaps detected from keyword coverage."
         prompt_intro = (
-            "Rewrite the following deal-level diligence synthesis into two short paragraphs. "
-            "Keep it concise, factual, and framed for a land acquisition decision-maker."
+            "Write a concise, investment-oriented overall read for a land acquisition diligence review. "
+            "Use two short paragraphs at most. Lead with the most important conclusions, avoid generic phrases, "
+            "state what appears known versus unresolved, and emphasize what matters most for closing, cost certainty, timing, and execution. "
+            "Do not simply list diligence categories."
         )
         if compact:
             prompt_intro = (
-                "Rewrite the following deal-level diligence synthesis into one short paragraph. "
-                "Keep only the highest-priority decision points and limitations."
+                "Write one short, decisive overall read for a land acquisition decision-maker. "
+                "Keep only the highest-priority conclusions and unresolved issues. Do not use generic filler."
             )
         return (
             f"{prompt_intro}\n\n"

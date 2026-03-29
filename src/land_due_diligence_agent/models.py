@@ -39,6 +39,10 @@ class RiskFinding:
     severity: str
     summary: str
     evidence: list[str] = field(default_factory=list)
+    issue: str = ""
+    why_it_matters: str = ""
+    likely_implication: str = ""
+    source_documents: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)
