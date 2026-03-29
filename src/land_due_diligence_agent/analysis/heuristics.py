@@ -12,7 +12,17 @@ from land_due_diligence_agent.analysis.risk_rules import (
     EXPECTED_DILIGENCE_ITEMS,
     EXPECTED_DILIGENCE_PATH_HINTS,
 )
-from land_due_diligence_agent.models import Citation, ContradictionFinding, DocumentAnalysis, DocumentRecord, ReadingRecommendation, RiskFinding
+from land_due_diligence_agent.models import (
+    ChallengeFinding,
+    Citation,
+    ContradictionFinding,
+    DocumentAnalysis,
+    DocumentRecord,
+    IssueAnalysis,
+    PriorityAssessment,
+    ReadingRecommendation,
+    RiskFinding,
+)
 from land_due_diligence_agent.utils.text import clip_text, extractive_summary, split_sentences, unique_preserve_order
 
 
@@ -346,6 +356,8 @@ def collect_seller_questions(
     missing_items: list[str],
     key_risks: list[RiskFinding],
     contradictions: list[ContradictionFinding],
+    *,
+    issue_analyses: list[IssueAnalysis] | None = None,
 ) -> list[str]:
     """Merge category-driven questions with confidence and gap follow-up."""
 
@@ -357,6 +369,9 @@ def collect_seller_questions(
 
     for contradiction in contradictions:
         questions.append(_build_contradiction_question(contradiction))
+
+    for issue in (issue_analyses or [])[:3]:
+        questions.extend(issue.unresolved_questions[:1])
 
     for analysis in document_analyses:
         if analysis.confidence == "low" and analysis.focus_areas:
@@ -377,6 +392,9 @@ def build_executive_summary_draft(
     deal_name: str,
     document_analyses: list[DocumentAnalysis],
     key_risks: list[RiskFinding],
+    issue_analyses: list[IssueAnalysis],
+    challenge_findings: list[ChallengeFinding],
+    priority_assessment: PriorityAssessment | None,
     contradictions: list[ContradictionFinding],
     entitlement_status: str,
     missing_items: list[str],
@@ -402,6 +420,23 @@ def build_executive_summary_draft(
         if contradictions
         else "- No material cross-document contradiction was isolated from the current package."
     )
+    issue_text = (
+        "\n".join(
+            f"- {issue.label}: {issue.decision_summary} Confidence: {issue.confidence}."
+            for issue in issue_analyses[:5]
+        )
+        if issue_analyses
+        else "- No issue-specific analysis lane was populated."
+    )
+    priority_text = _build_priority_assessment_text(priority_assessment)
+    challenge_text = (
+        "\n".join(
+            f"- {finding.heading}: {finding.concern} Likely pushback: {finding.likely_pushback}"
+            for finding in challenge_findings[:4]
+        )
+        if challenge_findings
+        else "- No adversarial challenge point was elevated from the current package."
+    )
     gating_points = "\n".join(f"- {point}" for point in _build_gating_points(key_risks, missing_items, low_confidence_docs))
     decision_points = "\n".join(f"- {point}" for point in _build_decision_points(key_risks, contradictions, missing_items, low_confidence_docs))
     limitation_text = (
@@ -421,13 +456,32 @@ def build_executive_summary_draft(
         f"Most important conclusions:\n{conclusions}\n\n"
         f"Primary risks (deal-shaping):\n{primary_risk_text}\n\n"
         f"Secondary risks (important but not gating):\n{secondary_risk_text}\n\n"
+        f"Issue-specific analysis:\n{issue_text}\n\n"
+        f"Top risk calls:\n{priority_text}\n\n"
         f"What appears known:\n{known_points}\n\n"
         f"What appears unresolved:\n{unresolved_points}\n\n"
         f"Potential contradictions / tensions:\n{contradiction_text}\n\n"
         f"Gating issues:\n{gating_points}\n\n"
+        f"Adversarial challenge pass:\n{challenge_text}\n\n"
         f"What matters most for the acquisition decision:\n{decision_points}"
         f"{limitation_text}{extraction_text}"
     ).strip()
+
+
+def _build_priority_assessment_text(priority_assessment: PriorityAssessment | None) -> str:
+    if priority_assessment is None:
+        return "- No priority assessment was built."
+
+    lines: list[str] = []
+    for callout in priority_assessment.top_deal_shaping_issues[:3]:
+        lines.append(f"- Top deal-shaping issue ({callout.label}): {callout.statement}")
+    if priority_assessment.top_cost_risk is not None:
+        lines.append(f"- Top cost risk: {priority_assessment.top_cost_risk.statement}")
+    if priority_assessment.top_timing_risk is not None:
+        lines.append(f"- Top timing risk: {priority_assessment.top_timing_risk.statement}")
+    if priority_assessment.top_closability_risk is not None:
+        lines.append(f"- Top closability risk: {priority_assessment.top_closability_risk.statement}")
+    return "\n".join(lines) or "- No priority assessment was built."
 
 
 def _build_aggregate_risk(

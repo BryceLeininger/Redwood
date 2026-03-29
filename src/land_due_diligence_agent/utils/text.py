@@ -8,6 +8,21 @@ from collections.abc import Iterable
 
 _SPACE_RE = re.compile(r"[ \t]+")
 _SENTENCE_RE = re.compile(r"(?<=[.!?])\s+")
+_MOJIBAKE_REPLACEMENTS = {
+    "\u00a0": " ",
+    "Â ": " ",
+    "Â": "",
+    "â€™": "'",
+    "â€˜": "'",
+    "â€œ": '"',
+    "â€\u009d": '"',
+    "â€\x9d": '"',
+    "â€”": "-",
+    "â€\"": "-",
+    "â€\x94": "-",
+    "â€“": "-",
+    "Ã—": "x",
+}
 
 
 def normalize_text(text: str) -> str:
@@ -16,6 +31,7 @@ def normalize_text(text: str) -> str:
     if not text:
         return ""
 
+    text = repair_text_artifacts(text)
     text = text.replace("\r\n", "\n").replace("\r", "\n")
     lines = [_SPACE_RE.sub(" ", line).strip() for line in text.split("\n")]
 
@@ -31,6 +47,21 @@ def normalize_text(text: str) -> str:
         previous_blank = False
 
     return "\n".join(normalized_lines).strip()
+
+
+def repair_text_artifacts(text: str) -> str:
+    """Repair common OCR / mojibake artifacts without adding heavy dependencies."""
+
+    if not text:
+        return ""
+
+    repaired = text
+    for source, target in _MOJIBAKE_REPLACEMENTS.items():
+        repaired = repaired.replace(source, target)
+
+    repaired = re.sub(r"[\u200b-\u200d\u2060]", "", repaired)
+    repaired = re.sub(r"\s+([,.;:!?])", r"\1", repaired)
+    return repaired.strip()
 
 
 def split_sentences(text: str) -> list[str]:

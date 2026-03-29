@@ -7,7 +7,6 @@ import logging
 from land_due_diligence_agent.analysis.heuristics import (
     aggregate_risks,
     analyze_document,
-    build_category_rollup,
     build_executive_summary_draft,
     collect_seller_questions,
     detect_contradictions,
@@ -15,8 +14,16 @@ from land_due_diligence_agent.analysis.heuristics import (
     infer_entitlement_status,
     recommend_reading_order,
 )
+from land_due_diligence_agent.analysis.multi_pass import (
+    build_adversarial_challenges,
+    build_category_rollup_from_issue_analyses,
+    build_issue_analyses,
+    build_priority_assessment,
+    build_structured_facts,
+    enrich_issue_analyses_with_contradictions,
+)
 from land_due_diligence_agent.llm.base import LLMProvider
-from land_due_diligence_agent.models import DealSynthesis, DocumentRecord, LLMCallFailure
+from land_due_diligence_agent.models import DealSynthesis, DocumentRecord, LLMCallFailure, PriorityAssessment
 
 
 def run_analysis(
@@ -65,6 +72,7 @@ def run_analysis(
                 )
         document_analyses.append(analysis)
 
+    structured_facts = build_structured_facts(document_analyses)
     key_risks = aggregate_risks(document_analyses)
     if analysis_mode == "fast":
         primary_risks = [risk for risk in key_risks if risk.priority_tier == "primary"] or key_risks[:3]
@@ -72,23 +80,55 @@ def run_analysis(
 
     missing_items = identify_missing_items(documents, document_analyses)
     entitlement_status = infer_entitlement_status(documents)
-    category_rollup = (
-        {risk.category: risk.summary for risk in key_risks}
-        if analysis_mode == "fast"
-        else build_category_rollup(document_analyses)
-    )
+    issue_analyses = []
+    if analysis_mode == "full":
+        issue_analyses = build_issue_analyses(
+            structured_facts=structured_facts,
+            document_analyses=document_analyses,
+            key_risks=key_risks,
+            missing_items=missing_items,
+        )
     contradictions = (
         detect_contradictions(document_analyses, key_risks, missing_items)
         if analysis_mode == "full"
         else []
     )
-    seller_questions = collect_seller_questions(document_analyses, missing_items, key_risks, contradictions)
+    if analysis_mode == "full":
+        issue_analyses = enrich_issue_analyses_with_contradictions(issue_analyses, contradictions)
+
+    priority_assessment = build_priority_assessment(issue_analyses, contradictions) if analysis_mode == "full" else None
+    challenge_findings = (
+        build_adversarial_challenges(
+            issue_analyses=issue_analyses,
+            contradictions=contradictions,
+            missing_items=missing_items,
+            document_analyses=document_analyses,
+            priority_assessment=priority_assessment,
+        )
+        if analysis_mode == "full" and priority_assessment is not None
+        else []
+    )
+    category_rollup = (
+        {risk.category: risk.summary for risk in key_risks}
+        if analysis_mode == "fast"
+        else build_category_rollup_from_issue_analyses(issue_analyses)
+    )
+    seller_questions = collect_seller_questions(
+        document_analyses,
+        missing_items,
+        key_risks,
+        contradictions,
+        issue_analyses=issue_analyses,
+    )
     if analysis_mode == "fast":
         seller_questions = seller_questions[:6]
     executive_summary = build_executive_summary_draft(
         deal_name=deal_name,
         document_analyses=document_analyses,
         key_risks=key_risks,
+        issue_analyses=issue_analyses,
+        challenge_findings=challenge_findings,
+        priority_assessment=priority_assessment,
         contradictions=contradictions,
         entitlement_status=entitlement_status,
         missing_items=missing_items,
@@ -128,6 +168,10 @@ def run_analysis(
         missing_items=missing_items,
         category_rollup=category_rollup,
         document_analyses=document_analyses,
+        structured_facts=structured_facts,
+        issue_analyses=issue_analyses,
+        challenge_findings=challenge_findings,
+        priority_assessment=priority_assessment or PriorityAssessment(),
         contradictions=contradictions,
         extraction_errors=extraction_errors,
         llm_failures=llm_failures,

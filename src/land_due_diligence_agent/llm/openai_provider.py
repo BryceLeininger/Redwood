@@ -6,7 +6,7 @@ from openai import OpenAI
 
 from land_due_diligence_agent.llm.base import LLMProvider
 from land_due_diligence_agent.models import ContradictionFinding, DocumentRecord, RiskFinding
-from land_due_diligence_agent.utils.text import clip_text
+from land_due_diligence_agent.utils.text import clip_text, normalize_text
 
 _DOCUMENT_TEXT_LIMIT = 6000
 _DOCUMENT_TEXT_RETRY_LIMIT = 2500
@@ -218,7 +218,7 @@ class OpenAIProvider(LLMProvider):
                     input=prompt,
                     max_output_tokens=max_output_tokens,
                 )
-                text = (response.output_text or "").strip()
+                text = normalize_text(response.output_text or "")
                 if not text:
                     raise RuntimeError("OpenAI provider returned an empty response.")
                 return text

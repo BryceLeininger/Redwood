@@ -7,16 +7,21 @@ import unittest
 from pathlib import Path
 
 from land_due_diligence_agent.models import (
+    ChallengeFinding,
     Citation,
     ContradictionFinding,
     DealSynthesis,
     DocumentAnalysis,
     DocumentRecord,
     FileProcessingResult,
+    IssueAnalysis,
     LLMCallFailure,
+    PriorityAssessment,
+    PriorityCallout,
     ReadingRecommendation,
     RiskFinding,
     RunSummary,
+    StructuredFact,
 )
 from land_due_diligence_agent.output.markdown_writer import write_markdown_outputs
 
@@ -58,6 +63,42 @@ class OutputWriterTests(unittest.TestCase):
             confidence_reason="Text extraction was strong with no OCR-related warnings.",
             focus_areas=["Environmental Risks"],
         )
+        structured_fact = StructuredFact(
+            category="Environmental Risks",
+            statement="Memo: Phase I ESA indicates environmental follow-up remains open.",
+            document_name="Memo",
+            confidence="high",
+            citations=[Citation(document_name="Memo", chunk_id="page-0001", page_number=1)],
+        )
+        issue_analysis = IssueAnalysis(
+            category="Environmental Risks",
+            label="Environmental",
+            core_facts=[structured_fact],
+            unresolved_questions=["What remediation scope remains open and who is paying for it?"],
+            why_it_matters="This affects underwriting certainty.",
+            likely_implication="Mitigation cost remains open.",
+            confidence="high",
+            citations=[Citation(document_name="Memo", chunk_id="page-0001", page_number=1)],
+            source_documents=["Memo"],
+            priority_score=95,
+            decision_summary="The Phase I ESA leaves environmental follow-up open and cost certainty exposed.",
+        )
+        challenge_finding = ChallengeFinding(
+            heading="Optimism Check",
+            concern="The package can overstate cost certainty if remediation is treated as closed when the Phase I still leaves follow-up open.",
+            why_it_matters="Environmental scope can expand after deal approval if the follow-up assumptions are wrong.",
+            likely_pushback="IC will ask why remediation reserve is not better evidenced before approval.",
+            citations=[Citation(document_name="Memo", chunk_id="page-0001", page_number=1)],
+            source_documents=["Memo"],
+            priority=80,
+        )
+        priority_callout = PriorityCallout(
+            label="Environmental",
+            statement="The Phase I ESA leaves environmental follow-up open and cost certainty exposed.",
+            why_it_matters="Environmental scope still affects underwriting confidence.",
+            citations=[Citation(document_name="Memo", chunk_id="page-0001", page_number=1)],
+            category="Environmental Risks",
+        )
         synthesis = DealSynthesis(
             deal_name="Demo Deal",
             executive_summary="Executive summary text.",
@@ -77,6 +118,13 @@ class OutputWriterTests(unittest.TestCase):
             missing_items=["ALTA or boundary survey"],
             category_rollup={"Environmental Risks": "One document flagged environmental signals."},
             document_analyses=[analysis],
+            structured_facts=[structured_fact],
+            issue_analyses=[issue_analysis],
+            challenge_findings=[challenge_finding],
+            priority_assessment=PriorityAssessment(
+                top_deal_shaping_issues=[priority_callout],
+                top_cost_risk=priority_callout,
+            ),
             contradictions=[
                 ContradictionFinding(
                     description="Memo p. 1 shows environmental follow-up, but the pricing package still reads as preliminary.",
@@ -120,43 +168,57 @@ class OutputWriterTests(unittest.TestCase):
             (output_dir / "run.log").write_text("log", encoding="utf-8")
             written = write_markdown_outputs(output_dir, run_summary=run_summary, synthesis=synthesis)
 
-            self.assertEqual(len(written), 10)
+            self.assertEqual(len(written), 11)
             self.assertTrue((output_dir / "00_run_summary.md").exists())
             self.assertTrue((output_dir / "08_error_report.md").exists())
             self.assertTrue((output_dir / "01_executive_summary.md").exists())
             self.assertTrue((output_dir / "09_investment_committee_brief.md").exists())
+            self.assertTrue((output_dir / "10_issue_analysis.md").exists())
             content = (output_dir / "01_executive_summary.md").read_text(encoding="utf-8")
             self.assertIn("Demo Deal", content)
             self.assertIn("heuristic", content)
             self.assertIn("Decision Framing", content)
             self.assertIn("Top Decision Drivers", content)
+            self.assertIn("Top Risk Calls", content)
             self.assertIn("Decision Readiness", content)
             self.assertIn("Status:", content)
             self.assertIn("Most Important Conclusions", content)
             self.assertIn("Potential Contradictions / Tensions", content)
+            self.assertIn("Adversarial Challenge", content)
             self.assertIn("Gating Issues", content)
             self.assertIn("Known Limitations Of This Run", content)
+            self.assertNotIn("- - Top deal-shaping issue", content)
             key_risk_content = (output_dir / "02_key_risks.md").read_text(encoding="utf-8")
+            self.assertIn("Risk Priorities", key_risk_content)
             self.assertIn("Primary Risks (Deal-Shaping)", key_risk_content)
             self.assertIn("Document Anchor", key_risk_content)
             self.assertIn("Gating Impact", key_risk_content)
             self.assertIn("Source: Memo p. 1", key_risk_content)
             self.assertIn("Potential Contradictions / Tensions", key_risk_content)
             synthesis_content = (output_dir / "07_deal_synthesis.md").read_text(encoding="utf-8")
+            self.assertIn("Top Risk Calls", synthesis_content)
             self.assertIn("Primary Risks (Deal-Shaping)", synthesis_content)
             self.assertIn("Gating Issues", synthesis_content)
             self.assertIn("[Source: Memo p. 1]", synthesis_content)
             self.assertIn("Potential Contradictions / Tensions", synthesis_content)
+            self.assertIn("Adversarial Challenge", synthesis_content)
             ic_content = (output_dir / "09_investment_committee_brief.md").read_text(encoding="utf-8")
             self.assertIn("Decision Framing", ic_content)
             self.assertIn("Top Decision Drivers", ic_content)
+            self.assertIn("Top Risk Calls", ic_content)
             self.assertIn("Deal Breakers", ic_content)
             self.assertIn("Decision Readiness", ic_content)
+            self.assertIn("Likely IC Pushback", ic_content)
             self.assertIn("Potential Contradictions / Tensions", ic_content)
+            issue_content = (output_dir / "10_issue_analysis.md").read_text(encoding="utf-8")
+            self.assertIn("Issue Analysis", issue_content)
+            self.assertIn("Environmental", issue_content)
+            self.assertIn("Core Facts", issue_content)
             summary_content = (output_dir / "00_run_summary.md").read_text(encoding="utf-8")
             self.assertIn("Files found: 1", summary_content)
             self.assertIn("run.log", summary_content)
             self.assertIn("09_investment_committee_brief.md", summary_content)
+            self.assertIn("10_issue_analysis.md", summary_content)
             self.assertIn("LLM Model: `gpt-4.1`", summary_content)
             self.assertIn("Analysis Mode: `full`", summary_content)
             self.assertIn("OCR fallback was required on 1 file(s) across 1 page(s).", summary_content)

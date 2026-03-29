@@ -88,6 +88,68 @@ class ContradictionFinding:
 
 
 @dataclass(slots=True)
+class StructuredFact:
+    """Document-anchored fact extracted into an issue/category lane."""
+
+    category: str
+    statement: str
+    document_name: str
+    confidence: str
+    citations: list[Citation] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class IssueAnalysis:
+    """Multi-pass issue analysis for one acquisition workstream."""
+
+    category: str
+    label: str
+    core_facts: list[StructuredFact]
+    unresolved_questions: list[str]
+    why_it_matters: str
+    likely_implication: str
+    confidence: str
+    citations: list[Citation] = field(default_factory=list)
+    source_documents: list[str] = field(default_factory=list)
+    priority_score: int = 0
+    decision_summary: str = ""
+
+
+@dataclass(slots=True)
+class ChallengeFinding:
+    """Adversarial challenge against the current recommendation."""
+
+    heading: str
+    concern: str
+    why_it_matters: str
+    likely_pushback: str
+    citations: list[Citation] = field(default_factory=list)
+    source_documents: list[str] = field(default_factory=list)
+    priority: int = 0
+
+
+@dataclass(slots=True)
+class PriorityCallout:
+    """Named priority cut for the decision-maker."""
+
+    label: str
+    statement: str
+    why_it_matters: str
+    citations: list[Citation] = field(default_factory=list)
+    category: str = ""
+
+
+@dataclass(slots=True)
+class PriorityAssessment:
+    """Decision-priority rollup derived from issue analyses and contradictions."""
+
+    top_deal_shaping_issues: list[PriorityCallout] = field(default_factory=list)
+    top_cost_risk: PriorityCallout | None = None
+    top_timing_risk: PriorityCallout | None = None
+    top_closability_risk: PriorityCallout | None = None
+
+
+@dataclass(slots=True)
 class LLMCallFailure:
     """Structured details for a failed LLM refinement call."""
 
@@ -138,6 +200,10 @@ class DealSynthesis:
     missing_items: list[str]
     category_rollup: dict[str, str]
     document_analyses: list[DocumentAnalysis]
+    structured_facts: list[StructuredFact] = field(default_factory=list)
+    issue_analyses: list[IssueAnalysis] = field(default_factory=list)
+    challenge_findings: list[ChallengeFinding] = field(default_factory=list)
+    priority_assessment: PriorityAssessment = field(default_factory=PriorityAssessment)
     contradictions: list[ContradictionFinding] = field(default_factory=list)
     extraction_errors: list[str] = field(default_factory=list)
     llm_failures: list[LLMCallFailure] = field(default_factory=list)

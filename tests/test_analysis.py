@@ -26,6 +26,13 @@ def _document(relative_path: str, text: str) -> DocumentRecord:
 
 
 class AnalysisTests(unittest.TestCase):
+    def test_normalize_text_repairs_common_mojibake(self) -> None:
+        text = "The dealâ€™s geotech scopeâ€”and cost basisâ€”need review."
+        self.assertEqual(
+            normalize_text(text),
+            "The deal's geotech scope-and cost basis-need review.",
+        )
+
     def test_generates_key_risks_and_questions(self) -> None:
         documents = [
             _document(
@@ -99,6 +106,9 @@ class AnalysisTests(unittest.TestCase):
         )
 
         self.assertTrue(synthesis.contradictions)
+        self.assertTrue(synthesis.issue_analyses)
+        self.assertTrue(synthesis.priority_assessment.top_deal_shaping_issues)
+        self.assertTrue(synthesis.challenge_findings)
         self.assertTrue(any("frontage" in finding.description.lower() or "access" in finding.description.lower() for finding in synthesis.contradictions))
         self.assertTrue(all(finding.citations for finding in synthesis.contradictions))
 
