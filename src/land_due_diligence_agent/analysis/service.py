@@ -27,6 +27,7 @@ from land_due_diligence_agent.analysis.issue_registry import (
 from land_due_diligence_agent.analysis.multi_pass import (
     build_structured_facts,
 )
+from land_due_diligence_agent.analysis.precedents import build_precedent_engine
 from land_due_diligence_agent.llm.base import LLMProvider
 from land_due_diligence_agent.models import DealSynthesis, DocumentRecord, LLMCallFailure, PriorityAssessment
 
@@ -91,12 +92,19 @@ def run_analysis(
         else []
     )
     omission_assessments = build_omission_assessments(document_analyses)
+    precedent_engine = build_precedent_engine(
+        deal_name=deal_name,
+        documents=documents,
+        logger=logger,
+    )
     registry = build_canonical_issue_registry(
         key_risks=key_risks,
         contradictions=contradictions,
         omission_assessments=omission_assessments,
         document_analyses=document_analyses,
         merge_arbiter=_merge_arbiter_for_provider(llm_provider, logger) if analysis_mode == "full" else None,
+        precedent_retriever=precedent_engine.retrieve,
+        deal_metadata=precedent_engine.deal_metadata,
     )
     recommendation = build_recommendation_from_registry(registry)
     registry.output_selections = build_section_selections(

@@ -367,6 +367,18 @@ def _build_issue_analysis_markdown(synthesis: DealSynthesis) -> str:
         lines.append("### What Would Resolve It")
         lines.append(f"- {issue.what_would_resolve_it}")
         lines.append("")
+        if issue.precedent_summary.sample_size:
+            lines.append("### Precedent Read")
+            lines.append(f"- Historical Frequency: {issue.precedent_summary.historical_frequency}")
+            lines.append(f"- False-Positive Rate: {_format_percentage(issue.precedent_summary.false_positive_rate)}")
+            lines.append(f"- Typical Impact: {issue.precedent_summary.typical_impact}")
+            lines.append(f"- Resolution Pattern: {issue.precedent_summary.resolution_pattern}")
+            lines.append(
+                f"- Calibration: {issue.precedent_summary.confidence_adjustment} "
+                f"({issue.precedent_summary.score_adjustment:+d} priority points)"
+            )
+            lines.append(f"- Read: {issue.precedent_summary.reasoning}")
+            lines.append("")
 
     return "\n".join(lines).rstrip() + "\n"
 
@@ -490,6 +502,7 @@ def _build_issue_registry_debug_markdown(synthesis: DealSynthesis) -> str:
             f"- Canonical Issues: {len(registry.issues)}",
             f"- Merge Decisions: {len(registry.merge_decisions)}",
             f"- Arbitration Records: {len(registry.arbitration_records)}",
+            f"- Deal Metadata: stage={registry.deal_metadata.stage or 'n/a'}, region={registry.deal_metadata.region or 'n/a'}, product={registry.deal_metadata.product or 'n/a'}",
             "",
         ]
     )
@@ -512,14 +525,35 @@ def _build_issue_registry_debug_markdown(synthesis: DealSynthesis) -> str:
             lines.append(f"- Filter Reasons: {', '.join(issue.top_line_filter_reasons)}")
         lines.append(f"- Output Bucket: {issue.output_bucket}")
         lines.append(f"- Decision Action: {issue.decision_action}")
+        lines.append(
+            f"- Score Adjustments: calibration={issue.priority_score.calibration_adjustment:+d}, "
+            f"precedent={issue.priority_score.precedent_adjustment:+d}"
+        )
         lines.append(f"- Source: {_format_citations(issue.citations[:3]) or ', '.join(issue.source_documents[:3]) or 'None'}")
         lines.append(f"- Merged Fragments: {', '.join(issue.merged_fragment_ids) or 'None'}")
         if issue.calibration_notes:
             lines.append(f"- Calibration Notes: {' | '.join(issue.calibration_notes)}")
-        if issue.precedent_references:
+        if issue.precedent_summary.sample_size:
             lines.append(
-                f"- Precedent Hooks: {', '.join(reference.title for reference in issue.precedent_references[:3])}"
+                f"- Precedent Summary: frequency={issue.precedent_summary.historical_frequency}, "
+                f"sample={issue.precedent_summary.sample_size}, "
+                f"false-positive rate={_format_percentage(issue.precedent_summary.false_positive_rate)}, "
+                f"typical impact={issue.precedent_summary.typical_impact}, "
+                f"confidence adjustment={issue.precedent_summary.confidence_adjustment}, "
+                f"score adjustment={issue.precedent_summary.score_adjustment:+d}"
             )
+            lines.append(f"- Precedent Read: {issue.precedent_summary.reasoning}")
+        if issue.precedent_references:
+            lines.append("- Retrieved Precedent Matches:")
+            for reference in issue.precedent_references[:5]:
+                lines.append(
+                    "  - "
+                    f"{reference.title} | score={reference.similarity_score:.3f} | "
+                    f"{reference.relevance} | outcome={reference.actual_outcome} | "
+                    f"false_positive={reference.false_positive_flag}"
+                )
+                if reference.resolution_notes:
+                    lines.append(f"    Resolution: {reference.resolution_notes}")
         lines.append("")
 
     lines.extend(["## Merge Decisions", ""])
@@ -574,6 +608,12 @@ def _build_reviewer_feedback_template_json(synthesis: DealSynthesis) -> str:
             }
         )
     return json.dumps(rows, indent=2) + "\n"
+
+
+def _format_percentage(value: float | None) -> str:
+    if value is None:
+        return "n/a"
+    return f"{value:.0%}"
 
 
 def _selected_issues(

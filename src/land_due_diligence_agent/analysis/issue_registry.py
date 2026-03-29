@@ -17,6 +17,7 @@ from land_due_diligence_agent.models import (
     ChallengeFinding,
     Citation,
     ContradictionFinding,
+    DealMetadata,
     DocumentAnalysis,
     IssueAnalysis,
     IssueFragment,
@@ -25,6 +26,7 @@ from land_due_diligence_agent.models import (
     MergeArbitrationRecord,
     OmissionAssessment,
     OutputIssueSelection,
+    PrecedentCalibration,
     PrecedentReference,
     PriorityAssessment,
     PriorityCallout,
@@ -68,7 +70,7 @@ _RELATION_ORDER = {
 }
 
 MergeArbiter = Callable[[IssueFragment, IssueFragment], tuple[str, str] | None]
-PrecedentRetriever = Callable[[CanonicalIssue], list[PrecedentReference]]
+PrecedentRetriever = Callable[[CanonicalIssue], PrecedentCalibration | None]
 
 _ALLOWED_CROSS_CATEGORY_MERGES = {
     frozenset({"Budget / Cost Reliability", "Title / Access Concerns"}),
@@ -347,6 +349,7 @@ def build_canonical_issue_registry(
     weights: PriorityWeights | None = None,
     merge_arbiter: MergeArbiter | None = None,
     precedent_retriever: PrecedentRetriever | None = None,
+    deal_metadata: DealMetadata | None = None,
 ) -> CanonicalIssueRegistry:
     """Build the canonical issue registry from raw deal signals."""
 
@@ -374,6 +377,7 @@ def build_canonical_issue_registry(
         arbitration_records=arbitration_records,
         omission_assessments=omission_assessments,
         weights=weights,
+        deal_metadata=deal_metadata or DealMetadata(),
     )
 
 
@@ -993,6 +997,7 @@ def _merge_issue_fragments(
                 title=template["title"],
                 category=template["category"],
                 status=_merge_status(ordered_fragments),
+                issue_type=issue_id,
                 core_facts=core_facts,
                 best_evidence=best_evidence or core_facts[:2],
                 why_it_matters=_select_fragment_line(
@@ -1070,11 +1075,16 @@ def _calibrate_canonical_issues(
         issue.issue_strength = _classify_issue_strength(issue)
         issue.false_positive_risk = _classify_false_positive_risk(issue)
         issue.decision_relevant = _is_decision_relevant(issue)
+        if precedent_retriever is not None:
+            calibration = precedent_retriever(issue)
+            if calibration is not None:
+                issue.precedent_references = calibration.matches
+                issue.precedent_summary = calibration.summary
+                _apply_precedent_calibration(issue)
+        issue.decision_relevant = _is_decision_relevant(issue)
         issue.top_line_filter_reasons = _top_line_filter_reasons(issue)
         issue.top_line_eligible = not issue.top_line_filter_reasons
         issue.calibration_notes = _calibration_notes(issue)
-        if precedent_retriever is not None:
-            issue.precedent_references = precedent_retriever(issue)
 
 
 def _classify_evidence_basis(
@@ -1148,11 +1158,22 @@ def _classify_false_positive_risk(issue: CanonicalIssue) -> str:
 
 
 def _is_decision_relevant(issue: CanonicalIssue) -> bool:
+    if (
+        issue.precedent_summary.confidence_adjustment == "down"
+        and issue.evidence_basis in {"omission_only", "routine_missing_support", "weak_inference"}
+    ):
+        return False
     if "Closing" in issue.gating_flags:
         return True
     if issue.materiality == "high" and issue.false_positive_risk != "high":
         return True
     if issue.evidence_basis in {"direct_unresolved_risk", "contradictory_evidence_present"} and issue.issue_strength == "strong":
+        return True
+    if (
+        issue.precedent_summary.confidence_adjustment == "up"
+        and issue.evidence_basis in {"direct_confirmed_risk", "direct_unresolved_risk", "contradictory_evidence_present"}
+        and issue.false_positive_risk != "high"
+    ):
         return True
     return False
 
@@ -1178,9 +1199,69 @@ def _calibration_notes(issue: CanonicalIssue) -> list[str]:
         notes.append("looks closer to routine process friction than a deal-specific problem")
     if issue.evidence_basis == "omission_only":
         notes.append("issue is being inferred from missing support rather than direct conflicting evidence")
+    if issue.precedent_summary.sample_size:
+        notes.append(
+            "precedent sample="
+            f"{issue.precedent_summary.sample_size}, "
+            f"historical frequency={issue.precedent_summary.historical_frequency}, "
+            f"false-positive rate={_format_precedent_rate(issue.precedent_summary.false_positive_rate)}, "
+            f"confidence adjustment={issue.precedent_summary.confidence_adjustment}, "
+            f"score adjustment={issue.precedent_summary.score_adjustment:+d}"
+        )
     if issue.top_line_filter_reasons:
         notes.append("filtered from top-line outputs because " + ", ".join(issue.top_line_filter_reasons))
     return notes
+
+
+def _apply_precedent_calibration(issue: CanonicalIssue) -> None:
+    summary = issue.precedent_summary
+    if summary.sample_size == 0:
+        return
+
+    if (
+        summary.confidence_adjustment == "down"
+        and issue.evidence_basis in {"omission_only", "routine_missing_support", "weak_inference"}
+    ):
+        issue.issue_strength = _shift_strength(issue.issue_strength, -1)
+        issue.false_positive_risk = _shift_false_positive_risk(issue.false_positive_risk, 1)
+        issue.normal_friction_flag = True
+    elif summary.confidence_adjustment == "down" and summary.false_positive_rate is not None and summary.false_positive_rate >= 0.5:
+        issue.false_positive_risk = _shift_false_positive_risk(issue.false_positive_risk, 1)
+
+    if (
+        summary.confidence_adjustment == "up"
+        and issue.evidence_basis in {"direct_confirmed_risk", "direct_unresolved_risk", "contradictory_evidence_present"}
+    ):
+        issue.issue_strength = _shift_strength(issue.issue_strength, 1)
+        issue.false_positive_risk = _shift_false_positive_risk(issue.false_positive_risk, -1)
+        if issue.materiality == "medium" and summary.typical_impact in {"cost", "delay", "redesign"}:
+            issue.materiality = "high"
+
+
+def _shift_strength(level: str, steps: int) -> str:
+    order = ["weak", "moderate", "strong"]
+    try:
+        index = order.index(level)
+    except ValueError:
+        return level
+    new_index = max(0, min(len(order) - 1, index + steps))
+    return order[new_index]
+
+
+def _shift_false_positive_risk(level: str, steps: int) -> str:
+    order = ["low", "medium", "high"]
+    try:
+        index = order.index(level)
+    except ValueError:
+        return level
+    new_index = max(0, min(len(order) - 1, index + steps))
+    return order[new_index]
+
+
+def _format_precedent_rate(value: float | None) -> str:
+    if value is None:
+        return "n/a"
+    return f"{value:.0%}"
 
 
 def _score_canonical_issues(
@@ -1212,6 +1293,7 @@ def _score_issue(issue: CanonicalIssue, weights: PriorityWeights) -> IssuePriori
     seller_shiftability = _seller_shiftability(issue)
     ic_sensitivity = max(base[7], 5 if issue.status in {"conflicted", "not found"} else 0)
     calibration_adjustment = _calibration_adjustment(issue)
+    precedent_adjustment = issue.precedent_summary.score_adjustment * weights.precedent_signal
 
     total = (
         cost_exposure * weights.cost_exposure
@@ -1225,6 +1307,7 @@ def _score_issue(issue: CanonicalIssue, weights: PriorityWeights) -> IssuePriori
         + seller_shiftability * weights.seller_shiftability_penalty
         + ic_sensitivity * weights.ic_sensitivity
         + calibration_adjustment
+        + precedent_adjustment
     )
     return IssuePriorityScore(
         total=total,
@@ -1239,6 +1322,7 @@ def _score_issue(issue: CanonicalIssue, weights: PriorityWeights) -> IssuePriori
         seller_shiftability=seller_shiftability,
         ic_sensitivity=ic_sensitivity,
         calibration_adjustment=calibration_adjustment,
+        precedent_adjustment=precedent_adjustment,
     )
 
 

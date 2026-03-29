@@ -13,6 +13,7 @@ from land_due_diligence_agent.models import (
     ChallengeFinding,
     Citation,
     ContradictionFinding,
+    DealMetadata,
     DealSynthesis,
     DocumentAnalysis,
     DocumentRecord,
@@ -22,6 +23,8 @@ from land_due_diligence_agent.models import (
     LLMCallFailure,
     OmissionAssessment,
     OutputIssueSelection,
+    PrecedentReference,
+    PrecedentSummary,
     PriorityAssessment,
     PriorityCallout,
     ReadingRecommendation,
@@ -111,6 +114,7 @@ class OutputWriterTests(unittest.TestCase):
             title="Environmental follow-up is not fully closed",
             category="Environmental Risks",
             status="open",
+            issue_type="environmental-followup",
             core_facts=["Phase I ESA still leaves remediation scope unresolved."],
             best_evidence=["Memo: Phase I ESA indicates environmental follow-up remains open."],
             why_it_matters="Environmental scope still affects underwriting confidence.",
@@ -136,6 +140,35 @@ class OutputWriterTests(unittest.TestCase):
                 likelihood=5,
                 evidence_confidence=5,
                 ic_sensitivity=4,
+                precedent_adjustment=6,
+            ),
+            precedent_references=[
+                PrecedentReference(
+                    precedent_id="anon-west-007",
+                    title="Anon West Multifamily G: Environmental follow-up is not fully closed",
+                    issue_type="environmental-followup",
+                    category="Environmental Risks",
+                    deal_metadata=DealMetadata(stage="acquisition-dd", region="west", product="multifamily"),
+                    similarity_score=0.781,
+                    category_match=True,
+                    stage_match=True,
+                    real_issue=True,
+                    materiality="high",
+                    actual_outcome="cost",
+                    resolution_notes="Closed after confirming the remediation scope, seller credit, and agency sign-off path.",
+                    relevance="same issue type, same stage",
+                )
+            ],
+            precedent_summary=PrecedentSummary(
+                historical_frequency=2,
+                false_positive_rate=0.5,
+                typical_impact="cost",
+                resolution_pattern="Closed after confirming the remediation scope, seller credit, and agency sign-off path.",
+                confidence_adjustment="none",
+                score_adjustment=6,
+                sample_size=2,
+                sparse_data=False,
+                reasoning="Historical outcomes are mixed, so the current issue should stay anchored to the cited deal evidence first.",
             ),
             output_bucket="executive",
         )
@@ -179,6 +212,7 @@ class OutputWriterTests(unittest.TestCase):
                     OutputIssueSelection("09_investment_committee_brief.md", "environmental-followup", 1, "Board-level decision driver"),
                     OutputIssueSelection("10_issue_analysis.md", "environmental-followup", 1, "Appendix coverage"),
                 ],
+                deal_metadata=DealMetadata(stage="acquisition-dd", region="west", product="multifamily"),
             ),
             challenge_findings=[challenge_finding],
             priority_assessment=PriorityAssessment(
@@ -280,6 +314,10 @@ class OutputWriterTests(unittest.TestCase):
             self.assertIn("environmental-followup", debug_content)
             self.assertIn("Evidence Basis", debug_content)
             self.assertIn("Top-Line Eligible", debug_content)
+            self.assertIn("Deal Metadata", debug_content)
+            self.assertIn("Precedent Summary", debug_content)
+            self.assertIn("Retrieved Precedent Matches", debug_content)
+            self.assertIn("precedent=+6", debug_content)
             feedback_rows = json.loads((output_dir / "12_reviewer_feedback_template.json").read_text(encoding="utf-8"))
             self.assertEqual(feedback_rows[0]["issue_id"], "environmental-followup")
             self.assertEqual(

@@ -179,6 +179,15 @@ class PriorityCallout:
     category: str = ""
 
 
+@dataclass(slots=True, frozen=True)
+class DealMetadata:
+    """Portable deal metadata used for precedent matching and calibration."""
+
+    stage: str = ""
+    region: str = ""
+    product: str = ""
+
+
 @dataclass(slots=True)
 class PriorityAssessment:
     """Decision-priority rollup derived from issue analyses and contradictions."""
@@ -203,6 +212,7 @@ class PriorityWeights:
     preclose_mitigation_difficulty: int = 4
     seller_shiftability_penalty: int = 3
     ic_sensitivity: int = 5
+    precedent_signal: int = 1
 
 
 @dataclass(slots=True)
@@ -221,16 +231,72 @@ class IssuePriorityScore:
     seller_shiftability: int = 0
     ic_sensitivity: int = 0
     calibration_adjustment: int = 0
+    precedent_adjustment: int = 0
 
 
 @dataclass(slots=True)
 class PrecedentReference:
-    """Optional precedent hook result for future issue calibration."""
+    """Retrieved precedent issue used for outcome-aware calibration."""
 
     precedent_id: str
     title: str
+    issue_type: str = ""
+    canonical_title: str = ""
+    category: str = ""
+    deal_metadata: DealMetadata = field(default_factory=DealMetadata)
+    similarity_score: float = 0.0
+    category_match: bool = False
+    stage_match: bool = False
+    region_match: bool = False
+    product_match: bool = False
+    real_issue: bool | None = None
+    materiality: str = "medium"
+    actual_outcome: str = "none"
+    false_positive_flag: bool = False
+    resolution_notes: str = ""
     relevance: str = ""
     note: str = ""
+
+
+@dataclass(slots=True)
+class PrecedentIssueRecord:
+    """Historical issue outcome record used by the local precedent store."""
+
+    precedent_id: str
+    deal_name: str
+    issue_type: str
+    canonical_title: str
+    category: str
+    description: str = ""
+    deal_metadata: DealMetadata = field(default_factory=DealMetadata)
+    real_issue: bool | None = None
+    materiality: str = "medium"
+    actual_outcome: str = "none"
+    false_positive_flag: bool = False
+    resolution_notes: str = ""
+
+
+@dataclass(slots=True)
+class PrecedentSummary:
+    """Aggregate precedent calibration for one canonical issue."""
+
+    historical_frequency: int = 0
+    false_positive_rate: float | None = None
+    typical_impact: str = "none"
+    resolution_pattern: str = ""
+    confidence_adjustment: str = "none"
+    score_adjustment: int = 0
+    sample_size: int = 0
+    sparse_data: bool = True
+    reasoning: str = ""
+
+
+@dataclass(slots=True)
+class PrecedentCalibration:
+    """Retrieved precedent matches plus the summary used to calibrate an issue."""
+
+    matches: list[PrecedentReference] = field(default_factory=list)
+    summary: PrecedentSummary = field(default_factory=PrecedentSummary)
 
 
 @dataclass(slots=True)
@@ -269,6 +335,7 @@ class CanonicalIssue:
     title: str
     category: str
     status: str
+    issue_type: str = ""
     core_facts: list[str] = field(default_factory=list)
     best_evidence: list[str] = field(default_factory=list)
     why_it_matters: str = ""
@@ -298,6 +365,7 @@ class CanonicalIssue:
     top_line_filter_reasons: list[str] = field(default_factory=list)
     calibration_notes: list[str] = field(default_factory=list)
     precedent_references: list[PrecedentReference] = field(default_factory=list)
+    precedent_summary: PrecedentSummary = field(default_factory=PrecedentSummary)
     output_bucket: str = "appendix"
 
 
@@ -343,6 +411,7 @@ class CanonicalIssueRegistry:
     omission_assessments: list[OmissionAssessment] = field(default_factory=list)
     output_selections: list[OutputIssueSelection] = field(default_factory=list)
     weights: PriorityWeights = field(default_factory=PriorityWeights)
+    deal_metadata: DealMetadata = field(default_factory=DealMetadata)
 
 
 @dataclass(slots=True)
