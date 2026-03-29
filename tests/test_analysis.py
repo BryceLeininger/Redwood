@@ -14,7 +14,7 @@ from land_due_diligence_agent.analysis.issue_registry import (
 from land_due_diligence_agent.analysis.service import run_analysis
 from land_due_diligence_agent.llm.base import LLMProvider
 from land_due_diligence_agent.llm.heuristic_provider import HeuristicProvider
-from land_due_diligence_agent.models import ContradictionFinding, DocumentRecord, OmissionAssessment, RiskFinding
+from land_due_diligence_agent.models import Citation, ContradictionFinding, DocumentRecord, OmissionAssessment, RiskFinding
 from land_due_diligence_agent.utils.text import normalize_text
 
 
@@ -261,6 +261,124 @@ class AnalysisTests(unittest.TestCase):
         self.assertEqual(len(executive_ids), len(set(executive_ids)))
         self.assertEqual(len(key_risk_ids), len(set(key_risk_ids)))
         self.assertTrue(set(executive_ids).issubset(set(key_risk_ids)))
+
+    def test_omission_only_issue_is_downgraded_when_not_critical(self) -> None:
+        registry = build_canonical_issue_registry(
+            key_risks=[],
+            contradictions=[],
+            omission_assessments=[
+                OmissionAssessment(
+                    item="Agency correspondence log",
+                    category="Entitlement Status",
+                    status="unclear whether present",
+                    rationale="No clean correspondence log is in the package.",
+                )
+            ],
+            document_analyses=[],
+        )
+
+        issue = next(issue for issue in registry.issues if issue.issue_id == "entitlement-conditions")
+        self.assertEqual(issue.evidence_basis, "routine_missing_support")
+        self.assertEqual(issue.issue_strength, "weak")
+        self.assertFalse(issue.top_line_eligible)
+        self.assertIn("normal process friction", issue.top_line_filter_reasons)
+
+    def test_strong_direct_evidence_issue_stays_top_line_eligible(self) -> None:
+        registry = build_canonical_issue_registry(
+            key_risks=[
+                RiskFinding(
+                    category="Title / Access Concerns",
+                    severity="high",
+                    summary="Preliminary title report lists an access easement exception affecting the site layout.",
+                    issue="Title and access clearance is not closed.",
+                    why_it_matters="This goes directly to closability and lenderability.",
+                    likely_implication="Closing should not be treated as clean until the exception is cured or endorsed.",
+                    source_documents=["Title Report"],
+                    citations=[Citation(document_name="Title Report", chunk_id="page-0001", page_number=1)],
+                    gating_flags=["Closing", "Underwriting confidence"],
+                )
+            ],
+            contradictions=[],
+            omission_assessments=[],
+            document_analyses=[],
+        )
+
+        issue = registry.issues[0]
+        self.assertIn(issue.evidence_basis, {"direct_confirmed_risk", "direct_unresolved_risk"})
+        self.assertEqual(issue.issue_strength, "strong")
+        self.assertTrue(issue.top_line_eligible)
+
+    def test_output_selection_filters_weak_routine_issue(self) -> None:
+        registry = build_canonical_issue_registry(
+            key_risks=[
+                RiskFinding(
+                    category="Environmental Risks",
+                    severity="high",
+                    summary="Phase I ESA identifies follow-up work.",
+                    issue="Environmental follow-up is not fully closed.",
+                    why_it_matters="Environmental scope still affects underwriting confidence.",
+                    likely_implication="Mitigation cost remains open.",
+                    source_documents=["Phase I ESA"],
+                    gating_flags=["Underwriting confidence"],
+                )
+            ],
+            contradictions=[],
+            omission_assessments=[
+                OmissionAssessment(
+                    item="Agency correspondence log",
+                    category="Entitlement Status",
+                    status="unclear whether present",
+                    rationale="No clean correspondence log is in the package.",
+                )
+            ],
+            document_analyses=[],
+        )
+        recommendation = build_recommendation_from_registry(registry)
+        selections = build_section_selections(registry, recommendation, analysis_mode="full")
+
+        executive_ids = [selection.issue_id for selection in selections if selection.output_name == "01_executive_summary.md"]
+        self.assertIn("environmental-followup", executive_ids)
+        self.assertNotIn("entitlement-conditions", executive_ids)
+
+    def test_ambiguous_merge_arbiter_is_used(self) -> None:
+        arbiter_calls: list[tuple[str, str]] = []
+
+        def _arbiter(left_fragment, right_fragment):
+            arbiter_calls.append((left_fragment.fragment_id, right_fragment.fragment_id))
+            return "same_issue", "Utility scope and schedule exposure should be treated as one issue."
+
+        registry = build_canonical_issue_registry(
+            key_risks=[
+                RiskFinding(
+                    category="Budget / Cost Reliability",
+                    severity="high",
+                    summary="The site-development cost package is still budgetary and allowance-driven.",
+                    issue="Cost package is still budgetary.",
+                    why_it_matters="Basis remains exposed if the current cost stack is not auditable.",
+                    likely_implication="Land basis remains provisional until pricing is locked.",
+                    source_documents=["Cost Memo"],
+                    gating_flags=["Underwriting confidence"],
+                ),
+                RiskFinding(
+                    category="Fee / Exaction Burden",
+                    severity="medium",
+                    summary="Impact fee assumptions are still preliminary in the same underwriting package.",
+                    issue="Fee stack is not locked.",
+                    why_it_matters="The same underwriting package still depends on estimated fee assumptions.",
+                    likely_implication="Land basis can move if the fee stack resets.",
+                    source_documents=["Cost Memo"],
+                    gating_flags=["Underwriting confidence"],
+                ),
+            ],
+            contradictions=[],
+            omission_assessments=[],
+            document_analyses=[],
+            merge_arbiter=_arbiter,
+        )
+
+        self.assertTrue(arbiter_calls)
+        self.assertTrue(registry.arbitration_records)
+        self.assertTrue(registry.arbitration_records[0].used_arbiter)
 
 
 if __name__ == "__main__":

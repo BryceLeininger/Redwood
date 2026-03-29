@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -233,13 +234,14 @@ class OutputWriterTests(unittest.TestCase):
             (output_dir / "run.log").write_text("log", encoding="utf-8")
             written = write_markdown_outputs(output_dir, run_summary=run_summary, synthesis=synthesis)
 
-            self.assertEqual(len(written), 12)
+            self.assertEqual(len(written), 13)
             self.assertTrue((output_dir / "00_run_summary.md").exists())
             self.assertTrue((output_dir / "08_error_report.md").exists())
             self.assertTrue((output_dir / "01_executive_summary.md").exists())
             self.assertTrue((output_dir / "09_investment_committee_brief.md").exists())
             self.assertTrue((output_dir / "10_issue_analysis.md").exists())
             self.assertTrue((output_dir / "11_issue_registry_debug.md").exists())
+            self.assertTrue((output_dir / "12_reviewer_feedback_template.json").exists())
             content = (output_dir / "01_executive_summary.md").read_text(encoding="utf-8")
             self.assertIn("Demo Deal", content)
             self.assertIn("heuristic", content)
@@ -276,12 +278,31 @@ class OutputWriterTests(unittest.TestCase):
             self.assertIn("Issue Registry Debug", debug_content)
             self.assertIn("Canonical Issue Registry", debug_content)
             self.assertIn("environmental-followup", debug_content)
+            self.assertIn("Evidence Basis", debug_content)
+            self.assertIn("Top-Line Eligible", debug_content)
+            feedback_rows = json.loads((output_dir / "12_reviewer_feedback_template.json").read_text(encoding="utf-8"))
+            self.assertEqual(feedback_rows[0]["issue_id"], "environmental-followup")
+            self.assertEqual(
+                set(feedback_rows[0]),
+                {
+                    "issue_id",
+                    "real_issue",
+                    "materiality",
+                    "decision_relevant",
+                    "duplicate_of",
+                    "overstated",
+                    "understated",
+                    "correct_action",
+                    "notes",
+                },
+            )
             summary_content = (output_dir / "00_run_summary.md").read_text(encoding="utf-8")
             self.assertIn("Files found: 1", summary_content)
             self.assertIn("run.log", summary_content)
             self.assertIn("09_investment_committee_brief.md", summary_content)
             self.assertIn("10_issue_analysis.md", summary_content)
             self.assertIn("11_issue_registry_debug.md", summary_content)
+            self.assertIn("12_reviewer_feedback_template.json", summary_content)
             self.assertIn("LLM Model: `gpt-4.1`", summary_content)
             self.assertIn("Analysis Mode: `full`", summary_content)
             self.assertIn("OCR fallback was required on 1 file(s) across 1 page(s).", summary_content)
@@ -401,6 +422,7 @@ class OutputWriterTests(unittest.TestCase):
             self.assertFalse((output_dir / "07_deal_synthesis.md").exists())
             self.assertFalse((output_dir / "09_investment_committee_brief.md").exists())
             self.assertFalse((output_dir / "11_issue_registry_debug.md").exists())
+            self.assertFalse((output_dir / "12_reviewer_feedback_template.json").exists())
             content = (output_dir / "01_executive_summary.md").read_text(encoding="utf-8")
             self.assertIn("Mode:** fast", content)
             self.assertNotIn("Decision Framing", content)

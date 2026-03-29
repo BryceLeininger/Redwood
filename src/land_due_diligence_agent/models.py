@@ -220,6 +220,45 @@ class IssuePriorityScore:
     preclose_mitigation_difficulty: int = 0
     seller_shiftability: int = 0
     ic_sensitivity: int = 0
+    calibration_adjustment: int = 0
+
+
+@dataclass(slots=True)
+class PrecedentReference:
+    """Optional precedent hook result for future issue calibration."""
+
+    precedent_id: str
+    title: str
+    relevance: str = ""
+    note: str = ""
+
+
+@dataclass(slots=True)
+class ReviewerIssueFeedback:
+    """Reviewer feedback template row for post-run calibration."""
+
+    issue_id: str
+    real_issue: bool | None = None
+    materiality: str = "medium"
+    decision_relevant: bool | None = None
+    duplicate_of: str | None = None
+    overstated: bool = False
+    understated: bool = False
+    correct_action: str = ""
+    notes: str = ""
+
+
+@dataclass(slots=True)
+class MergeArbitrationRecord:
+    """Trace for ambiguous merge review, optionally via LLM arbitration."""
+
+    left_key: str
+    right_key: str
+    deterministic_relation: str
+    deterministic_confidence: str
+    final_relation: str
+    used_arbiter: bool = False
+    rationale: str = ""
 
 
 @dataclass(slots=True)
@@ -249,6 +288,16 @@ class CanonicalIssue:
     merged_fragment_ids: list[str] = field(default_factory=list)
     merged_fragment_titles: list[str] = field(default_factory=list)
     priority_score: IssuePriorityScore = field(default_factory=IssuePriorityScore)
+    materiality: str = "medium"
+    evidence_basis: str = "weak_inference"
+    issue_strength: str = "moderate"
+    false_positive_risk: str = "medium"
+    normal_friction_flag: bool = False
+    decision_relevant: bool = True
+    top_line_eligible: bool = True
+    top_line_filter_reasons: list[str] = field(default_factory=list)
+    calibration_notes: list[str] = field(default_factory=list)
+    precedent_references: list[PrecedentReference] = field(default_factory=list)
     output_bucket: str = "appendix"
 
 
@@ -290,6 +339,7 @@ class CanonicalIssueRegistry:
     fragments: list[IssueFragment] = field(default_factory=list)
     issues: list[CanonicalIssue] = field(default_factory=list)
     merge_decisions: list[MergeDecision] = field(default_factory=list)
+    arbitration_records: list[MergeArbitrationRecord] = field(default_factory=list)
     omission_assessments: list[OmissionAssessment] = field(default_factory=list)
     output_selections: list[OutputIssueSelection] = field(default_factory=list)
     weights: PriorityWeights = field(default_factory=PriorityWeights)

@@ -99,6 +99,40 @@ class OpenAIProvider(LLMProvider):
             max_output_tokens=450,
         )
 
+    def arbitrate_issue_merge(
+        self,
+        *,
+        left_issue: dict[str, str],
+        right_issue: dict[str, str],
+    ) -> tuple[str, str] | None:
+        prompt = (
+            "Classify the relationship between two land-acquisition diligence issues. "
+            "Return exactly two lines:\n"
+            "relation: <same_issue|parent_child|related_but_distinct|separate>\n"
+            "rationale: <short reason>\n\n"
+            f"Left issue:\n{clip_text(self._format_issue_for_merge(left_issue), 1400)}\n\n"
+            f"Right issue:\n{clip_text(self._format_issue_for_merge(right_issue), 1400)}"
+        )
+        response = self.client.responses.create(
+            model=self.model,
+            input=prompt,
+            max_output_tokens=120,
+        )
+        text = normalize_text(response.output_text or "")
+        if not text:
+            return None
+        relation = ""
+        rationale = ""
+        for line in text.splitlines():
+            lower = line.lower()
+            if lower.startswith("relation:"):
+                relation = line.split(":", 1)[1].strip()
+            elif lower.startswith("rationale:"):
+                rationale = line.split(":", 1)[1].strip()
+        if relation not in {"same_issue", "parent_child", "related_but_distinct", "separate"}:
+            return None
+        return relation, rationale or "No rationale returned."
+
     def _build_document_prompt(
         self,
         *,
@@ -255,4 +289,16 @@ class OpenAIProvider(LLMProvider):
         return (
             f"{stage} attempt {attempt_number} failed for {target} "
             f"(model={self.model}, prompt_chars={prompt_chars}): {' <- '.join(chain)}"
+        )
+
+    def _format_issue_for_merge(self, issue: dict[str, str]) -> str:
+        return "\n".join(
+            [
+                f"title: {issue.get('title', '')}",
+                f"category: {issue.get('category', '')}",
+                f"why it matters: {issue.get('why_it_matters', '')}",
+                f"likely implication: {issue.get('likely_implication', '')}",
+                f"evidence basis: {issue.get('evidence_basis', '')}",
+                f"citations: {issue.get('citations', '')}",
+            ]
         )

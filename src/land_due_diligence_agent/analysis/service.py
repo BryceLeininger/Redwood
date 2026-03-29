@@ -96,6 +96,7 @@ def run_analysis(
         contradictions=contradictions,
         omission_assessments=omission_assessments,
         document_analyses=document_analyses,
+        merge_arbiter=_merge_arbiter_for_provider(llm_provider, logger) if analysis_mode == "full" else None,
     )
     recommendation = build_recommendation_from_registry(registry)
     registry.output_selections = build_section_selections(
@@ -181,3 +182,32 @@ def _format_llm_exception(exc: Exception) -> str:
         parts.append(f"{type(current).__name__}: {detail}")
         current = current.__cause__
     return " <- ".join(parts)
+
+
+def _merge_arbiter_for_provider(llm_provider: LLMProvider, logger: logging.Logger):
+    provider_method = getattr(llm_provider, "arbitrate_issue_merge", None)
+    if provider_method is None:
+        return None
+
+    def _arbiter(left_fragment, right_fragment):
+        try:
+            return provider_method(
+                left_issue=_fragment_for_arbiter(left_fragment),
+                right_issue=_fragment_for_arbiter(right_fragment),
+            )
+        except Exception as exc:  # pragma: no cover - provider/network failure path
+            logger.warning("Merge arbitration failed for %s vs %s: %s", left_fragment.fragment_id, right_fragment.fragment_id, _format_llm_exception(exc))
+            return None
+
+    return _arbiter
+
+
+def _fragment_for_arbiter(fragment) -> dict[str, str]:
+    return {
+        "title": fragment.title,
+        "category": fragment.category,
+        "why_it_matters": fragment.why_it_matters,
+        "likely_implication": fragment.likely_implication,
+        "evidence_basis": fragment.source_type,
+        "citations": "; ".join(fragment.source_documents[:3]),
+    }

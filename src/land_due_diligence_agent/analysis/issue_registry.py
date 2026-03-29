@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from collections import Counter, defaultdict
 from dataclasses import dataclass
+from typing import Callable
 
 from land_due_diligence_agent.analysis.risk_rules import (
     EXPECTED_DILIGENCE_ITEMS,
@@ -21,12 +22,15 @@ from land_due_diligence_agent.models import (
     IssueFragment,
     IssuePriorityScore,
     MergeDecision,
+    MergeArbitrationRecord,
     OmissionAssessment,
     OutputIssueSelection,
+    PrecedentReference,
     PriorityAssessment,
     PriorityCallout,
     PriorityWeights,
     RecommendationDecision,
+    ReviewerIssueFeedback,
     RiskFinding,
 )
 from land_due_diligence_agent.utils.files import slugify
@@ -54,6 +58,31 @@ _CATEGORY_PRIORITY = {
     "Fee / Exaction Burden": 85,
     "Budget / Cost Reliability": 84,
     "Schedule Risks": 80,
+}
+
+_RELATION_ORDER = {
+    "separate": 0,
+    "related_but_distinct": 1,
+    "parent_child": 2,
+    "same_issue": 3,
+}
+
+MergeArbiter = Callable[[IssueFragment, IssueFragment], tuple[str, str] | None]
+PrecedentRetriever = Callable[[CanonicalIssue], list[PrecedentReference]]
+
+_ALLOWED_CROSS_CATEGORY_MERGES = {
+    frozenset({"Budget / Cost Reliability", "Title / Access Concerns"}),
+    frozenset({"Budget / Cost Reliability", "Geotechnical Risks"}),
+    frozenset({"Budget / Cost Reliability", "Utilities / Infrastructure Issues"}),
+    frozenset({"Budget / Cost Reliability", "Offsite Obligations"}),
+    frozenset({"Budget / Cost Reliability", "Fee / Exaction Burden"}),
+    frozenset({"Schedule Risks", "Title / Access Concerns"}),
+    frozenset({"Schedule Risks", "Entitlement Status"}),
+    frozenset({"Schedule Risks", "Utilities / Infrastructure Issues"}),
+    frozenset({"Schedule Risks", "Offsite Obligations"}),
+    frozenset({"Schedule Risks", "Flood / Drainage Issues"}),
+    frozenset({"Schedule Risks", "Geotechnical Risks"}),
+    frozenset({"Schedule Risks", "Environmental Risks"}),
 }
 
 
@@ -316,6 +345,8 @@ def build_canonical_issue_registry(
     omission_assessments: list[OmissionAssessment],
     document_analyses: list[DocumentAnalysis],
     weights: PriorityWeights | None = None,
+    merge_arbiter: MergeArbiter | None = None,
+    precedent_retriever: PrecedentRetriever | None = None,
 ) -> CanonicalIssueRegistry:
     """Build the canonical issue registry from raw deal signals."""
 
@@ -326,12 +357,21 @@ def build_canonical_issue_registry(
         omission_assessments=omission_assessments,
         document_analyses=document_analyses,
     )
-    issues, merge_decisions = _merge_issue_fragments(fragments)
+    issues, merge_decisions, arbitration_records = _merge_issue_fragments(
+        fragments,
+        merge_arbiter=merge_arbiter,
+    )
+    _calibrate_canonical_issues(
+        issues,
+        omission_assessments=omission_assessments,
+        precedent_retriever=precedent_retriever,
+    )
     scored_issues = _score_canonical_issues(issues, weights)
     return CanonicalIssueRegistry(
         fragments=fragments,
         issues=scored_issues,
         merge_decisions=merge_decisions,
+        arbitration_records=arbitration_records,
         omission_assessments=omission_assessments,
         weights=weights,
     )
@@ -363,7 +403,7 @@ def build_issue_analyses_from_registry(registry: CanonicalIssueRegistry) -> list
 def build_priority_assessment_from_registry(registry: CanonicalIssueRegistry) -> PriorityAssessment:
     """Build compatibility priority callouts from canonical issues."""
 
-    issues = registry.issues
+    issues = [issue for issue in registry.issues if issue.top_line_eligible] or registry.issues
     top_deal_shaping = [_to_priority_callout(issue) for issue in issues[:3]]
     return PriorityAssessment(
         top_deal_shaping_issues=[callout for callout in top_deal_shaping if callout is not None],
@@ -387,7 +427,7 @@ def build_category_rollup_from_registry(registry: CanonicalIssueRegistry) -> dic
 def build_recommendation_from_registry(registry: CanonicalIssueRegistry) -> RecommendationDecision:
     """Create decision posture, reasons, and conditions from ranked issues."""
 
-    issues = registry.issues
+    issues = [issue for issue in registry.issues if issue.top_line_eligible] or registry.issues
     if not issues:
         return RecommendationDecision(
             posture="proceed",
@@ -437,10 +477,11 @@ def build_section_selections(
 
     del recommendation
     issues = registry.issues
+    top_line_issues = [issue for issue in issues if issue.top_line_eligible]
     if analysis_mode == "fast":
-        executive_ids = [issue.issue_id for issue in issues[:3]]
+        executive_ids = [issue.issue_id for issue in top_line_issues[:3]]
         key_risk_ids = executive_ids
-        seller_ids = executive_ids
+        seller_ids = [issue.issue_id for issue in issues[:3]]
         return _selection_records(
             executive_ids=executive_ids,
             key_risk_ids=key_risk_ids,
@@ -449,9 +490,9 @@ def build_section_selections(
             appendix_ids=[issue.issue_id for issue in issues],
         )
 
-    executive_ids = [issue.issue_id for issue in issues[:4]]
-    key_risk_ids = [issue.issue_id for issue in issues[:5]]
-    ic_ids = [issue.issue_id for issue in issues[:3]]
+    executive_ids = [issue.issue_id for issue in top_line_issues[:4]]
+    key_risk_ids = [issue.issue_id for issue in top_line_issues[:5]]
+    ic_ids = [issue.issue_id for issue in top_line_issues[:3]]
     seller_ids = [issue.issue_id for issue in issues[:5]]
     appendix_ids = [issue.issue_id for issue in issues]
 
@@ -472,6 +513,20 @@ def build_section_selections(
         issue.output_bucket = bucket_by_issue_id.get(issue.issue_id, "appendix")
 
     return selections
+
+
+def build_reviewer_feedback_template(registry: CanonicalIssueRegistry) -> list[ReviewerIssueFeedback]:
+    """Build a structured reviewer-feedback template from canonical issues."""
+
+    return [
+        ReviewerIssueFeedback(
+            issue_id=issue.issue_id,
+            materiality=issue.materiality,
+            decision_relevant=issue.decision_relevant,
+            correct_action=issue.decision_action,
+        )
+        for issue in registry.issues
+    ]
 
 
 def build_adversarial_challenges_from_registry(
@@ -571,7 +626,7 @@ def build_overall_read_draft(
 ) -> str:
     """Build a short overall read from canonical issues only."""
 
-    issues = registry.issues[:3]
+    issues = ([issue for issue in registry.issues if issue.top_line_eligible] or registry.issues)[:3]
     if not issues:
         return f"{deal_name} does not currently present a concentrated diligence issue, but the package should still be checked for completeness."
 
@@ -745,16 +800,166 @@ def _build_issue_fragments(
     return fragments
 
 
+def _resolve_fragment_groups(
+    by_key: dict[str, list[IssueFragment]],
+    *,
+    merge_arbiter: MergeArbiter | None,
+) -> tuple[list[tuple[str, list[IssueFragment]]], list[MergeArbitrationRecord]]:
+    groups = [(dependency_key, fragments[:]) for dependency_key, fragments in by_key.items()]
+    records: list[MergeArbitrationRecord] = []
+    seen_pairs: set[tuple[str, str]] = set()
+
+    merged = True
+    while merged and len(groups) > 1:
+        merged = False
+        for left_index in range(len(groups)):
+            if merged:
+                break
+            for right_index in range(left_index + 1, len(groups)):
+                left_key, left_fragments = groups[left_index]
+                right_key, right_fragments = groups[right_index]
+                pair_key = tuple(sorted((left_key, right_key)))
+                if pair_key in seen_pairs:
+                    continue
+                seen_pairs.add(pair_key)
+                relation, confidence, rationale, used_arbiter = _classify_group_relation(
+                    left_fragments,
+                    right_fragments,
+                    merge_arbiter=merge_arbiter,
+                )
+                if used_arbiter or relation in {"same_issue", "parent_child"}:
+                    records.append(
+                        MergeArbitrationRecord(
+                            left_key=left_key,
+                            right_key=right_key,
+                            deterministic_relation=relation if not used_arbiter else "ambiguous",
+                            deterministic_confidence=confidence,
+                            final_relation=relation,
+                            used_arbiter=used_arbiter,
+                            rationale=rationale,
+                        )
+                    )
+                if relation in {"same_issue", "parent_child"}:
+                    merged_fragments = left_fragments + right_fragments
+                    groups[left_index] = (_dominant_dependency_key(merged_fragments), merged_fragments)
+                    del groups[right_index]
+                    seen_pairs = set()
+                    merged = True
+                    break
+
+    return groups, records
+
+
+def _classify_group_relation(
+    left_fragments: list[IssueFragment],
+    right_fragments: list[IssueFragment],
+    *,
+    merge_arbiter: MergeArbiter | None,
+) -> tuple[str, str, str, bool]:
+    left_rep = _representative_fragment(left_fragments)
+    right_rep = _representative_fragment(right_fragments)
+    relation, confidence, rationale = _deterministic_group_relation(left_fragments, right_fragments)
+    if confidence == "low" and merge_arbiter is not None:
+        arbitration = merge_arbiter(left_rep, right_rep)
+        if arbitration is not None:
+            arbiter_relation, arbiter_rationale = arbitration
+            return arbiter_relation, confidence, arbiter_rationale, True
+    return relation, confidence, rationale, False
+
+
+def _deterministic_group_relation(
+    left_fragments: list[IssueFragment],
+    right_fragments: list[IssueFragment],
+) -> tuple[str, str, str]:
+    left_rep = _representative_fragment(left_fragments)
+    right_rep = _representative_fragment(right_fragments)
+    if left_rep.dependency_key == right_rep.dependency_key:
+        return "same_issue", "high", "Fragments already share the same dependency key."
+
+    left_categories = {fragment.category for fragment in left_fragments}
+    right_categories = {fragment.category for fragment in right_fragments}
+    shared_categories = left_categories.intersection(right_categories)
+    if not shared_categories and not _cross_category_merge_allowed(left_categories, right_categories):
+        return "separate", "medium", "The categories do not belong to a supported cross-category merge pair."
+    left_docs = {document for fragment in left_fragments for document in fragment.source_documents}
+    right_docs = {document for fragment in right_fragments for document in fragment.source_documents}
+    shared_docs = left_docs.intersection(right_docs)
+    left_gates = {gate for fragment in left_fragments for gate in fragment.gating_flags}
+    right_gates = {gate for fragment in right_fragments for gate in fragment.gating_flags}
+    shared_gates = left_gates.intersection(right_gates)
+    title_overlap = _token_overlap(left_rep.title, right_rep.title)
+    evidence_overlap = _token_overlap(" ".join(left_rep.best_evidence[:2]), " ".join(right_rep.best_evidence[:2]))
+
+    score = 0
+    if shared_categories:
+        score += 2
+    if shared_docs:
+        score += 2
+    if shared_gates:
+        score += 1
+    if title_overlap >= 2:
+        score += 2
+    elif title_overlap == 1:
+        score += 1
+    if evidence_overlap >= 2:
+        score += 1
+
+    if score >= 6:
+        return "same_issue", "high", "Category, source, and title signals indicate one underlying issue."
+    if score >= 4:
+        return "parent_child", "low", "Signals overlap materially, but the dependency split may still be distinct."
+    if score >= 2:
+        return "related_but_distinct", "low", "Issues overlap on some signals but are not clearly the same problem."
+    return "separate", "medium", "The fragments do not share enough category, source, or evidence overlap to merge."
+
+
+def _representative_fragment(fragments: list[IssueFragment]) -> IssueFragment:
+    return sorted(
+        fragments,
+        key=lambda fragment: (
+            -_STATUS_PRIORITY.get(fragment.status, 0),
+            -_LEVEL_SCORE.get(fragment.severity, 0),
+            -_CONFIDENCE_SCORE.get(fragment.confidence, 0),
+            fragment.fragment_id,
+        ),
+    )[0]
+
+
+def _dominant_dependency_key(fragments: list[IssueFragment]) -> str:
+    representative = _representative_fragment(fragments)
+    return representative.dependency_key
+
+
+def _token_overlap(left_text: str, right_text: str) -> int:
+    left_tokens = {token for token in re.findall(r"[a-z0-9]+", left_text.lower()) if len(token) > 3}
+    right_tokens = {token for token in re.findall(r"[a-z0-9]+", right_text.lower()) if len(token) > 3}
+    return len(left_tokens.intersection(right_tokens))
+
+
+def _cross_category_merge_allowed(left_categories: set[str], right_categories: set[str]) -> bool:
+    for left_category in left_categories:
+        for right_category in right_categories:
+            if frozenset({left_category, right_category}) in _ALLOWED_CROSS_CATEGORY_MERGES:
+                return True
+    return False
+
+
 def _merge_issue_fragments(
     fragments: list[IssueFragment],
-) -> tuple[list[CanonicalIssue], list[MergeDecision]]:
+    *,
+    merge_arbiter: MergeArbiter | None = None,
+) -> tuple[list[CanonicalIssue], list[MergeDecision], list[MergeArbitrationRecord]]:
     by_key: dict[str, list[IssueFragment]] = defaultdict(list)
     for fragment in fragments:
         by_key[fragment.dependency_key].append(fragment)
 
+    groups, arbitration_records = _resolve_fragment_groups(
+        by_key,
+        merge_arbiter=merge_arbiter,
+    )
     issues: list[CanonicalIssue] = []
     merge_decisions: list[MergeDecision] = []
-    for dependency_key, grouped_fragments in by_key.items():
+    for dependency_key, grouped_fragments in groups:
         ordered_fragments = sorted(
             grouped_fragments,
             key=lambda fragment: (
@@ -845,7 +1050,137 @@ def _merge_issue_fragments(
             issue.title,
         )
     )
-    return issues, merge_decisions
+    return issues, merge_decisions, arbitration_records
+
+
+def _calibrate_canonical_issues(
+    issues: list[CanonicalIssue],
+    *,
+    omission_assessments: list[OmissionAssessment],
+    precedent_retriever: PrecedentRetriever | None,
+) -> None:
+    omission_status_by_issue_id = {
+        _dependency_key_for_omission(assessment).replace("_", "-"): assessment.status
+        for assessment in omission_assessments
+    }
+    for issue in issues:
+        issue.evidence_basis = _classify_evidence_basis(issue, omission_status_by_issue_id)
+        issue.materiality = _classify_materiality(issue)
+        issue.normal_friction_flag = _is_normal_friction(issue)
+        issue.issue_strength = _classify_issue_strength(issue)
+        issue.false_positive_risk = _classify_false_positive_risk(issue)
+        issue.decision_relevant = _is_decision_relevant(issue)
+        issue.top_line_filter_reasons = _top_line_filter_reasons(issue)
+        issue.top_line_eligible = not issue.top_line_filter_reasons
+        issue.calibration_notes = _calibration_notes(issue)
+        if precedent_retriever is not None:
+            issue.precedent_references = precedent_retriever(issue)
+
+
+def _classify_evidence_basis(
+    issue: CanonicalIssue,
+    omission_status_by_issue_id: dict[str, str],
+) -> str:
+    fragment_ids = issue.merged_fragment_ids
+    has_risk = any(fragment_id.startswith("risk-") for fragment_id in fragment_ids)
+    has_contradiction = any(fragment_id.startswith("contradiction-") for fragment_id in fragment_ids)
+    has_omission = any(fragment_id.startswith("omission-") for fragment_id in fragment_ids)
+    has_fallback = any(fragment_id.startswith("fallback-") for fragment_id in fragment_ids)
+
+    if has_contradiction:
+        return "contradictory_evidence_present"
+    if has_risk:
+        if issue.status in {"open", "conflicted", "not found", "unclear whether present", "present but weak"}:
+            return "direct_unresolved_risk"
+        return "direct_confirmed_risk"
+    if has_omission:
+        omission_status = omission_status_by_issue_id.get(issue.issue_id, issue.status)
+        if omission_status in {"present but weak", "unclear whether present"} and issue.category in {"Entitlement Status", "Schedule Risks"}:
+            return "routine_missing_support"
+        return "omission_only"
+    if has_fallback or not issue.citations:
+        return "weak_inference"
+    return "direct_confirmed_risk"
+
+
+def _classify_materiality(issue: CanonicalIssue) -> str:
+    if "Closing" in issue.gating_flags or issue.category == "Title / Access Concerns":
+        return "high"
+    if issue.category in {"Offsite Obligations", "Environmental Risks", "Geotechnical Risks", "Utilities / Infrastructure Issues"}:
+        return "high" if issue.evidence_basis in {"direct_unresolved_risk", "contradictory_evidence_present"} else "medium"
+    if issue.category in {"Budget / Cost Reliability", "Fee / Exaction Burden", "Flood / Drainage Issues", "Entitlement Status"}:
+        return "medium"
+    return "low"
+
+
+def _is_normal_friction(issue: CanonicalIssue) -> bool:
+    if issue.evidence_basis == "routine_missing_support":
+        return True
+    if issue.evidence_basis == "omission_only" and issue.category in {"Entitlement Status", "Schedule Risks"}:
+        return True
+    if issue.issue_id == "schedule-path" and issue.evidence_basis != "direct_unresolved_risk":
+        return True
+    return False
+
+
+def _classify_issue_strength(issue: CanonicalIssue) -> str:
+    if issue.evidence_basis in {"direct_confirmed_risk", "direct_unresolved_risk", "contradictory_evidence_present"}:
+        if issue.confidence in {"high", "medium"}:
+            return "strong"
+        return "moderate"
+    if issue.evidence_basis == "omission_only":
+        return "moderate" if issue.materiality == "high" else "weak"
+    if issue.evidence_basis == "routine_missing_support":
+        return "weak"
+    return "weak"
+
+
+def _classify_false_positive_risk(issue: CanonicalIssue) -> str:
+    if issue.evidence_basis in {"weak_inference", "routine_missing_support"}:
+        return "high"
+    if issue.evidence_basis == "omission_only":
+        return "medium" if issue.materiality == "high" else "high"
+    if issue.normal_friction_flag:
+        return "high"
+    if issue.confidence == "low":
+        return "medium"
+    return "low"
+
+
+def _is_decision_relevant(issue: CanonicalIssue) -> bool:
+    if "Closing" in issue.gating_flags:
+        return True
+    if issue.materiality == "high" and issue.false_positive_risk != "high":
+        return True
+    if issue.evidence_basis in {"direct_unresolved_risk", "contradictory_evidence_present"} and issue.issue_strength == "strong":
+        return True
+    return False
+
+
+def _top_line_filter_reasons(issue: CanonicalIssue) -> list[str]:
+    reasons: list[str] = []
+    if issue.issue_strength == "weak":
+        reasons.append("weak issue strength")
+    if issue.false_positive_risk == "high":
+        reasons.append("high false-positive risk")
+    if issue.normal_friction_flag:
+        reasons.append("normal process friction")
+    if issue.evidence_basis in {"omission_only", "routine_missing_support"} and issue.materiality != "high":
+        reasons.append("omission-only without high criticality")
+    if not issue.decision_relevant:
+        reasons.append("not decision relevant")
+    return reasons
+
+
+def _calibration_notes(issue: CanonicalIssue) -> list[str]:
+    notes = [f"evidence basis={issue.evidence_basis}"]
+    if issue.normal_friction_flag:
+        notes.append("looks closer to routine process friction than a deal-specific problem")
+    if issue.evidence_basis == "omission_only":
+        notes.append("issue is being inferred from missing support rather than direct conflicting evidence")
+    if issue.top_line_filter_reasons:
+        notes.append("filtered from top-line outputs because " + ", ".join(issue.top_line_filter_reasons))
+    return notes
 
 
 def _score_canonical_issues(
@@ -876,6 +1211,7 @@ def _score_issue(issue: CanonicalIssue, weights: PriorityWeights) -> IssuePriori
     preclose_mitigation_difficulty = max(base[6], _FIXABILITY_SCORE.get(issue.fixability, 0))
     seller_shiftability = _seller_shiftability(issue)
     ic_sensitivity = max(base[7], 5 if issue.status in {"conflicted", "not found"} else 0)
+    calibration_adjustment = _calibration_adjustment(issue)
 
     total = (
         cost_exposure * weights.cost_exposure
@@ -888,6 +1224,7 @@ def _score_issue(issue: CanonicalIssue, weights: PriorityWeights) -> IssuePriori
         + preclose_mitigation_difficulty * weights.preclose_mitigation_difficulty
         + seller_shiftability * weights.seller_shiftability_penalty
         + ic_sensitivity * weights.ic_sensitivity
+        + calibration_adjustment
     )
     return IssuePriorityScore(
         total=total,
@@ -901,6 +1238,31 @@ def _score_issue(issue: CanonicalIssue, weights: PriorityWeights) -> IssuePriori
         preclose_mitigation_difficulty=preclose_mitigation_difficulty,
         seller_shiftability=seller_shiftability,
         ic_sensitivity=ic_sensitivity,
+        calibration_adjustment=calibration_adjustment,
+    )
+
+
+def _calibration_adjustment(issue: CanonicalIssue) -> int:
+    basis_adjustment = {
+        "direct_confirmed_risk": 16,
+        "direct_unresolved_risk": 22,
+        "contradictory_evidence_present": 20,
+        "omission_only": -16,
+        "weak_inference": -24,
+        "routine_missing_support": -30,
+    }.get(issue.evidence_basis, 0)
+    strength_adjustment = {"strong": 14, "moderate": 0, "weak": -20}.get(issue.issue_strength, 0)
+    false_positive_penalty = {"low": 0, "medium": -8, "high": -20}.get(issue.false_positive_risk, 0)
+    materiality_adjustment = {"high": 12, "medium": 0, "low": -12}.get(issue.materiality, 0)
+    decision_adjustment = 8 if issue.decision_relevant else -18
+    friction_penalty = -16 if issue.normal_friction_flag else 0
+    return (
+        basis_adjustment
+        + strength_adjustment
+        + false_positive_penalty
+        + materiality_adjustment
+        + decision_adjustment
+        + friction_penalty
     )
 
 

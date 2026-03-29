@@ -33,3 +33,18 @@ class LLMProvider(ABC):
         missing_items: list[str],
     ) -> str:
         """Return a polished deal-level executive summary."""
+
+    def arbitrate_issue_merge(
+        self,
+        *,
+        left_issue: dict[str, str],
+        right_issue: dict[str, str],
+    ) -> tuple[str, str] | None:
+        """Optionally classify an ambiguous issue-merge relationship.
+
+        Returns a tuple of `(relation, rationale)` where relation is one of
+        `same_issue`, `parent_child`, `related_but_distinct`, or `separate`.
+        Providers may return `None` to skip arbitration.
+        """
+
+        return None

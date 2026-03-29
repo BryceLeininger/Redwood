@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from land_due_diligence_agent.models import CanonicalIssue, DealSynthesis, RunSummary
@@ -47,6 +48,7 @@ def write_markdown_outputs(
                     (output_dir / "09_investment_committee_brief.md", _build_investment_committee_brief_markdown(synthesis)),
                     (output_dir / "10_issue_analysis.md", _build_issue_analysis_markdown(synthesis)),
                     (output_dir / "11_issue_registry_debug.md", _build_issue_registry_debug_markdown(synthesis)),
+                    (output_dir / "12_reviewer_feedback_template.json", _build_reviewer_feedback_template_json(synthesis)),
                 ]
             )
 
@@ -78,6 +80,7 @@ def _analysis_output_names(analysis_mode: str) -> list[str]:
         "09_investment_committee_brief.md",
         "10_issue_analysis.md",
         "11_issue_registry_debug.md",
+        "12_reviewer_feedback_template.json",
     ]
 
 
@@ -486,6 +489,7 @@ def _build_issue_registry_debug_markdown(synthesis: DealSynthesis) -> str:
             f"- Fragments: {len(registry.fragments)}",
             f"- Canonical Issues: {len(registry.issues)}",
             f"- Merge Decisions: {len(registry.merge_decisions)}",
+            f"- Arbitration Records: {len(registry.arbitration_records)}",
             "",
         ]
     )
@@ -497,10 +501,25 @@ def _build_issue_registry_debug_markdown(synthesis: DealSynthesis) -> str:
         lines.append(f"- Category: {issue.category}")
         lines.append(f"- Status: {issue.status}")
         lines.append(f"- Priority Score: {issue.priority_score.total}")
+        lines.append(f"- Materiality: {issue.materiality}")
+        lines.append(f"- Evidence Basis: {issue.evidence_basis}")
+        lines.append(f"- Issue Strength: {issue.issue_strength}")
+        lines.append(f"- False-Positive Risk: {issue.false_positive_risk}")
+        lines.append(f"- Normal Friction: {issue.normal_friction_flag}")
+        lines.append(f"- Decision Relevant: {issue.decision_relevant}")
+        lines.append(f"- Top-Line Eligible: {issue.top_line_eligible}")
+        if issue.top_line_filter_reasons:
+            lines.append(f"- Filter Reasons: {', '.join(issue.top_line_filter_reasons)}")
         lines.append(f"- Output Bucket: {issue.output_bucket}")
         lines.append(f"- Decision Action: {issue.decision_action}")
         lines.append(f"- Source: {_format_citations(issue.citations[:3]) or ', '.join(issue.source_documents[:3]) or 'None'}")
         lines.append(f"- Merged Fragments: {', '.join(issue.merged_fragment_ids) or 'None'}")
+        if issue.calibration_notes:
+            lines.append(f"- Calibration Notes: {' | '.join(issue.calibration_notes)}")
+        if issue.precedent_references:
+            lines.append(
+                f"- Precedent Hooks: {', '.join(reference.title for reference in issue.precedent_references[:3])}"
+            )
         lines.append("")
 
     lines.extend(["## Merge Decisions", ""])
@@ -510,6 +529,19 @@ def _build_issue_registry_debug_markdown(synthesis: DealSynthesis) -> str:
             lines.append(f"  Rationale: {decision.rationale}")
     else:
         lines.append("- No merge decisions were recorded.")
+    lines.append("")
+
+    lines.extend(["## Merge Arbitration", ""])
+    if registry.arbitration_records:
+        for record in registry.arbitration_records:
+            lines.append(
+                f"- `{record.left_key}` vs `{record.right_key}` -> {record.final_relation}"
+                f" (deterministic={record.deterministic_relation}, confidence={record.deterministic_confidence}, used_arbiter={record.used_arbiter})"
+            )
+            if record.rationale:
+                lines.append(f"  Rationale: {record.rationale}")
+    else:
+        lines.append("- No ambiguous merge arbitration was triggered.")
     lines.append("")
 
     lines.extend(["## Output Selections", ""])
@@ -523,6 +555,25 @@ def _build_issue_registry_debug_markdown(synthesis: DealSynthesis) -> str:
     lines.append("")
 
     return "\n".join(lines)
+
+
+def _build_reviewer_feedback_template_json(synthesis: DealSynthesis) -> str:
+    rows = []
+    for issue in synthesis.canonical_issue_registry.issues:
+        rows.append(
+            {
+                "issue_id": issue.issue_id,
+                "real_issue": None,
+                "materiality": issue.materiality,
+                "decision_relevant": issue.decision_relevant,
+                "duplicate_of": None,
+                "overstated": False,
+                "understated": False,
+                "correct_action": issue.decision_action,
+                "notes": "",
+            }
+        )
+    return json.dumps(rows, indent=2) + "\n"
 
 
 def _selected_issues(
@@ -546,6 +597,8 @@ def _selected_issues(
         if selected_ids:
             issue_by_id = {issue.issue_id: issue for issue in registry.issues}
             return [issue_by_id[issue_id] for issue_id in selected_ids if issue_id in issue_by_id]
+    if output_name in {"01_executive_summary.md", "02_key_risks.md", "09_investment_committee_brief.md"}:
+        return [issue for issue in registry.issues if issue.top_line_eligible][:default_count]
     return registry.issues[:default_count]
 
 
