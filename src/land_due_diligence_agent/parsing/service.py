@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from land_due_diligence_agent.models import DocumentRecord
+from land_due_diligence_agent.models import DocumentRecord, ExtractedChunk
 from land_due_diligence_agent.parsing.docx_parser import extract_docx_text
 from land_due_diligence_agent.parsing.pdf_parser import extract_pdf_text
 from land_due_diligence_agent.parsing.spreadsheet_parser import extract_csv_text, extract_xlsx_text
@@ -31,19 +31,53 @@ def parse_document(path: Path, input_root: Path) -> DocumentRecord:
     if parser is None:
         raise ValueError(f"Unsupported file type: {path.suffix}")
 
-    raw_text, metadata, warnings = parser(path)
+    raw_text, metadata, warnings, chunk_records = parser(path)
     normalized = normalize_text(raw_text)
+    title = humanize_filename(path.stem)
+    chunks = _build_chunks(title, chunk_records)
 
     if not normalized:
         warnings.append("Normalized text is empty after extraction.")
+    elif not chunks:
+        chunks.append(
+            ExtractedChunk(
+                document_name=title,
+                chunk_id="chunk-0001",
+                text=normalized,
+                page_number=None,
+            )
+        )
+
+    metadata = dict(metadata)
+    metadata["chunk_count"] = len(chunks)
 
     return DocumentRecord(
         source_path=path,
         relative_path=path.relative_to(input_root),
         extension=suffix,
-        title=humanize_filename(path.stem),
+        title=title,
         raw_text=raw_text,
         normalized_text=normalized,
         metadata=metadata,
         warnings=warnings,
+        chunks=chunks,
     )
+
+
+def _build_chunks(title: str, chunk_records: list[dict[str, str | int | None]]) -> list[ExtractedChunk]:
+    chunks: list[ExtractedChunk] = []
+    for index, record in enumerate(chunk_records, start=1):
+        text = normalize_text(str(record.get("text") or ""))
+        if not text:
+            continue
+        chunk_id = str(record.get("chunk_id") or f"chunk-{index:04d}")
+        page_number = record.get("page_number")
+        chunks.append(
+            ExtractedChunk(
+                document_name=title,
+                chunk_id=chunk_id,
+                text=text,
+                page_number=page_number if isinstance(page_number, int) else None,
+            )
+        )
+    return chunks

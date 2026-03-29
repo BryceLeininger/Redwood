@@ -12,7 +12,7 @@ from land_due_diligence_agent.analysis.risk_rules import (
     EXPECTED_DILIGENCE_ITEMS,
     EXPECTED_DILIGENCE_PATH_HINTS,
 )
-from land_due_diligence_agent.models import DocumentAnalysis, DocumentRecord, ReadingRecommendation, RiskFinding
+from land_due_diligence_agent.models import Citation, ContradictionFinding, DocumentAnalysis, DocumentRecord, ReadingRecommendation, RiskFinding
 from land_due_diligence_agent.utils.text import clip_text, extractive_summary, split_sentences, unique_preserve_order
 
 
@@ -29,6 +29,7 @@ _NOISE_PHRASES = (
 _RULE_BY_CATEGORY = {rule.category: rule for rule in CATEGORY_RULES}
 _MAX_KEY_RISKS = 6
 _PRIMARY_RISK_COUNT = 3
+_MAX_CONTRADICTIONS = 3
 _GENERIC_UNRESOLVED_TERMS = (
     "pending",
     "required",
@@ -80,8 +81,7 @@ def analyze_document(document: DocumentRecord) -> DocumentAnalysis:
 
     focus_areas = _derive_focus_areas(document)
     confidence, confidence_reason = _calculate_document_confidence(document)
-    sentences = split_sentences(document.normalized_text)
-    lower_sentences = [sentence.lower() for sentence in sentences]
+    sentence_records = _build_sentence_records(document)
     text_lower = document.normalized_text.lower()
 
     risks: list[RiskFinding] = []
@@ -89,23 +89,33 @@ def analyze_document(document: DocumentRecord) -> DocumentAnalysis:
 
     for rule in CATEGORY_RULES:
         in_focus_area = rule.category in focus_areas
-        evidence = _collect_evidence(
-            sentences=sentences,
-            lower_sentences=lower_sentences,
+        evidence_records = _collect_evidence(
+            sentence_records=sentence_records,
             keywords=rule.keywords,
             severe_keywords=rule.severe_keywords,
         )
-        if not evidence:
+        if not evidence_records:
             continue
 
-        score = _score_risk(evidence, rule.keywords, rule.severe_keywords, in_focus_area)
-        if not in_focus_area and focus_areas and not _keep_cross_focus_signal(score, evidence):
+        evidence_texts = [text for text, _ in evidence_records]
+        citations = _unique_citations([citation for _, citation in evidence_records])
+
+        score = _score_risk(evidence_texts, rule.keywords, rule.severe_keywords, in_focus_area)
+        if not in_focus_area and focus_areas and not _keep_cross_focus_signal(score, evidence_texts):
             continue
 
         severity = _score_to_severity(score)
 
-        summary = _build_risk_summary(document, rule.category, severity, evidence, in_focus_area)
-        risks.append(RiskFinding(category=rule.category, severity=severity, summary=summary, evidence=evidence))
+        summary = _build_risk_summary(document, rule.category, severity, evidence_texts, in_focus_area)
+        risks.append(
+            RiskFinding(
+                category=rule.category,
+                severity=severity,
+                summary=summary,
+                evidence=evidence_texts,
+                citations=citations,
+            )
+        )
 
         if severity in {"medium", "high"} or in_focus_area:
             seller_questions.append(rule.seller_question)
@@ -296,10 +306,46 @@ def recommend_reading_order(document_analyses: list[DocumentAnalysis]) -> list[R
     ]
 
 
+def detect_contradictions(
+    document_analyses: list[DocumentAnalysis],
+    key_risks: list[RiskFinding],
+    missing_items: list[str],
+) -> list[ContradictionFinding]:
+    """Identify high-signal cross-document contradictions or tensions."""
+
+    candidates = [
+        _detect_offsite_completion_tension(document_analyses),
+        _detect_title_vs_plan_tension(document_analyses, key_risks),
+        _detect_entitlement_vs_condition_tension(document_analyses),
+        _detect_geotech_vs_budget_tension(document_analyses, key_risks, missing_items),
+    ]
+
+    contradictions = [candidate for candidate in candidates if candidate is not None]
+    contradictions.sort(
+        key=lambda finding: (
+            -finding.priority,
+            -len(finding.citations),
+            finding.description,
+        ),
+    )
+
+    deduped: list[ContradictionFinding] = []
+    seen_descriptions: set[str] = set()
+    for finding in contradictions:
+        if finding.description in seen_descriptions:
+            continue
+        seen_descriptions.add(finding.description)
+        deduped.append(finding)
+        if len(deduped) >= _MAX_CONTRADICTIONS:
+            break
+    return deduped
+
+
 def collect_seller_questions(
     document_analyses: list[DocumentAnalysis],
     missing_items: list[str],
     key_risks: list[RiskFinding],
+    contradictions: list[ContradictionFinding],
 ) -> list[str]:
     """Merge category-driven questions with confidence and gap follow-up."""
 
@@ -308,6 +354,9 @@ def collect_seller_questions(
     for risk in key_risks:
         if risk.severity in {"medium", "high"}:
             questions.append(_build_negotiation_question(risk))
+
+    for contradiction in contradictions:
+        questions.append(_build_contradiction_question(contradiction))
 
     for analysis in document_analyses:
         if analysis.confidence == "low" and analysis.focus_areas:
@@ -328,6 +377,7 @@ def build_executive_summary_draft(
     deal_name: str,
     document_analyses: list[DocumentAnalysis],
     key_risks: list[RiskFinding],
+    contradictions: list[ContradictionFinding],
     entitlement_status: str,
     missing_items: list[str],
     extraction_errors: list[str],
@@ -340,15 +390,20 @@ def build_executive_summary_draft(
     secondary_risks = [risk for risk in key_risks if risk.priority_tier == "secondary"]
     conclusions = "\n".join(f"- {conclusion}" for conclusion in _build_top_conclusions(key_risks, entitlement_status, missing_items, low_confidence_docs))
     known_points = "\n".join(f"- {point}" for point in _build_known_points(document_analyses, entitlement_status))
-    unresolved_points = "\n".join(f"- {point}" for point in _build_unresolved_points(key_risks, missing_items, low_confidence_docs))
+    unresolved_points = "\n".join(f"- {point}" for point in _build_unresolved_points(key_risks, contradictions, missing_items, low_confidence_docs))
     primary_risk_text = "\n".join(f"- {risk.summary}" for risk in primary_risks) or "- No primary deal-shaping risk was isolated from the extracted text."
     secondary_risk_text = (
         "\n".join(f"- {risk.summary}" for risk in secondary_risks)
         if secondary_risks
         else "- No secondary risk was elevated beyond the primary issue set."
     )
+    contradiction_text = (
+        "\n".join(f"- {finding.description} Why it matters: {finding.why_it_matters}" for finding in contradictions)
+        if contradictions
+        else "- No material cross-document contradiction was isolated from the current package."
+    )
     gating_points = "\n".join(f"- {point}" for point in _build_gating_points(key_risks, missing_items, low_confidence_docs))
-    decision_points = "\n".join(f"- {point}" for point in _build_decision_points(key_risks, missing_items, low_confidence_docs))
+    decision_points = "\n".join(f"- {point}" for point in _build_decision_points(key_risks, contradictions, missing_items, low_confidence_docs))
     limitation_text = (
         f"\nLow-confidence extraction affected {len(low_confidence_docs)} document(s): {', '.join(low_confidence_docs[:3])}."
         if low_confidence_docs
@@ -368,6 +423,7 @@ def build_executive_summary_draft(
         f"Secondary risks (important but not gating):\n{secondary_risk_text}\n\n"
         f"What appears known:\n{known_points}\n\n"
         f"What appears unresolved:\n{unresolved_points}\n\n"
+        f"Potential contradictions / tensions:\n{contradiction_text}\n\n"
         f"Gating issues:\n{gating_points}\n\n"
         f"What matters most for the acquisition decision:\n{decision_points}"
         f"{limitation_text}{extraction_text}"
@@ -381,6 +437,7 @@ def _build_aggregate_risk(
     focused_entries = [entry for entry in ranked_entries if category in entry[0].focus_areas] or ranked_entries
     lead_analysis, lead_risk = focused_entries[0]
     source_documents: list[str] = []
+    citations: list[Citation] = []
     evidence: list[str] = []
     evidence_text_parts: list[str] = []
     low_confidence_sources = 0
@@ -389,9 +446,15 @@ def _build_aggregate_risk(
         source_documents.append(analysis.document.title)
         if analysis.confidence == "low":
             low_confidence_sources += 1
-        for snippet in risk.evidence[:1]:
+        for index, snippet in enumerate(risk.evidence[:1]):
             clipped = clip_text(snippet, 220)
-            evidence.append(f"{analysis.document.title}: {clipped}")
+            citation = risk.citations[index] if index < len(risk.citations) else Citation(
+                document_name=analysis.document.title,
+                chunk_id="chunk-0001",
+                page_number=None,
+            )
+            citations.append(citation)
+            evidence.append(_format_evidence_with_citation(clipped, citation))
             evidence_text_parts.append(clipped)
         if len(evidence) >= 3:
             break
@@ -427,6 +490,7 @@ def _build_aggregate_risk(
             anchor=anchor,
             gating_flags=gating_flags,
             uncertainty_reason=uncertainty_reason,
+            citations=_unique_citations(citations)[:3],
         ),
     )
 
@@ -636,27 +700,255 @@ def _build_uncertainty_reason(
 
 def _build_negotiation_question(risk: RiskFinding) -> str:
     source_text = ", ".join(risk.source_documents[:2])
+    source_hint = _build_question_source_hint(risk)
     if risk.category == "Title / Access Concerns":
-        return f"Please mark up {source_text or 'the preliminary title report and survey'} against the current plan set, and identify every exception, easement, encroachment, and access right that must be cured, endorsed, or redesigned before closing."
+        return f"Please mark up {source_text or 'the preliminary title report and survey'} against the current plan set, and identify every exception, easement, encroachment, and access right that must be cured, endorsed, or redesigned before closing.{source_hint}"
     if risk.category == "Entitlement Status":
-        return f"Please provide the live conditions-of-approval tracker tied to {source_text or 'the entitlement package'}, and identify every item still open before map recordation, grading permit, building permit, and vertical start."
+        return f"Please provide the live conditions-of-approval tracker tied to {source_text or 'the entitlement package'}, and identify every item still open before map recordation, grading permit, building permit, and vertical start.{source_hint}"
     if risk.category == "Geotechnical Risks":
-        return f"Please confirm which recommendations in {source_text or 'the geotechnical reports'} are actually driving grading and foundation design, and state whether liquefaction, settlement, overexcavation, and retaining assumptions are fully carried in the site budget."
+        return f"Please confirm which recommendations in {source_text or 'the geotechnical reports'} are actually driving grading and foundation design, and state whether liquefaction, settlement, overexcavation, and retaining assumptions are fully carried in the site budget.{source_hint}"
     if risk.category == "Flood / Drainage Issues":
-        return f"Please reconcile {source_text or 'the stormwater and drainage files'} into a single scope memo identifying every unresolved stormwater, floodplain, detention, and offsite drainage item still affecting permit issuance or civil cost."
+        return f"Please reconcile {source_text or 'the stormwater and drainage files'} into a single scope memo identifying every unresolved stormwater, floodplain, detention, and offsite drainage item still affecting permit issuance or civil cost.{source_hint}"
     if risk.category == "Fee / Exaction Burden":
-        return f"Please provide the underwriting fee matrix tied to {source_text or 'the fee schedule'}, identify what is city-confirmed versus estimated, and quantify the exposure if permits slip."
+        return f"Please provide the underwriting fee matrix tied to {source_text or 'the fee schedule'}, identify what is city-confirmed versus estimated, and quantify the exposure if permits slip.{source_hint}"
     if risk.category == "Offsite Obligations":
-        return f"Please deliver a closing checklist built off {source_text or 'the offsite and approval files'} that identifies every remaining frontage, dedication, permit, guarantee, reimbursement, and offsite improvement obligation, who pays it, and when it hits the schedule."
+        return f"Please deliver a closing checklist built off {source_text or 'the offsite and approval files'} that identifies every remaining frontage, dedication, permit, guarantee, reimbursement, and offsite improvement obligation, who pays it, and when it hits the schedule.{source_hint}"
     if risk.category == "Budget / Cost Reliability":
-        return f"Please break out which site-development numbers in {source_text or 'the current pricing package'} are hard bids versus budgetary allowances, identify the largest open contingencies, and replace any unreadable files with native copies."
+        return f"Please break out which site-development numbers in {source_text or 'the current pricing package'} are hard bids versus budgetary allowances, identify the largest open contingencies, and replace any unreadable files with native copies.{source_hint}"
     if risk.category == "Utilities / Infrastructure Issues":
-        return f"Please reconcile {source_text or 'the utility files'} into a utility status memo stating all will-serve assumptions, offsite extensions, joint-trench scope, and serving-agency approvals that are not yet in hand."
+        return f"Please reconcile {source_text or 'the utility files'} into a utility status memo stating all will-serve assumptions, offsite extensions, joint-trench scope, and serving-agency approvals that are not yet in hand.{source_hint}"
     if risk.category == "Environmental Risks":
-        return f"Please use {source_text or 'the environmental package'} to state whether any REC, mitigation obligation, habitat constraint, or agency follow-up item remains open, and identify who bears the cost, schedule, and closing risk."
+        return f"Please use {source_text or 'the environmental package'} to state whether any REC, mitigation obligation, habitat constraint, or agency follow-up item remains open, and identify who bears the cost, schedule, and closing risk.{source_hint}"
     if risk.category == "Schedule Risks":
-        return f"Please provide the current critical-path schedule tied back to {source_text or 'the approval package'}, showing remaining approvals, utility releases, offsite triggers, and the assumptions required to hit first permit and vertical-start dates."
-    return f"Please address the current {risk.category.lower()} issue in a form that can be underwritten at closing."
+        return f"Please provide the current critical-path schedule tied back to {source_text or 'the approval package'}, showing remaining approvals, utility releases, offsite triggers, and the assumptions required to hit first permit and vertical-start dates.{source_hint}"
+    return f"Please address the current {risk.category.lower()} issue in a form that can be underwritten at closing.{source_hint}"
+
+
+def _build_question_source_hint(risk: RiskFinding) -> str:
+    if not risk.citations:
+        return ""
+    return f" (Source: {_format_citation_label(risk.citations[0])})"
+
+
+def _build_contradiction_question(contradiction: ContradictionFinding) -> str:
+    source_text = ", ".join(contradiction.source_documents[:2]) or "the current diligence package"
+    source_hint = (
+        f" (Sources: {', '.join(_format_citation_label(citation) for citation in contradiction.citations[:2])})"
+        if contradiction.citations
+        else ""
+    )
+    return (
+        f"Please reconcile the tension between {source_text} and confirm which assumption is controlling underwriting, "
+        f"scope, and schedule: {contradiction.description}{source_hint}"
+    )
+
+
+def _detect_offsite_completion_tension(document_analyses: list[DocumentAnalysis]) -> ContradictionFinding | None:
+    complete_signal = _find_best_sentence(
+        document_analyses,
+        include_terms=("already improved", "frontage is already improved", "existing frontage", "already constructed"),
+        focus_categories=("Offsite Obligations", "Flood / Drainage Issues"),
+        title_terms=("stormwater", "plan", "design permit"),
+    )
+    unresolved_signal = _find_best_sentence(
+        document_analyses,
+        include_terms=("shall confirm", "confirm if", "frontage", "dedicated", "improvement plan stage"),
+        focus_categories=("Offsite Obligations", "Entitlement Status"),
+        title_terms=("condition", "exhibit b", "subdivision", "resolution"),
+        exclude_document_names={complete_signal[2].document.title} if complete_signal is not None else None,
+    )
+    if complete_signal is None or unresolved_signal is None:
+        return None
+
+    return ContradictionFinding(
+        description=(
+            f"{_format_citation_label(complete_signal[1])} treats frontage or offsite work as already improved, "
+            f"but {_format_citation_label(unresolved_signal[1])} still carries open dedication or frontage obligations."
+        ),
+        why_it_matters="That tension keeps offsite scope, cost allocation, and the vertical-start path open instead of fully closed.",
+        citations=_unique_citations([complete_signal[1], unresolved_signal[1]]),
+        source_documents=unique_preserve_order([complete_signal[2].document.title, unresolved_signal[2].document.title]),
+        related_categories=["Offsite Obligations", "Entitlement Status", "Flood / Drainage Issues"],
+        priority=100,
+    )
+
+
+def _detect_title_vs_plan_tension(
+    document_analyses: list[DocumentAnalysis],
+    key_risks: list[RiskFinding],
+) -> ContradictionFinding | None:
+    title_risk = _risk_by_category(key_risks, "Title / Access Concerns")
+    if title_risk is None or not title_risk.citations:
+        return None
+
+    title_citation = title_risk.citations[0]
+    plan_signal = _find_best_sentence(
+        document_analyses,
+        include_terms=("project entry", "private access", "vehicular project entry", "access", "entry located"),
+        focus_categories=("Entitlement Status", "Offsite Obligations"),
+        title_terms=("plan", "design permit"),
+        exclude_document_names={title_citation.document_name},
+    )
+    if plan_signal is None:
+        return None
+
+    return ContradictionFinding(
+        description=(
+            f"{_format_citation_label(plan_signal[1])} assumes the current access and entry layout works as designed, "
+            f"but {_format_citation_label(title_citation)} still carries title or access exceptions that are not reconciled to that layout."
+        ),
+        why_it_matters="If the plan relies on access rights that are not cleared in title, the issue goes directly to closability, lenderability, and buildability.",
+        citations=_unique_citations([plan_signal[1], title_citation]),
+        source_documents=unique_preserve_order([plan_signal[2].document.title, title_citation.document_name]),
+        related_categories=["Title / Access Concerns", "Entitlement Status", "Offsite Obligations"],
+        priority=95,
+    )
+
+
+def _detect_entitlement_vs_condition_tension(document_analyses: list[DocumentAnalysis]) -> ContradictionFinding | None:
+    approval_signal = _find_best_sentence(
+        document_analyses,
+        include_terms=("approved", "adopted", "approved by the city council", "planning commission", "city council"),
+        focus_categories=("Entitlement Status",),
+        title_terms=("resolution", "city council", "design permit", "map"),
+    )
+    condition_signal = _find_best_sentence(
+        document_analyses,
+        include_terms=("condition of approval", "prior to", "shall", "must", "confirm"),
+        focus_categories=("Entitlement Status", "Offsite Obligations"),
+        title_terms=("condition", "exhibit a", "exhibit b"),
+        exclude_document_names={approval_signal[2].document.title} if approval_signal is not None else None,
+    )
+    if approval_signal is None or condition_signal is None:
+        return None
+
+    return ContradictionFinding(
+        description=(
+            f"{_format_citation_label(approval_signal[1])} shows approvals are in place, "
+            f"but {_format_citation_label(condition_signal[1])} still carries permit-stage or implementation obligations."
+        ),
+        why_it_matters="That tension means approval status alone does not make the project execution-ready; permit timing and entitlement certainty still depend on clearing the remaining conditions.",
+        citations=_unique_citations([approval_signal[1], condition_signal[1]]),
+        source_documents=unique_preserve_order([approval_signal[2].document.title, condition_signal[2].document.title]),
+        related_categories=["Entitlement Status", "Schedule Risks", "Offsite Obligations"],
+        priority=85,
+    )
+
+
+def _detect_geotech_vs_budget_tension(
+    document_analyses: list[DocumentAnalysis],
+    key_risks: list[RiskFinding],
+    missing_items: list[str],
+) -> ContradictionFinding | None:
+    geotech_risk = _risk_by_category(key_risks, "Geotechnical Risks")
+    if geotech_risk is None or not geotech_risk.citations:
+        return None
+
+    budget_signal = _find_best_sentence(
+        document_analyses,
+        include_terms=("budgetary", "allowance", "proposal", "preliminary", "pricing"),
+        focus_categories=("Budget / Cost Reliability",),
+        title_terms=("budget", "pricing", "bid"),
+    )
+    budget_document = _find_budget_support_gap(document_analyses, missing_items)
+    if budget_signal is None and budget_document is None:
+        return None
+
+    if budget_signal is not None:
+        budget_citation = budget_signal[1]
+        budget_document_name = budget_signal[2].document.title
+    else:
+        budget_citation = Citation(document_name=budget_document.document.title, chunk_id="document", page_number=None)
+        budget_document_name = budget_document.document.title
+
+    return ContradictionFinding(
+        description=(
+            f"{_format_citation_label(geotech_risk.citations[0])} identifies soils-driven scope, "
+            f"but {_format_citation_label(budget_citation)} does not show that scope as fully carried into the current cost package."
+        ),
+        why_it_matters="That disconnect weakens land-basis confidence and raises the risk that grading, retaining, or foundation costs move after deal approval.",
+        citations=_unique_citations([geotech_risk.citations[0], budget_citation]),
+        source_documents=unique_preserve_order([geotech_risk.citations[0].document_name, budget_document_name]),
+        related_categories=["Geotechnical Risks", "Budget / Cost Reliability"],
+        priority=90,
+    )
+
+
+def _risk_by_category(key_risks: list[RiskFinding], category: str) -> RiskFinding | None:
+    return next((risk for risk in key_risks if risk.category == category), None)
+
+
+def _find_budget_support_gap(
+    document_analyses: list[DocumentAnalysis],
+    missing_items: list[str],
+) -> DocumentAnalysis | None:
+    budget_analyses = [
+        analysis
+        for analysis in document_analyses
+        if "Budget / Cost Reliability" in analysis.focus_areas
+    ]
+    for analysis in budget_analyses:
+        if analysis.confidence == "low":
+            return analysis
+        text_lower = analysis.document.normalized_text.lower()
+        if any(term in text_lower for term in ("budgetary", "preliminary", "allowance", "proposal", "pricing")):
+            return analysis
+
+    if any("site development budget" in item.lower() for item in missing_items):
+        return budget_analyses[0] if budget_analyses else None
+    return None
+
+
+def _find_best_sentence(
+    document_analyses: list[DocumentAnalysis],
+    *,
+    include_terms: tuple[str, ...],
+    focus_categories: tuple[str, ...] = (),
+    title_terms: tuple[str, ...] = (),
+    exclude_document_names: set[str] | None = None,
+) -> tuple[str, Citation, DocumentAnalysis] | None:
+    exclude_document_names = exclude_document_names or set()
+    candidates: list[tuple[int, str, Citation, DocumentAnalysis]] = []
+
+    for analysis in document_analyses:
+        if analysis.document.title in exclude_document_names:
+            continue
+
+        analysis_categories = set(analysis.focus_areas) | {risk.category for risk in analysis.risks}
+        if focus_categories and not any(category in analysis_categories for category in focus_categories):
+            continue
+
+        title_text = f"{analysis.document.title} {analysis.document.relative_path.as_posix()}".lower()
+        if title_terms and not any(term in title_text for term in title_terms):
+            continue
+
+        for sentence, citation in _build_sentence_records(analysis.document):
+            cleaned = _clean_sentence(sentence)
+            if not _is_substantive_sentence(cleaned):
+                continue
+
+            lower_sentence = cleaned.lower()
+            if not any(_keyword_present(lower_sentence, term) for term in include_terms):
+                continue
+
+            score = _count_keyword_hits(lower_sentence, include_terms) * 3
+            score += 2 * sum(term in title_text for term in title_terms)
+            score += 2 * sum(category in analysis.focus_areas for category in focus_categories)
+            score += 2 if analysis.confidence == "high" else 1 if analysis.confidence == "medium" else 0
+            candidates.append((score, cleaned, citation, analysis))
+
+    if not candidates:
+        return None
+
+    candidates.sort(
+        key=lambda item: (
+            -item[0],
+            -_CONFIDENCE_RANK[item[3].confidence],
+            len(item[1]),
+        ),
+    )
+    _, text, citation, analysis = candidates[0]
+    return text, citation, analysis
 
 
 def _build_top_conclusions(
@@ -712,11 +1004,13 @@ def _build_known_points(document_analyses: list[DocumentAnalysis], entitlement_s
 
 def _build_unresolved_points(
     key_risks: list[RiskFinding],
+    contradictions: list[ContradictionFinding],
     missing_items: list[str],
     low_confidence_docs: list[str],
 ) -> list[str]:
     primary_risks = [risk for risk in key_risks if risk.priority_tier == "primary"] or key_risks[:_PRIMARY_RISK_COUNT]
     points = [risk.issue for risk in primary_risks[:3] if risk.issue]
+    points.extend(finding.description for finding in contradictions[:2])
     for risk in primary_risks[:3]:
         if risk.uncertainty_reason:
             points.append(f"{risk.category}: {risk.uncertainty_reason}")
@@ -755,6 +1049,7 @@ def _build_gating_points(
 
 def _build_decision_points(
     key_risks: list[RiskFinding],
+    contradictions: list[ContradictionFinding],
     missing_items: list[str],
     low_confidence_docs: list[str],
 ) -> list[str]:
@@ -766,6 +1061,8 @@ def _build_decision_points(
         points.append("Treat land basis as provisional until cost, fee, offsite, and other buyer-facing obligations are converted into auditable support.")
     if grouped["Vertical start"]:
         points.append("Treat the vertical-start schedule as conditional until permit-stage, civil, utility, and offsite execution items are closed.")
+    if contradictions:
+        points.append("Where documents conflict, underwrite to the more conservative assumption until the contradiction is reconciled with direct support.")
     if low_confidence_docs:
         points.append("Do not treat the current cost package as fully decision-grade until unreadable or budgetary files are replaced with native support.")
     if missing_items:
@@ -839,16 +1136,38 @@ def _calculate_document_confidence(document: DocumentRecord) -> tuple[str, str]:
     return "high", "Text extraction was strong with no OCR-related warnings."
 
 
+def _build_sentence_records(document: DocumentRecord) -> list[tuple[str, Citation]]:
+    records: list[tuple[str, Citation]] = []
+    if document.chunks:
+        for chunk in document.chunks:
+            citation = Citation(
+                document_name=chunk.document_name,
+                chunk_id=chunk.chunk_id,
+                page_number=chunk.page_number,
+            )
+            for sentence in split_sentences(chunk.text):
+                records.append((sentence, citation))
+        if records:
+            return records
+
+    fallback_citation = Citation(
+        document_name=document.title,
+        chunk_id="chunk-0001",
+        page_number=None,
+    )
+    return [(sentence, fallback_citation) for sentence in split_sentences(document.normalized_text)]
+
+
 def _collect_evidence(
     *,
-    sentences: list[str],
-    lower_sentences: list[str],
+    sentence_records: list[tuple[str, Citation]],
     keywords: tuple[str, ...],
     severe_keywords: tuple[str, ...],
-) -> list[str]:
-    scored_sentences: list[tuple[int, str]] = []
+) -> list[tuple[str, Citation]]:
+    scored_sentences: list[tuple[int, str, Citation]] = []
 
-    for sentence, lower_sentence in zip(sentences, lower_sentences):
+    for sentence, citation in sentence_records:
+        lower_sentence = sentence.lower()
         match_count = _count_keyword_hits(lower_sentence, keywords)
         if not match_count:
             continue
@@ -859,10 +1178,40 @@ def _collect_evidence(
 
         severe_count = _count_keyword_hits(lower_sentence, severe_keywords)
         score = (match_count * 3) + (severe_count * 5)
-        scored_sentences.append((score, cleaned))
+        scored_sentences.append((score, cleaned, citation))
 
     scored_sentences.sort(key=lambda item: (-item[0], len(item[1])))
-    return unique_preserve_order(sentence for _, sentence in scored_sentences)[:3]
+    selected: list[tuple[str, Citation]] = []
+    seen_sentences: set[str] = set()
+    for _, sentence, citation in scored_sentences:
+        if sentence in seen_sentences:
+            continue
+        seen_sentences.add(sentence)
+        selected.append((sentence, citation))
+        if len(selected) >= 3:
+            break
+    return selected
+
+
+def _format_evidence_with_citation(text: str, citation: Citation) -> str:
+    return f"{_format_citation_label(citation)}: {text}"
+
+
+def _unique_citations(citations: list[Citation]) -> list[Citation]:
+    ordered: list[Citation] = []
+    seen: set[Citation] = set()
+    for citation in citations:
+        if citation in seen:
+            continue
+        seen.add(citation)
+        ordered.append(citation)
+    return ordered
+
+
+def _format_citation_label(citation: Citation) -> str:
+    if citation.page_number is not None:
+        return f"{citation.document_name} p. {citation.page_number}"
+    return citation.document_name
 
 
 def _score_risk(

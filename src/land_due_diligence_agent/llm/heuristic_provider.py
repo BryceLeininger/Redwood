@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from land_due_diligence_agent.llm.base import LLMProvider
-from land_due_diligence_agent.models import DocumentRecord, RiskFinding
+from land_due_diligence_agent.models import ContradictionFinding, DocumentRecord, RiskFinding
 
 
 class HeuristicProvider(LLMProvider):
@@ -26,6 +26,7 @@ class HeuristicProvider(LLMProvider):
         draft_summary: str,
         category_rollup: dict[str, str],
         key_risks: list[RiskFinding],
+        contradictions: list[ContradictionFinding],
         missing_items: list[str],
     ) -> str:
         return draft_summary

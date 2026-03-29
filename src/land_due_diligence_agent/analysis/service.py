@@ -10,6 +10,7 @@ from land_due_diligence_agent.analysis.heuristics import (
     build_category_rollup,
     build_executive_summary_draft,
     collect_seller_questions,
+    detect_contradictions,
     identify_missing_items,
     infer_entitlement_status,
     recommend_reading_order,
@@ -58,11 +59,13 @@ def run_analysis(
     missing_items = identify_missing_items(documents, document_analyses)
     entitlement_status = infer_entitlement_status(documents)
     category_rollup = build_category_rollup(document_analyses)
-    seller_questions = collect_seller_questions(document_analyses, missing_items, key_risks)
+    contradictions = detect_contradictions(document_analyses, key_risks, missing_items)
+    seller_questions = collect_seller_questions(document_analyses, missing_items, key_risks, contradictions)
     executive_summary = build_executive_summary_draft(
         deal_name=deal_name,
         document_analyses=document_analyses,
         key_risks=key_risks,
+        contradictions=contradictions,
         entitlement_status=entitlement_status,
         missing_items=missing_items,
         extraction_errors=extraction_errors,
@@ -74,6 +77,7 @@ def run_analysis(
             draft_summary=executive_summary,
             category_rollup=category_rollup,
             key_risks=key_risks,
+            contradictions=contradictions,
             missing_items=missing_items,
         )
     except Exception as exc:  # pragma: no cover - network/provider failure path
@@ -98,6 +102,7 @@ def run_analysis(
         missing_items=missing_items,
         category_rollup=category_rollup,
         document_analyses=document_analyses,
+        contradictions=contradictions,
         extraction_errors=extraction_errors,
         llm_failures=llm_failures,
     )

@@ -60,6 +60,46 @@ class AnalysisTests(unittest.TestCase):
         self.assertIn("Schedule Risks", categories)
         self.assertTrue(synthesis.seller_questions)
         self.assertTrue(any("ALTA" in item for item in synthesis.missing_items))
+        self.assertTrue(all(risk.citations for risk in synthesis.key_risks))
+
+    def test_detects_cross_document_tensions(self) -> None:
+        documents = [
+            _document(
+                "title_report.txt",
+                "Preliminary title report lists an access easement exception affecting the current site layout.",
+            ),
+            _document(
+                "design_permit_plans.txt",
+                "The vehicular project entry is located along the Diana Avenue frontage and private access drive.",
+            ),
+            _document(
+                "conditions_of_approval.txt",
+                "At improvement plan stage, the project shall confirm if the Diana Avenue frontage was dedicated to the City.",
+            ),
+            _document(
+                "stormwater_plan.txt",
+                "Diana Avenue frontage is already improved.",
+            ),
+            _document(
+                "geotechnical_report.txt",
+                "Liquefaction triggering and foundation recommendations apply to the site and must be incorporated into design.",
+            ),
+            _document(
+                "site_budget.txt",
+                "Budgetary pricing only. Preliminary proposal with allowances and unresolved contingencies.",
+            ),
+        ]
+
+        synthesis = run_analysis(
+            deal_name="Contradiction Deal",
+            documents=documents,
+            llm_provider=HeuristicProvider(),
+            logger=logging.getLogger("test-contradictions"),
+        )
+
+        self.assertTrue(synthesis.contradictions)
+        self.assertTrue(any("frontage" in finding.description.lower() or "access" in finding.description.lower() for finding in synthesis.contradictions))
+        self.assertTrue(all(finding.citations for finding in synthesis.contradictions))
 
 
 if __name__ == "__main__":

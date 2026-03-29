@@ -196,6 +196,14 @@ def _build_executive_summary_markdown(
     lines.extend(
         [
             "",
+            "## Potential Contradictions / Tensions",
+            "",
+        ]
+    )
+    lines.extend(_render_contradictions(synthesis.contradictions))
+    lines.extend(
+        [
+            "",
             "## Gating Issues",
             "",
         ]
@@ -236,6 +244,9 @@ def _build_key_risks_markdown(synthesis: DealSynthesis) -> str:
         lines.extend(["## Secondary Risks (Important But Not Gating Yet)", ""])
         for risk in secondary_risks:
             lines.extend(_render_risk_block(risk, heading_level="###"))
+
+    lines.extend(["## Potential Contradictions / Tensions", ""])
+    lines.extend(_render_contradictions(synthesis.contradictions))
 
     return "\n".join(lines).rstrip() + "\n"
 
@@ -321,15 +332,24 @@ def _build_deal_synthesis_markdown(synthesis: DealSynthesis) -> str:
     ]
 
     if primary_risks:
-        lines.extend(f"- **{risk.category}:** {risk.issue} {risk.likely_implication}".strip() for risk in primary_risks)
+        lines.extend(
+            f"- **{risk.category}:** {_with_light_citation(f'{risk.issue} {risk.likely_implication}'.strip(), risk)}"
+            for risk in primary_risks
+        )
     else:
         lines.append("- No primary deal-shaping risk was isolated from the extracted text.")
 
     lines.extend(["", "## Secondary Risks (Important But Not Gating Yet)", ""])
     if secondary_risks:
-        lines.extend(f"- **{risk.category}:** {risk.issue} {risk.likely_implication}".strip() for risk in secondary_risks)
+        lines.extend(
+            f"- **{risk.category}:** {_with_light_citation(f'{risk.issue} {risk.likely_implication}'.strip(), risk)}"
+            for risk in secondary_risks
+        )
     else:
         lines.append("- No secondary risk was elevated beyond the primary issue set.")
+
+    lines.extend(["", "## Potential Contradictions / Tensions", ""])
+    lines.extend(_render_contradictions(synthesis.contradictions))
 
     lines.extend(["", "## Gating Issues", ""])
     lines.extend(f"- {item}" for item in _build_gating_points(synthesis))
@@ -355,6 +375,14 @@ def _build_investment_committee_brief_markdown(synthesis: DealSynthesis) -> str:
         "",
     ]
     lines.extend(f"- {item}" for item in biggest_risks)
+    lines.extend(
+        [
+            "",
+            "## Potential Contradictions / Tensions",
+            "",
+        ]
+    )
+    lines.extend(_render_contradictions(synthesis.contradictions))
     lines.extend(
         [
             "",
@@ -535,6 +563,10 @@ def _render_risk_block(risk, *, heading_level: str) -> list[str]:
     lines = [f"{heading_level} {risk.category}"]
     if risk.anchor:
         lines.append(f"- Document Anchor: {risk.anchor}")
+    if risk.citations:
+        lines.append(f"- Source: {_format_citations(risk.citations)}")
+    elif risk.source_documents:
+        lines.append(f"- Source: {', '.join(risk.source_documents)}")
     lines.append(f"- Severity: {risk.severity}")
     if risk.gating_flags:
         lines.append(f"- Gating Impact: {', '.join(risk.gating_flags)}")
@@ -556,9 +588,49 @@ def _render_risk_block(risk, *, heading_level: str) -> list[str]:
     return lines
 
 
+def _render_contradictions(contradictions: list) -> list[str]:
+    if not contradictions:
+        return ["- No material cross-document contradiction was isolated from the current package."]
+
+    lines: list[str] = []
+    for index, finding in enumerate(contradictions, start=1):
+        lines.append(f"### Tension {index}")
+        lines.append(f"- Description: {finding.description}")
+        if finding.citations:
+            lines.append(f"- Documents: {_format_citations(finding.citations)}")
+        elif finding.source_documents:
+            lines.append(f"- Documents: {', '.join(finding.source_documents)}")
+        lines.append(f"- Why It Matters: {finding.why_it_matters}")
+        lines.append("")
+    return lines
+
+
+def _with_light_citation(text: str, risk) -> str:
+    citation_text = _format_citations(risk.citations[:1])
+    if not citation_text:
+        return text
+    return f"{text} [Source: {citation_text}]"
+
+
+def _format_citations(citations: list) -> str:
+    if not citations:
+        return ""
+    parts: list[str] = []
+    for citation in citations[:3]:
+        if citation.page_number is not None:
+            parts.append(f"{citation.document_name} p. {citation.page_number}")
+        else:
+            parts.append(citation.document_name)
+    return "; ".join(parts)
+
+
 def _build_executive_conclusions(synthesis: DealSynthesis) -> list[str]:
     primary_risks, _ = _split_risk_tiers(synthesis.key_risks)
-    conclusions = [risk.issue or risk.summary for risk in primary_risks[:3]]
+    conclusions = [
+        _with_light_citation(finding.description, finding)
+        for finding in synthesis.contradictions[:2]
+    ]
+    conclusions.extend(_with_light_citation(risk.issue or risk.summary, risk) for risk in primary_risks[:3])
     if any(analysis.confidence == "low" for analysis in synthesis.document_analyses):
         conclusions.append("At least one key cost or support file still requires manual review because extraction quality was weak.")
     if not conclusions:
@@ -594,7 +666,8 @@ def _build_known_points(synthesis: DealSynthesis) -> list[str]:
 
 def _build_unresolved_points(synthesis: DealSynthesis) -> list[str]:
     primary_risks, _ = _split_risk_tiers(synthesis.key_risks)
-    points = [risk.issue for risk in primary_risks[:3] if risk.issue]
+    points = [_with_light_citation(finding.description, finding) for finding in synthesis.contradictions[:2]]
+    points.extend(_with_light_citation(risk.issue, risk) for risk in primary_risks[:3] if risk.issue)
     for risk in primary_risks[:3]:
         if risk.uncertainty_reason:
             points.append(f"{risk.category}: {risk.uncertainty_reason}")
@@ -641,6 +714,8 @@ def _build_decision_points(synthesis: DealSynthesis) -> list[str]:
         points.append("Treat land basis as provisional until cost, fee, offsite, and other buyer-facing obligations are converted into auditable support.")
     if grouped["Vertical start"]:
         points.append("Treat the vertical-start schedule as conditional until permit-stage, civil, utility, and offsite execution items are closed.")
+    if synthesis.contradictions:
+        points.append("Where documents conflict, underwrite to the more conservative assumption until the contradiction is reconciled with direct support.")
     if any(analysis.confidence == "low" for analysis in synthesis.document_analyses):
         points.append("Do not treat the current cost package as fully decision-grade until unreadable or budgetary files are replaced with native support.")
     return points[:5]
@@ -649,6 +724,13 @@ def _build_decision_points(synthesis: DealSynthesis) -> list[str]:
 def _build_ic_overall_read(synthesis: DealSynthesis) -> str:
     if not synthesis.key_risks:
         return "The file set does not surface a concentrated issue, but the package should still be checked for completeness before it is treated as decision-ready."
+
+    if synthesis.contradictions:
+        lead_tensions = "; ".join(finding.description for finding in synthesis.contradictions[:2])
+        return (
+            f"The package is substantive, but the documents do not line up cleanly. {lead_tensions} "
+            f"Until those tensions are reconciled, underwriting should stay conservative on basis, timing, and closing confidence."
+        )
 
     primary_risks, _ = _split_risk_tiers(synthesis.key_risks)
     lead_issues = "; ".join((risk.issue or risk.summary) for risk in primary_risks[:3])
@@ -665,7 +747,7 @@ def _build_ic_biggest_risks(synthesis: DealSynthesis) -> list[str]:
         risk_text = f"{risk.issue} {risk.likely_implication}".strip()
         if risk.anchor:
             risk_text = f"{risk.anchor}: {risk_text[0].lower() + risk_text[1:]}" if risk_text else risk.anchor
-        risks.append(risk_text)
+        risks.append(_with_light_citation(risk_text, risk))
     return risks or ["No concentrated issue was elevated into a top risk."]
 
 
@@ -680,6 +762,10 @@ def _build_ic_biggest_unknowns(synthesis: DealSynthesis) -> list[str]:
     ]
     if low_confidence_docs:
         unknowns.append(f"Unreadable or weakly extracted documents still affect: {', '.join(low_confidence_docs[:2])}.")
+    unknowns.extend(
+        _with_light_citation(finding.description, finding)
+        for finding in synthesis.contradictions[:2]
+    )
     primary_risks, _ = _split_risk_tiers(synthesis.key_risks)
     unknowns.extend(
         f"{risk.category}: {risk.uncertainty_reason}"
@@ -704,7 +790,7 @@ def _build_ic_verify_points(synthesis: DealSynthesis) -> list[str]:
 
 def _build_decision_ready_assessment(synthesis: DealSynthesis) -> str:
     grouped = _group_risks_by_gate(synthesis.key_risks)
-    if grouped["Closing"] or synthesis.missing_items or any(analysis.confidence == "low" for analysis in synthesis.document_analyses):
+    if synthesis.contradictions or grouped["Closing"] or synthesis.missing_items or any(analysis.confidence == "low" for analysis in synthesis.document_analyses):
         return "Not decision-ready. The package is useful, but closing and underwriting should stay conditional until the gating title, scope, cost, and support gaps are resolved."
     if grouped["Underwriting confidence"] or grouped["Vertical start"]:
         return "Not fully decision-ready. The package is substantive, but the risk stack is still too open on basis and execution timing to support a final recommendation."

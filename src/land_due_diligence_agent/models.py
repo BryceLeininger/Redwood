@@ -7,6 +7,25 @@ from pathlib import Path
 from typing import Any
 
 
+@dataclass(slots=True, frozen=True)
+class Citation:
+    """Compact source reference for a claim or evidence snippet."""
+
+    document_name: str
+    chunk_id: str
+    page_number: int | None = None
+
+
+@dataclass(slots=True)
+class ExtractedChunk:
+    """Normalized chunk-level extraction record used for traceable analysis."""
+
+    document_name: str
+    chunk_id: str
+    text: str
+    page_number: int | None = None
+
+
 @dataclass(slots=True)
 class DocumentRecord:
     """Normalized representation of an extracted diligence document."""
@@ -19,6 +38,7 @@ class DocumentRecord:
     normalized_text: str
     metadata: dict[str, Any] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
+    chunks: list[ExtractedChunk] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -47,6 +67,19 @@ class RiskFinding:
     priority_tier: str = ""
     gating_flags: list[str] = field(default_factory=list)
     uncertainty_reason: str = ""
+    citations: list[Citation] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class ContradictionFinding:
+    """Focused cross-document contradiction or tension finding."""
+
+    description: str
+    why_it_matters: str
+    citations: list[Citation] = field(default_factory=list)
+    source_documents: list[str] = field(default_factory=list)
+    related_categories: list[str] = field(default_factory=list)
+    priority: int = 0
 
 
 @dataclass(slots=True)
@@ -100,6 +133,7 @@ class DealSynthesis:
     missing_items: list[str]
     category_rollup: dict[str, str]
     document_analyses: list[DocumentAnalysis]
+    contradictions: list[ContradictionFinding] = field(default_factory=list)
     extraction_errors: list[str] = field(default_factory=list)
     llm_failures: list[LLMCallFailure] = field(default_factory=list)
 

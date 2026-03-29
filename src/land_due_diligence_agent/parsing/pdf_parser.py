@@ -8,7 +8,7 @@ from pypdf import PdfReader
 from pypdf.errors import DependencyError
 
 
-def extract_pdf_text(path: Path) -> tuple[str, dict[str, int], list[str]]:
+def extract_pdf_text(path: Path) -> tuple[str, dict[str, int], list[str], list[dict[str, str | int | None]]]:
     """Extract page text from a PDF using text-layer parsing only."""
 
     try:
@@ -19,6 +19,7 @@ def extract_pdf_text(path: Path) -> tuple[str, dict[str, int], list[str]]:
         ) from exc
     warnings: list[str] = []
     pages: list[str] = []
+    chunk_records: list[dict[str, str | int | None]] = []
 
     for index, page in enumerate(reader.pages, start=1):
         try:
@@ -32,8 +33,15 @@ def extract_pdf_text(path: Path) -> tuple[str, dict[str, int], list[str]]:
             continue
 
         pages.append(f"[Page {index}]\n{page_text}")
+        chunk_records.append(
+            {
+                "chunk_id": f"page-{index:04d}",
+                "page_number": index,
+                "text": page_text,
+            }
+        )
 
     if not pages:
         warnings.append("No PDF text extracted.")
 
-    return "\n\n".join(pages), {"page_count": len(reader.pages)}, warnings
+    return "\n\n".join(pages), {"page_count": len(reader.pages)}, warnings, chunk_records

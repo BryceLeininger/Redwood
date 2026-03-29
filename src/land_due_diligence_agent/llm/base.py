@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
-from land_due_diligence_agent.models import DocumentRecord, RiskFinding
+from land_due_diligence_agent.models import ContradictionFinding, DocumentRecord, RiskFinding
 
 
 class LLMProvider(ABC):
@@ -29,6 +29,7 @@ class LLMProvider(ABC):
         draft_summary: str,
         category_rollup: dict[str, str],
         key_risks: list[RiskFinding],
+        contradictions: list[ContradictionFinding],
         missing_items: list[str],
     ) -> str:
         """Return a polished deal-level executive summary."""

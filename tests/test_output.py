@@ -7,6 +7,8 @@ import unittest
 from pathlib import Path
 
 from land_due_diligence_agent.models import (
+    Citation,
+    ContradictionFinding,
     DealSynthesis,
     DocumentAnalysis,
     DocumentRecord,
@@ -44,6 +46,7 @@ class OutputWriterTests(unittest.TestCase):
                     anchor="The Phase I ESA (Memo)",
                     priority_tier="primary",
                     gating_flags=["Underwriting confidence"],
+                    citations=[Citation(document_name="Memo", chunk_id="page-0001", page_number=1)],
                 )
             ],
             seller_questions=["What remediation is still outstanding?"],
@@ -72,6 +75,16 @@ class OutputWriterTests(unittest.TestCase):
             missing_items=["ALTA or boundary survey"],
             category_rollup={"Environmental Risks": "One document flagged environmental signals."},
             document_analyses=[analysis],
+            contradictions=[
+                ContradictionFinding(
+                    description="Memo p. 1 shows environmental follow-up, but the pricing package still reads as preliminary.",
+                    why_it_matters="That tension weakens cost certainty.",
+                    citations=[Citation(document_name="Memo", chunk_id="page-0001", page_number=1)],
+                    source_documents=["Memo"],
+                    related_categories=["Environmental Risks", "Budget / Cost Reliability"],
+                    priority=90,
+                )
+            ],
             llm_failures=[
                 LLMCallFailure(
                     stage="document_summary",
@@ -110,15 +123,22 @@ class OutputWriterTests(unittest.TestCase):
             self.assertIn("Demo Deal", content)
             self.assertIn("heuristic", content)
             self.assertIn("Most Important Conclusions", content)
+            self.assertIn("Potential Contradictions / Tensions", content)
             self.assertIn("Gating Issues", content)
             self.assertIn("Known Limitations Of This Run", content)
             key_risk_content = (output_dir / "02_key_risks.md").read_text(encoding="utf-8")
             self.assertIn("Primary Risks (Deal-Shaping)", key_risk_content)
             self.assertIn("Document Anchor", key_risk_content)
             self.assertIn("Gating Impact", key_risk_content)
+            self.assertIn("Source: Memo p. 1", key_risk_content)
+            self.assertIn("Potential Contradictions / Tensions", key_risk_content)
             synthesis_content = (output_dir / "07_deal_synthesis.md").read_text(encoding="utf-8")
             self.assertIn("Primary Risks (Deal-Shaping)", synthesis_content)
             self.assertIn("Gating Issues", synthesis_content)
+            self.assertIn("[Source: Memo p. 1]", synthesis_content)
+            self.assertIn("Potential Contradictions / Tensions", synthesis_content)
+            ic_content = (output_dir / "09_investment_committee_brief.md").read_text(encoding="utf-8")
+            self.assertIn("Potential Contradictions / Tensions", ic_content)
             summary_content = (output_dir / "00_run_summary.md").read_text(encoding="utf-8")
             self.assertIn("Files found: 1", summary_content)
             self.assertIn("run.log", summary_content)
