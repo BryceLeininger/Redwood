@@ -11,6 +11,7 @@ from land_due_diligence_agent.models import (
     DocumentAnalysis,
     DocumentRecord,
     FileProcessingResult,
+    LLMCallFailure,
     ReadingRecommendation,
     RiskFinding,
     RunSummary,
@@ -58,6 +59,14 @@ class OutputWriterTests(unittest.TestCase):
             missing_items=["ALTA or boundary survey"],
             category_rollup={"Environmental Risks": "One document flagged environmental signals."},
             document_analyses=[analysis],
+            llm_failures=[
+                LLMCallFailure(
+                    stage="document_summary",
+                    target="memo.txt",
+                    model="gpt-4.1",
+                    detail="RuntimeError: example failure detail",
+                )
+            ],
         )
         run_summary = RunSummary(
             run_id="20260328_120000",
@@ -71,6 +80,7 @@ class OutputWriterTests(unittest.TestCase):
             files_parsed_successfully=1,
             files_failed=0,
             file_results=[FileProcessingResult(relative_path="memo.txt", status="parsed")],
+            llm_model="gpt-4.1",
         )
 
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -89,6 +99,10 @@ class OutputWriterTests(unittest.TestCase):
             summary_content = (output_dir / "00_run_summary.md").read_text(encoding="utf-8")
             self.assertIn("Files found: 1", summary_content)
             self.assertIn("run.log", summary_content)
+            self.assertIn("LLM Model: `gpt-4.1`", summary_content)
+            error_content = (output_dir / "08_error_report.md").read_text(encoding="utf-8")
+            self.assertIn("LLM Refinement Failures", error_content)
+            self.assertIn("example failure detail", error_content)
 
     def test_writes_summary_and_error_report_without_synthesis(self) -> None:
         run_summary = RunSummary(

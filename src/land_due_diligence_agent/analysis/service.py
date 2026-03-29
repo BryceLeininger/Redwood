@@ -15,7 +15,7 @@ from land_due_diligence_agent.analysis.heuristics import (
     recommend_reading_order,
 )
 from land_due_diligence_agent.llm.base import LLMProvider
-from land_due_diligence_agent.models import DealSynthesis, DocumentRecord
+from land_due_diligence_agent.models import DealSynthesis, DocumentRecord, LLMCallFailure
 
 
 def run_analysis(
@@ -30,6 +30,7 @@ def run_analysis(
 
     extraction_errors = extraction_errors or []
     document_analyses = []
+    llm_failures: list[LLMCallFailure] = []
 
     for document in documents:
         analysis = analyze_document(document)
@@ -41,7 +42,16 @@ def run_analysis(
                 missing_items=analysis.missing_items,
             )
         except Exception as exc:  # pragma: no cover - network/provider failure path
-            logger.warning("LLM refinement failed for %s: %s", document.relative_path.as_posix(), exc)
+            detail = _format_llm_exception(exc)
+            logger.warning("LLM refinement failed for %s: %s", document.relative_path.as_posix(), detail)
+            llm_failures.append(
+                LLMCallFailure(
+                    stage="document_summary",
+                    target=document.relative_path.as_posix(),
+                    model=getattr(llm_provider, "model", llm_provider.provider_name),
+                    detail=detail,
+                )
+            )
         document_analyses.append(analysis)
 
     key_risks = aggregate_risks(document_analyses)
@@ -67,7 +77,16 @@ def run_analysis(
             missing_items=missing_items,
         )
     except Exception as exc:  # pragma: no cover - network/provider failure path
-        logger.warning("Deal-level LLM refinement failed: %s", exc)
+        detail = _format_llm_exception(exc)
+        logger.warning("Deal-level LLM refinement failed: %s", detail)
+        llm_failures.append(
+            LLMCallFailure(
+                stage="executive_summary",
+                target=deal_name,
+                model=getattr(llm_provider, "model", llm_provider.provider_name),
+                detail=detail,
+            )
+        )
 
     return DealSynthesis(
         deal_name=deal_name,
@@ -80,4 +99,15 @@ def run_analysis(
         category_rollup=category_rollup,
         document_analyses=document_analyses,
         extraction_errors=extraction_errors,
+        llm_failures=llm_failures,
     )
+
+
+def _format_llm_exception(exc: Exception) -> str:
+    parts: list[str] = []
+    current: BaseException | None = exc
+    while current is not None:
+        detail = str(current).strip() or "<no message>"
+        parts.append(f"{type(current).__name__}: {detail}")
+        current = current.__cause__
+    return " <- ".join(parts)

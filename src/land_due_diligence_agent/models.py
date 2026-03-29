@@ -42,6 +42,16 @@ class RiskFinding:
 
 
 @dataclass(slots=True)
+class LLMCallFailure:
+    """Structured details for a failed LLM refinement call."""
+
+    stage: str
+    target: str
+    model: str
+    detail: str
+
+
+@dataclass(slots=True)
 class ReadingRecommendation:
     """Suggested document reading sequence for deal review."""
 
@@ -83,6 +93,7 @@ class DealSynthesis:
     category_rollup: dict[str, str]
     document_analyses: list[DocumentAnalysis]
     extraction_errors: list[str] = field(default_factory=list)
+    llm_failures: list[LLMCallFailure] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -95,6 +106,7 @@ class RunSummary:
     output_folder: str
     llm_provider: str
     started_at: str
+    llm_model: str | None = None
     completed_at: str | None = None
     files_found: int = 0
     files_parsed_successfully: int = 0

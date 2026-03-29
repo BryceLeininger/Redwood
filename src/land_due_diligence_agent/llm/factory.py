@@ -17,11 +17,17 @@ def build_llm_provider(settings: Settings, logger: logging.Logger) -> LLMProvide
         if not settings.openai_api_key:
             logger.warning("LLM_PROVIDER=openai but OPENAI_API_KEY is not set. Falling back to heuristic mode.")
             return HeuristicProvider()
-        return OpenAIProvider(
+        provider = OpenAIProvider(
             api_key=settings.openai_api_key,
             model=settings.openai_model,
             base_url=settings.openai_base_url,
         )
+        logger.info(
+            "Configured OpenAI provider with model '%s'%s.",
+            settings.openai_model,
+            f" and base URL '{settings.openai_base_url}'" if settings.openai_base_url else "",
+        )
+        return provider
 
     if settings.llm_provider != "heuristic":
         logger.warning("Unknown LLM provider '%s'. Falling back to heuristic mode.", settings.llm_provider)

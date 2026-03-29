@@ -62,6 +62,7 @@ def main(argv: list[str] | None = None) -> int:
         input_folder=str(input_folder),
         output_folder=str(run_output_dir),
         llm_provider=settings.llm_provider,
+        llm_model=settings.openai_model if settings.llm_provider == "openai" else None,
         started_at=started_at.isoformat(timespec="seconds"),
     )
 
@@ -137,9 +138,21 @@ def main(argv: list[str] | None = None) -> int:
         logger.info("Wrote %d report file(s).", len(written_paths))
         return 1
 
-    llm_provider = build_llm_provider(settings, logger)
+    try:
+        llm_provider = build_llm_provider(settings, logger)
+    except Exception as exc:
+        logger.exception("Unable to initialize the configured LLM provider")
+        run_summary.run_errors.append(f"Unable to initialize the configured LLM provider: {type(exc).__name__}: {exc}")
+        run_summary.completed_at = datetime.now().astimezone().isoformat(timespec="seconds")
+        write_markdown_outputs(run_output_dir, run_summary=run_summary)
+        return 1
+
     run_summary.llm_provider = llm_provider.provider_name
-    logger.info("Using LLM provider: %s", llm_provider.provider_name)
+    run_summary.llm_model = getattr(llm_provider, "model", None)
+    if run_summary.llm_model:
+        logger.info("Using LLM provider: %s | model: %s", llm_provider.provider_name, run_summary.llm_model)
+    else:
+        logger.info("Using LLM provider: %s", llm_provider.provider_name)
 
     synthesis = run_analysis(
         deal_name=deal_name,

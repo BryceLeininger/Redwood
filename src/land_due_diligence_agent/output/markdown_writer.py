@@ -72,6 +72,7 @@ def _build_run_summary_markdown(
         f"- Input Folder: `{run_summary.input_folder}`",
         f"- Output Folder: `{run_summary.output_folder}`",
         f"- LLM Provider: `{run_summary.llm_provider}`",
+        f"- LLM Model: `{run_summary.llm_model or 'n/a'}`",
         f"- Started At: `{run_summary.started_at}`",
         f"- Completed At: `{run_summary.completed_at or 'In progress'}`",
         "",
@@ -107,6 +108,16 @@ def _build_run_summary_markdown(
                 "",
             ]
         )
+
+        if synthesis.llm_failures:
+            lines.extend(
+                [
+                    "## LLM Refinement Issues",
+                    "",
+                    f"- LLM refinement failed for {len(synthesis.llm_failures)} call(s). See `08_error_report.md` for details.",
+                    "",
+                ]
+            )
 
     lines.extend(
         [
@@ -303,6 +314,15 @@ def _build_error_report_markdown(
                 for analysis in low_confidence_docs
             )
 
+        if synthesis.llm_failures:
+            lines.append("")
+            lines.append("## LLM Refinement Failures")
+            lines.append("")
+            lines.extend(
+                f"- [{failure.stage}] `{failure.target}` | model: `{failure.model}` | {failure.detail}"
+                for failure in synthesis.llm_failures
+            )
+
     lines.append("")
     lines.append("## Failed Files")
     lines.append("")
@@ -383,6 +403,9 @@ def _build_known_limitations(
 
     if synthesis.extraction_errors:
         limitations.append(f"{len(synthesis.extraction_errors)} extraction error(s) were carried into analysis.")
+
+    if synthesis.llm_failures:
+        limitations.append(f"OpenAI refinement failed for {len(synthesis.llm_failures)} call(s); heuristic drafts were retained where needed.")
 
     if not limitations:
         limitations.append("No major extraction limitations were recorded for this run.")
