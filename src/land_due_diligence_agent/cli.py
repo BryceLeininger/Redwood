@@ -30,6 +30,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--deal-name", help="Optional deal name for the output folder and report headings.")
     parser.add_argument(
+        "--mode",
+        choices=("fast", "full"),
+        default="fast",
+        help="Analysis depth. Fast mode is the default quick-read path; full mode runs the full decision-grade workflow.",
+    )
+    parser.add_argument(
         "--llm-provider",
         choices=("heuristic", "openai"),
         help="Override the LLM provider configured in the environment.",
@@ -64,12 +70,14 @@ def main(argv: list[str] | None = None) -> int:
         llm_provider=settings.llm_provider,
         llm_model=settings.openai_model if settings.llm_provider == "openai" else None,
         started_at=started_at.isoformat(timespec="seconds"),
+        analysis_mode=args.mode,
     )
 
     logger.info("Starting diligence review for '%s'.", deal_name)
     logger.info("Run ID: %s", run_id)
     logger.info("Input folder: %s", input_folder)
     logger.info("Output folder: %s", run_output_dir)
+    logger.info("Analysis mode: %s", run_summary.analysis_mode)
 
     try:
         document_paths = discover_documents(input_folder)
@@ -160,7 +168,9 @@ def main(argv: list[str] | None = None) -> int:
         llm_provider=llm_provider,
         logger=logger,
         extraction_errors=extraction_errors,
+        mode=run_summary.analysis_mode,
     )
+    run_summary.llm_calls_made = synthesis.llm_calls_attempted
 
     run_summary.completed_at = datetime.now().astimezone().isoformat(timespec="seconds")
     written_paths = write_markdown_outputs(
@@ -176,6 +186,7 @@ def main(argv: list[str] | None = None) -> int:
         run_summary.files_parsed_successfully,
         run_summary.files_failed,
     )
+    logger.info("Approximate LLM calls made: %d", run_summary.llm_calls_made)
 
     if extraction_errors:
         logger.warning("Completed with %d extraction error(s). See output markdown and run.log for details.", len(extraction_errors))

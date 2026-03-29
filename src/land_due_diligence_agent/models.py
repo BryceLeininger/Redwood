@@ -136,6 +136,8 @@ class DealSynthesis:
     contradictions: list[ContradictionFinding] = field(default_factory=list)
     extraction_errors: list[str] = field(default_factory=list)
     llm_failures: list[LLMCallFailure] = field(default_factory=list)
+    analysis_mode: str = "full"
+    llm_calls_attempted: int = 0
 
 
 @dataclass(slots=True)
@@ -150,6 +152,8 @@ class RunSummary:
     started_at: str
     llm_model: str | None = None
     completed_at: str | None = None
+    analysis_mode: str = "fast"
+    llm_calls_made: int = 0
     files_found: int = 0
     files_parsed_successfully: int = 0
     files_failed: int = 0

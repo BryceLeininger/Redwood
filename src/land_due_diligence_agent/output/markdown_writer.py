@@ -17,18 +17,7 @@ def write_markdown_outputs(
 
     planned_output_names = ["00_run_summary.md"]
     if synthesis is not None:
-        planned_output_names.extend(
-            [
-                "01_executive_summary.md",
-                "02_key_risks.md",
-                "03_recommended_reading_order.md",
-                "04_seller_questions.md",
-                "05_document_summaries.md",
-                "06_missing_diligence_items.md",
-                "07_deal_synthesis.md",
-                "09_investment_committee_brief.md",
-            ]
-        )
+        planned_output_names.extend(_analysis_output_names(run_summary.analysis_mode))
     planned_output_names.extend(["08_error_report.md", "run.log"])
     run_summary.output_files_created = planned_output_names
 
@@ -43,15 +32,20 @@ def write_markdown_outputs(
                     output_dir / "01_executive_summary.md",
                     _build_executive_summary_markdown(synthesis, run_summary.llm_provider, run_summary),
                 ),
-                (output_dir / "02_key_risks.md", _build_key_risks_markdown(synthesis)),
-                (output_dir / "03_recommended_reading_order.md", _build_reading_order_markdown(synthesis)),
-                (output_dir / "04_seller_questions.md", _build_seller_questions_markdown(synthesis)),
-                (output_dir / "05_document_summaries.md", _build_document_summaries_markdown(synthesis)),
-                (output_dir / "06_missing_diligence_items.md", _build_missing_items_markdown(synthesis)),
-                (output_dir / "07_deal_synthesis.md", _build_deal_synthesis_markdown(synthesis)),
-                (output_dir / "09_investment_committee_brief.md", _build_investment_committee_brief_markdown(synthesis)),
+                (output_dir / "02_key_risks.md", _build_key_risks_markdown(synthesis, run_summary.analysis_mode)),
+                (output_dir / "04_seller_questions.md", _build_seller_questions_markdown(synthesis, run_summary.analysis_mode)),
             ]
         )
+        if run_summary.analysis_mode == "full":
+            files.extend(
+                [
+                    (output_dir / "03_recommended_reading_order.md", _build_reading_order_markdown(synthesis)),
+                    (output_dir / "05_document_summaries.md", _build_document_summaries_markdown(synthesis)),
+                    (output_dir / "06_missing_diligence_items.md", _build_missing_items_markdown(synthesis)),
+                    (output_dir / "07_deal_synthesis.md", _build_deal_synthesis_markdown(synthesis)),
+                    (output_dir / "09_investment_committee_brief.md", _build_investment_committee_brief_markdown(synthesis)),
+                ]
+            )
 
     files.append((output_dir / "08_error_report.md", _build_error_report_markdown(run_summary, synthesis)))
 
@@ -60,6 +54,26 @@ def write_markdown_outputs(
         path.write_text(content, encoding="utf-8")
         written_paths.append(path)
     return written_paths
+
+
+def _analysis_output_names(analysis_mode: str) -> list[str]:
+    if analysis_mode == "fast":
+        return [
+            "01_executive_summary.md",
+            "02_key_risks.md",
+            "04_seller_questions.md",
+        ]
+
+    return [
+        "01_executive_summary.md",
+        "02_key_risks.md",
+        "03_recommended_reading_order.md",
+        "04_seller_questions.md",
+        "05_document_summaries.md",
+        "06_missing_diligence_items.md",
+        "07_deal_synthesis.md",
+        "09_investment_committee_brief.md",
+    ]
 
 
 def _build_run_summary_markdown(
@@ -73,8 +87,10 @@ def _build_run_summary_markdown(
         f"- Deal: {run_summary.deal_name}",
         f"- Input Folder: `{run_summary.input_folder}`",
         f"- Output Folder: `{run_summary.output_folder}`",
+        f"- Analysis Mode: `{run_summary.analysis_mode}`",
         f"- LLM Provider: `{run_summary.llm_provider}`",
         f"- LLM Model: `{run_summary.llm_model or 'n/a'}`",
+        f"- Approximate LLM Calls: {run_summary.llm_calls_made}",
         f"- Started At: `{run_summary.started_at}`",
         f"- Completed At: `{run_summary.completed_at or 'In progress'}`",
         "",
@@ -156,6 +172,36 @@ def _build_executive_summary_markdown(
 ) -> str:
     limitations = _build_known_limitations(run_summary, synthesis)
     conclusions = _build_executive_conclusions(synthesis)
+    if run_summary.analysis_mode == "fast":
+        lines = [
+            "# Executive Summary",
+            "",
+            f"**Deal:** {synthesis.deal_name}",
+            "",
+            f"**Provider:** {provider_name}",
+            "",
+            f"**Mode:** {run_summary.analysis_mode}",
+            "",
+            f"**Entitlement Status:** {synthesis.entitlement_status}",
+            "",
+            "## Overall Read",
+            "",
+            synthesis.executive_summary,
+            "",
+            "## Most Important Conclusions",
+            "",
+        ]
+        lines.extend(f"- {item}" for item in conclusions[:3])
+        lines.extend(
+            [
+                "",
+                "## Known Limitations Of This Run",
+                "",
+            ]
+        )
+        lines.extend(f"- {item}" for item in limitations)
+        return "\n".join(lines) + "\n"
+
     known_points = _build_known_points(synthesis)
     unresolved_points = _build_unresolved_points(synthesis)
     gating_points = _build_gating_points(synthesis)
@@ -236,13 +282,18 @@ def _build_executive_summary_markdown(
     return "\n".join(lines) + "\n"
 
 
-def _build_key_risks_markdown(synthesis: DealSynthesis) -> str:
+def _build_key_risks_markdown(synthesis: DealSynthesis, analysis_mode: str) -> str:
     lines = ["# Key Risks", ""]
     if not synthesis.key_risks:
         lines.append("No concentrated risk signals were detected from the supplied document text.")
         return "\n".join(lines) + "\n"
 
     primary_risks, secondary_risks = _split_risk_tiers(synthesis.key_risks)
+    if analysis_mode == "fast":
+        lines.extend(["## Highest-Priority Risks", ""])
+        for risk in primary_risks[:3]:
+            lines.extend(_render_fast_risk_block(risk))
+        return "\n".join(lines).rstrip() + "\n"
 
     lines.extend(["## Primary Risks (Deal-Shaping)", ""])
     for risk in primary_risks:
@@ -272,13 +323,14 @@ def _build_reading_order_markdown(synthesis: DealSynthesis) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
-def _build_seller_questions_markdown(synthesis: DealSynthesis) -> str:
+def _build_seller_questions_markdown(synthesis: DealSynthesis, analysis_mode: str) -> str:
     lines = ["# Seller Questions", ""]
     if not synthesis.seller_questions:
         lines.append("- No seller questions were generated.")
         return "\n".join(lines) + "\n"
 
-    lines.extend(f"- {question}" for question in synthesis.seller_questions)
+    questions = synthesis.seller_questions[:6] if analysis_mode == "fast" else synthesis.seller_questions
+    lines.extend(f"- {question}" for question in questions)
     return "\n".join(lines) + "\n"
 
 
@@ -523,6 +575,9 @@ def _build_known_limitations(
 ) -> list[str]:
     limitations: list[str] = []
 
+    if run_summary.analysis_mode == "fast":
+        limitations.append("This run used fast mode, so document-level LLM refinement, contradiction detection, deep synthesis, and the IC brief were skipped.")
+
     if run_summary.llm_provider == "heuristic":
         limitations.append("This run used heuristic mode only; no OpenAI refinement was applied.")
 
@@ -581,6 +636,20 @@ def _render_risk_block(risk, *, heading_level: str) -> list[str]:
     if risk.evidence:
         lines.append("- Evidence:")
         lines.extend(f"  - {evidence}" for evidence in risk.evidence)
+    lines.append("")
+    return lines
+
+
+def _render_fast_risk_block(risk) -> list[str]:
+    lines = [f"### {risk.category}"]
+    risk_text = " ".join(part for part in [risk.issue, risk.likely_implication] if part).strip() or risk.summary
+    lines.append(f"- {risk_text}")
+    if risk.citations:
+        lines.append(f"- Source: {_format_citations(risk.citations[:2])}")
+    elif risk.source_documents:
+        lines.append(f"- Source: {', '.join(risk.source_documents[:2])}")
+    if risk.gating_flags:
+        lines.append(f"- Affects: {', '.join(risk.gating_flags)}")
     lines.append("")
     return lines
 

@@ -102,6 +102,7 @@ class OutputWriterTests(unittest.TestCase):
             llm_provider="heuristic",
             started_at="2026-03-28T12:00:00-07:00",
             completed_at="2026-03-28T12:01:00-07:00",
+            analysis_mode="full",
             files_found=1,
             files_parsed_successfully=1,
             files_failed=0,
@@ -152,9 +153,97 @@ class OutputWriterTests(unittest.TestCase):
             self.assertIn("run.log", summary_content)
             self.assertIn("09_investment_committee_brief.md", summary_content)
             self.assertIn("LLM Model: `gpt-4.1`", summary_content)
+            self.assertIn("Analysis Mode: `full`", summary_content)
             error_content = (output_dir / "08_error_report.md").read_text(encoding="utf-8")
             self.assertIn("LLM Refinement Failures", error_content)
             self.assertIn("example failure detail", error_content)
+
+    def test_writes_fast_mode_output_subset(self) -> None:
+        document = DocumentRecord(
+            source_path=Path("memo.txt"),
+            relative_path=Path("memo.txt"),
+            extension=".txt",
+            title="Memo",
+            raw_text="memo",
+            normalized_text="memo",
+        )
+        analysis = DocumentAnalysis(
+            document=document,
+            summary="Summary text.",
+            risks=[
+                RiskFinding(
+                    category="Environmental Risks",
+                    severity="high",
+                    summary="Risk summary.",
+                    evidence=["Memo: evidence"],
+                    issue="The Phase I ESA (Memo) leaves environmental follow-up open.",
+                    why_it_matters="This affects underwriting certainty.",
+                    likely_implication="Mitigation cost remains open.",
+                    anchor="The Phase I ESA (Memo)",
+                    priority_tier="primary",
+                    gating_flags=["Underwriting confidence"],
+                    citations=[Citation(document_name="Memo", chunk_id="page-0001", page_number=1)],
+                )
+            ],
+            seller_questions=["What remediation is still outstanding?"],
+            reading_priority=5,
+            reading_reason="Contains high-priority environmental indicators.",
+            confidence="high",
+            confidence_reason="Text extraction was strong with no OCR-related warnings.",
+            focus_areas=["Environmental Risks"],
+        )
+        synthesis = DealSynthesis(
+            deal_name="Fast Deal",
+            executive_summary="Executive summary text.",
+            entitlement_status="Status unclear.",
+            key_risks=analysis.risks,
+            recommended_reading_order=[],
+            seller_questions=analysis.seller_questions,
+            missing_items=[],
+            category_rollup={"Environmental Risks": "One document flagged environmental signals."},
+            document_analyses=[analysis],
+            analysis_mode="fast",
+            llm_calls_attempted=1,
+        )
+        run_summary = RunSummary(
+            run_id="20260328_120000",
+            deal_name="Fast Deal",
+            input_folder="data/input/fast-deal",
+            output_folder="data/output/fast-deal/20260328_120000",
+            llm_provider="openai",
+            started_at="2026-03-28T12:00:00-07:00",
+            completed_at="2026-03-28T12:01:00-07:00",
+            analysis_mode="fast",
+            llm_calls_made=1,
+            files_found=1,
+            files_parsed_successfully=1,
+            files_failed=0,
+            file_results=[FileProcessingResult(relative_path="memo.txt", status="parsed")],
+            llm_model="gpt-4.1",
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_dir = Path(temp_dir)
+            (output_dir / "run.log").write_text("log", encoding="utf-8")
+            written = write_markdown_outputs(output_dir, run_summary=run_summary, synthesis=synthesis)
+
+            self.assertEqual(len(written), 5)
+            self.assertTrue((output_dir / "01_executive_summary.md").exists())
+            self.assertTrue((output_dir / "02_key_risks.md").exists())
+            self.assertTrue((output_dir / "04_seller_questions.md").exists())
+            self.assertFalse((output_dir / "03_recommended_reading_order.md").exists())
+            self.assertFalse((output_dir / "05_document_summaries.md").exists())
+            self.assertFalse((output_dir / "07_deal_synthesis.md").exists())
+            self.assertFalse((output_dir / "09_investment_committee_brief.md").exists())
+            content = (output_dir / "01_executive_summary.md").read_text(encoding="utf-8")
+            self.assertIn("Mode:** fast", content)
+            self.assertNotIn("Decision Framing", content)
+            key_risk_content = (output_dir / "02_key_risks.md").read_text(encoding="utf-8")
+            self.assertIn("Highest-Priority Risks", key_risk_content)
+            self.assertNotIn("Potential Contradictions / Tensions", key_risk_content)
+            summary_content = (output_dir / "00_run_summary.md").read_text(encoding="utf-8")
+            self.assertIn("Analysis Mode: `fast`", summary_content)
+            self.assertIn("Approximate LLM Calls: 1", summary_content)
 
     def test_writes_summary_and_error_report_without_synthesis(self) -> None:
         run_summary = RunSummary(

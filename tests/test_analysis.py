@@ -7,8 +7,9 @@ import unittest
 from pathlib import Path
 
 from land_due_diligence_agent.analysis.service import run_analysis
+from land_due_diligence_agent.llm.base import LLMProvider
 from land_due_diligence_agent.llm.heuristic_provider import HeuristicProvider
-from land_due_diligence_agent.models import DocumentRecord
+from land_due_diligence_agent.models import ContradictionFinding, DocumentRecord, RiskFinding
 from land_due_diligence_agent.utils.text import normalize_text
 
 
@@ -100,6 +101,72 @@ class AnalysisTests(unittest.TestCase):
         self.assertTrue(synthesis.contradictions)
         self.assertTrue(any("frontage" in finding.description.lower() or "access" in finding.description.lower() for finding in synthesis.contradictions))
         self.assertTrue(all(finding.citations for finding in synthesis.contradictions))
+
+    def test_fast_mode_limits_analysis_depth_and_llm_calls(self) -> None:
+        class CountingProvider(LLMProvider):
+            provider_name = "openai"
+
+            def __init__(self) -> None:
+                self.model = "fake-openai"
+                self.document_calls = 0
+                self.executive_calls = 0
+
+            def refine_document_summary(
+                self,
+                document: DocumentRecord,
+                draft_summary: str,
+                risks: list[RiskFinding],
+                missing_items: list[str],
+            ) -> str:
+                self.document_calls += 1
+                return draft_summary
+
+            def refine_executive_summary(
+                self,
+                deal_name: str,
+                draft_summary: str,
+                category_rollup: dict[str, str],
+                key_risks: list[RiskFinding],
+                contradictions: list[ContradictionFinding],
+                missing_items: list[str],
+            ) -> str:
+                self.executive_calls += 1
+                return draft_summary
+
+        documents = [
+            _document(
+                "title_report.txt",
+                "Preliminary title report lists an access easement exception affecting the current site layout.",
+            ),
+            _document(
+                "design_permit_plans.txt",
+                "The vehicular project entry is located along the Diana Avenue frontage and private access drive.",
+            ),
+            _document(
+                "conditions_of_approval.txt",
+                "At improvement plan stage, the project shall confirm if the Diana Avenue frontage was dedicated to the City.",
+            ),
+            _document(
+                "stormwater_plan.txt",
+                "Diana Avenue frontage is already improved.",
+            ),
+        ]
+
+        provider = CountingProvider()
+        synthesis = run_analysis(
+            deal_name="Fast Deal",
+            documents=documents,
+            llm_provider=provider,
+            logger=logging.getLogger("test-fast-mode"),
+            mode="fast",
+        )
+
+        self.assertEqual(provider.document_calls, 0)
+        self.assertEqual(provider.executive_calls, 1)
+        self.assertEqual(synthesis.llm_calls_attempted, 1)
+        self.assertFalse(synthesis.contradictions)
+        self.assertLessEqual(len(synthesis.key_risks), 3)
+        self.assertLessEqual(len(synthesis.seller_questions), 6)
 
 
 if __name__ == "__main__":

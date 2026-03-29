@@ -26,41 +26,65 @@ def run_analysis(
     llm_provider: LLMProvider,
     logger: logging.Logger,
     extraction_errors: list[str] | None = None,
+    mode: str = "full",
 ) -> DealSynthesis:
     """Run document summaries plus a deal-level synthesis."""
 
     extraction_errors = extraction_errors or []
+    analysis_mode = mode.lower()
+    if analysis_mode not in {"fast", "full"}:
+        raise ValueError(f"Unsupported analysis mode: {mode}")
+
     document_analyses = []
     llm_failures: list[LLMCallFailure] = []
+    llm_calls_attempted = 0
+    use_external_llm = llm_provider.provider_name != "heuristic"
 
     for document in documents:
         analysis = analyze_document(document)
-        try:
-            analysis.summary = llm_provider.refine_document_summary(
-                document=document,
-                draft_summary=analysis.summary,
-                risks=analysis.risks,
-                missing_items=analysis.missing_items,
-            )
-        except Exception as exc:  # pragma: no cover - network/provider failure path
-            detail = _format_llm_exception(exc)
-            logger.warning("LLM refinement failed for %s: %s", document.relative_path.as_posix(), detail)
-            llm_failures.append(
-                LLMCallFailure(
-                    stage="document_summary",
-                    target=document.relative_path.as_posix(),
-                    model=getattr(llm_provider, "model", llm_provider.provider_name),
-                    detail=detail,
+        if analysis_mode == "full":
+            if use_external_llm:
+                llm_calls_attempted += 1
+            try:
+                analysis.summary = llm_provider.refine_document_summary(
+                    document=document,
+                    draft_summary=analysis.summary,
+                    risks=analysis.risks,
+                    missing_items=analysis.missing_items,
                 )
-            )
+            except Exception as exc:  # pragma: no cover - network/provider failure path
+                detail = _format_llm_exception(exc)
+                logger.warning("LLM refinement failed for %s: %s", document.relative_path.as_posix(), detail)
+                llm_failures.append(
+                    LLMCallFailure(
+                        stage="document_summary",
+                        target=document.relative_path.as_posix(),
+                        model=getattr(llm_provider, "model", llm_provider.provider_name),
+                        detail=detail,
+                    )
+                )
         document_analyses.append(analysis)
 
     key_risks = aggregate_risks(document_analyses)
+    if analysis_mode == "fast":
+        primary_risks = [risk for risk in key_risks if risk.priority_tier == "primary"] or key_risks[:3]
+        key_risks = primary_risks[:3]
+
     missing_items = identify_missing_items(documents, document_analyses)
     entitlement_status = infer_entitlement_status(documents)
-    category_rollup = build_category_rollup(document_analyses)
-    contradictions = detect_contradictions(document_analyses, key_risks, missing_items)
+    category_rollup = (
+        {risk.category: risk.summary for risk in key_risks}
+        if analysis_mode == "fast"
+        else build_category_rollup(document_analyses)
+    )
+    contradictions = (
+        detect_contradictions(document_analyses, key_risks, missing_items)
+        if analysis_mode == "full"
+        else []
+    )
     seller_questions = collect_seller_questions(document_analyses, missing_items, key_risks, contradictions)
+    if analysis_mode == "fast":
+        seller_questions = seller_questions[:6]
     executive_summary = build_executive_summary_draft(
         deal_name=deal_name,
         document_analyses=document_analyses,
@@ -71,6 +95,8 @@ def run_analysis(
         extraction_errors=extraction_errors,
     )
 
+    if use_external_llm:
+        llm_calls_attempted += 1
     try:
         executive_summary = llm_provider.refine_executive_summary(
             deal_name=deal_name,
@@ -105,6 +131,8 @@ def run_analysis(
         contradictions=contradictions,
         extraction_errors=extraction_errors,
         llm_failures=llm_failures,
+        analysis_mode=analysis_mode,
+        llm_calls_attempted=llm_calls_attempted,
     )
 
 
