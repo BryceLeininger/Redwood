@@ -12,7 +12,11 @@ src/land_due_diligence_agent.egg-info/entry_points.txt
 src/land_due_diligence_agent.egg-info/requires.txt
 src/land_due_diligence_agent.egg-info/top_level.txt
 src/land_due_diligence_agent/analysis/__init__.py
+src/land_due_diligence_agent/analysis/evaluator.py
 src/land_due_diligence_agent/analysis/heuristics.py
+src/land_due_diligence_agent/analysis/issue_registry.py
+src/land_due_diligence_agent/analysis/multi_pass.py
+src/land_due_diligence_agent/analysis/precedents.py
 src/land_due_diligence_agent/analysis/risk_rules.py
 src/land_due_diligence_agent/analysis/service.py
 src/land_due_diligence_agent/ingestion/__init__.py
@@ -40,3 +44,4 @@ tests/test_config.py
 tests/test_discovery.py
 tests/test_output.py
 tests/test_pdf_parser.py
+tests/test_precedents.py
