@@ -161,10 +161,12 @@ class OutputWriterTests(unittest.TestCase):
             ],
             precedent_summary=PrecedentSummary(
                 historical_frequency=2,
+                real_rate=0.5,
+                outcome_stats={"cost": 1, "none": 1},
                 false_positive_rate=0.5,
                 typical_impact="cost",
                 resolution_pattern="Closed after confirming the remediation scope, seller credit, and agency sign-off path.",
-                confidence_adjustment="none",
+                confidence_adjustment="neutral",
                 score_adjustment=6,
                 sample_size=2,
                 sparse_data=False,
@@ -318,18 +320,33 @@ class OutputWriterTests(unittest.TestCase):
             self.assertIn("Precedent Summary", debug_content)
             self.assertIn("Retrieved Precedent Matches", debug_content)
             self.assertIn("precedent=+6", debug_content)
+            self.assertIn("## Evaluator", debug_content)
             feedback_rows = json.loads((output_dir / "12_reviewer_feedback_template.json").read_text(encoding="utf-8"))
             self.assertEqual(feedback_rows[0]["issue_id"], "environmental-followup")
             self.assertEqual(
                 set(feedback_rows[0]),
                 {
                     "issue_id",
+                    "canonical_title",
+                    "category",
+                    "deal_id",
+                    "deal_name",
+                    "deal_metadata",
+                    "evidence_basis",
+                    "issue_strength",
+                    "false_positive_risk",
+                    "model_materiality",
+                    "model_decision_relevant",
+                    "model_action",
                     "real_issue",
+                    "false_positive_flag",
                     "materiality",
                     "decision_relevant",
                     "duplicate_of",
                     "overstated",
                     "understated",
+                    "actual_outcome",
+                    "resolved_by",
                     "correct_action",
                     "notes",
                 },

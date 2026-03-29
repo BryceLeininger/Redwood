@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from land_due_diligence_agent.analysis.issue_registry import build_reviewer_feedback_template
 from land_due_diligence_agent.models import CanonicalIssue, DealSynthesis, RunSummary
 from land_due_diligence_agent.utils.text import normalize_text
 
@@ -370,7 +371,16 @@ def _build_issue_analysis_markdown(synthesis: DealSynthesis) -> str:
         if issue.precedent_summary.sample_size:
             lines.append("### Precedent Read")
             lines.append(f"- Historical Frequency: {issue.precedent_summary.historical_frequency}")
+            lines.append(f"- Real Rate: {_format_percentage(issue.precedent_summary.real_rate)}")
             lines.append(f"- False-Positive Rate: {_format_percentage(issue.precedent_summary.false_positive_rate)}")
+            if issue.precedent_summary.outcome_stats:
+                lines.append(
+                    "- Outcome Stats: "
+                    + ", ".join(
+                        f"{label}={count}"
+                        for label, count in sorted(issue.precedent_summary.outcome_stats.items())
+                    )
+                )
             lines.append(f"- Typical Impact: {issue.precedent_summary.typical_impact}")
             lines.append(f"- Resolution Pattern: {issue.precedent_summary.resolution_pattern}")
             lines.append(
@@ -527,7 +537,8 @@ def _build_issue_registry_debug_markdown(synthesis: DealSynthesis) -> str:
         lines.append(f"- Decision Action: {issue.decision_action}")
         lines.append(
             f"- Score Adjustments: calibration={issue.priority_score.calibration_adjustment:+d}, "
-            f"precedent={issue.priority_score.precedent_adjustment:+d}"
+            f"precedent={issue.priority_score.precedent_adjustment:+d}, "
+            f"evaluator={issue.priority_score.evaluator_adjustment:+d}"
         )
         lines.append(f"- Source: {_format_citations(issue.citations[:3]) or ', '.join(issue.source_documents[:3]) or 'None'}")
         lines.append(f"- Merged Fragments: {', '.join(issue.merged_fragment_ids) or 'None'}")
@@ -537,7 +548,9 @@ def _build_issue_registry_debug_markdown(synthesis: DealSynthesis) -> str:
             lines.append(
                 f"- Precedent Summary: frequency={issue.precedent_summary.historical_frequency}, "
                 f"sample={issue.precedent_summary.sample_size}, "
+                f"real rate={_format_percentage(issue.precedent_summary.real_rate)}, "
                 f"false-positive rate={_format_percentage(issue.precedent_summary.false_positive_rate)}, "
+                f"outcomes={', '.join(f'{label}={count}' for label, count in sorted(issue.precedent_summary.outcome_stats.items())) or 'none'}, "
                 f"typical impact={issue.precedent_summary.typical_impact}, "
                 f"confidence adjustment={issue.precedent_summary.confidence_adjustment}, "
                 f"score adjustment={issue.precedent_summary.score_adjustment:+d}"
@@ -550,7 +563,7 @@ def _build_issue_registry_debug_markdown(synthesis: DealSynthesis) -> str:
                     "  - "
                     f"{reference.title} | score={reference.similarity_score:.3f} | "
                     f"{reference.relevance} | outcome={reference.actual_outcome} | "
-                    f"false_positive={reference.false_positive_flag}"
+                    f"resolved_by={reference.resolved_by} | false_positive={reference.false_positive_flag}"
                 )
                 if reference.resolution_notes:
                     lines.append(f"    Resolution: {reference.resolution_notes}")
@@ -588,23 +601,80 @@ def _build_issue_registry_debug_markdown(synthesis: DealSynthesis) -> str:
         lines.append("- No output selections were recorded.")
     lines.append("")
 
+    evaluator = registry.evaluator_result
+    lines.extend(["## Evaluator", ""])
+    lines.append(f"- Redundancy Score: {evaluator.redundancy_score}")
+    lines.append(f"- False-Positive Score: {evaluator.false_positive_score}")
+    lines.append(f"- Missed Issue Risk: {evaluator.missed_issue_risk}")
+    lines.append(f"- Ranking Quality: {evaluator.ranking_quality}")
+    lines.append(
+        "- Suggested Top Issues: "
+        + (", ".join(evaluator.top_issues_should_be) if evaluator.top_issues_should_be else "None")
+    )
+    lines.append(
+        "- Issues To Remove: "
+        + (", ".join(evaluator.issues_to_remove) if evaluator.issues_to_remove else "None")
+    )
+    if evaluator.issues_to_merge:
+        lines.append("- Issues To Merge:")
+        for suggestion in evaluator.issues_to_merge:
+            lines.append(
+                f"  - {suggestion.primary_issue_id} <- {suggestion.secondary_issue_id}"
+                f" ({suggestion.rationale})"
+            )
+    else:
+        lines.append("- Issues To Merge: None")
+    lines.append(f"- Revision Applied: {evaluator.revision_applied}")
+    if evaluator.revision_reason:
+        lines.append(f"- Revision Reason: {evaluator.revision_reason}")
+    lines.append(
+        "- Initial Ranking: "
+        + (", ".join(registry.initial_issue_order) if registry.initial_issue_order else "None")
+    )
+    lines.append(
+        "- Final Ranking: "
+        + (", ".join(registry.final_issue_order or registry.initial_issue_order) if (registry.final_issue_order or registry.initial_issue_order) else "None")
+    )
+    lines.append("")
+
     return "\n".join(lines)
 
 
 def _build_reviewer_feedback_template_json(synthesis: DealSynthesis) -> str:
     rows = []
-    for issue in synthesis.canonical_issue_registry.issues:
+    for row in build_reviewer_feedback_template(
+        synthesis.canonical_issue_registry,
+        deal_name=synthesis.deal_name,
+    ):
         rows.append(
             {
-                "issue_id": issue.issue_id,
-                "real_issue": None,
-                "materiality": issue.materiality,
-                "decision_relevant": issue.decision_relevant,
-                "duplicate_of": None,
-                "overstated": False,
-                "understated": False,
-                "correct_action": issue.decision_action,
-                "notes": "",
+                "issue_id": row.issue_id,
+                "canonical_title": row.canonical_title,
+                "category": row.category,
+                "deal_id": row.deal_id,
+                "deal_name": row.deal_name,
+                "deal_metadata": {
+                    "stage": row.deal_metadata.stage,
+                    "geography": row.deal_metadata.region,
+                    "product": row.deal_metadata.product,
+                },
+                "evidence_basis": row.evidence_basis,
+                "issue_strength": row.issue_strength,
+                "false_positive_risk": row.false_positive_risk,
+                "model_materiality": row.model_materiality,
+                "model_decision_relevant": row.model_decision_relevant,
+                "model_action": row.model_action,
+                "real_issue": row.real_issue,
+                "false_positive_flag": row.false_positive_flag,
+                "materiality": row.materiality,
+                "decision_relevant": row.decision_relevant,
+                "duplicate_of": row.duplicate_of,
+                "overstated": row.overstated,
+                "understated": row.understated,
+                "actual_outcome": row.actual_outcome,
+                "resolved_by": row.resolved_by,
+                "correct_action": row.correct_action,
+                "notes": row.notes,
             }
         )
     return json.dumps(rows, indent=2) + "\n"

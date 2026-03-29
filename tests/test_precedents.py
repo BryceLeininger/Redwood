@@ -2,10 +2,17 @@
 
 from __future__ import annotations
 
+import json
+import tempfile
 import unittest
+from pathlib import Path
 
 from land_due_diligence_agent.analysis.issue_registry import build_canonical_issue_registry
-from land_due_diligence_agent.analysis.precedents import PrecedentEngine
+from land_due_diligence_agent.analysis.precedents import (
+    PrecedentEngine,
+    ingest_reviewer_feedback_files,
+    load_precedent_records,
+)
 from land_due_diligence_agent.models import (
     CanonicalIssue,
     Citation,
@@ -66,6 +73,8 @@ class PrecedentTests(unittest.TestCase):
         self.assertTrue(calibration.matches)
         self.assertEqual(calibration.matches[0].precedent_id, "p1")
         self.assertGreater(calibration.matches[0].similarity_score, 0.5)
+        self.assertEqual(calibration.summary.real_rate, 1.0)
+        self.assertEqual(calibration.summary.outcome_stats, {"delay": 1})
 
     def test_omission_only_issue_is_downgraded_by_false_positive_precedent(self) -> None:
         engine = PrecedentEngine(
@@ -181,6 +190,7 @@ class PrecedentTests(unittest.TestCase):
         self.assertEqual(issue.precedent_summary.confidence_adjustment, "up")
         self.assertGreater(issue.priority_score.precedent_adjustment, 0)
         self.assertTrue(issue.top_line_eligible)
+        self.assertEqual(issue.precedent_summary.outcome_stats, {"delay": 1, "redesign": 1})
 
     def test_precedent_engine_falls_back_cleanly_without_records(self) -> None:
         engine = PrecedentEngine(records=[], deal_metadata=DealMetadata(stage="acquisition-dd"))
@@ -198,7 +208,61 @@ class PrecedentTests(unittest.TestCase):
 
         self.assertFalse(calibration.matches)
         self.assertEqual(calibration.summary.score_adjustment, 0)
-        self.assertEqual(calibration.summary.confidence_adjustment, "none")
+        self.assertEqual(calibration.summary.confidence_adjustment, "neutral")
+
+    def test_feedback_ingestion_updates_issue_memory_store(self) -> None:
+        feedback_rows = [
+            {
+                "issue_id": "environmental-followup",
+                "canonical_title": "Environmental follow-up is not fully closed",
+                "category": "Environmental Risks",
+                "deal_id": "demo-deal",
+                "deal_name": "Demo Deal",
+                "deal_metadata": {
+                    "stage": "acquisition-dd",
+                    "geography": "west",
+                    "product": "multifamily",
+                },
+                "evidence_basis": "direct_unresolved_risk",
+                "issue_strength": "strong",
+                "false_positive_risk": "low",
+                "model_materiality": "high",
+                "model_decision_relevant": True,
+                "model_action": "verify",
+                "real_issue": True,
+                "false_positive_flag": False,
+                "materiality": "high",
+                "decision_relevant": True,
+                "duplicate_of": None,
+                "overstated": False,
+                "understated": False,
+                "actual_outcome": "cost",
+                "resolved_by": "seller",
+                "correct_action": "verify",
+                "notes": "Seller credit covered the remediation reserve.",
+            }
+        ]
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            feedback_path = temp_path / "12_reviewer_feedback_template.json"
+            store_path = temp_path / "issue_memory.jsonl"
+            feedback_path.write_text(json.dumps(feedback_rows, indent=2), encoding="utf-8")
+
+            result = ingest_reviewer_feedback_files(
+                feedback_paths=[feedback_path],
+                store_path=store_path,
+            )
+
+            self.assertEqual(result["files_ingested"], 1)
+            self.assertEqual(result["records_upserted"], 1)
+            stored = load_precedent_records(store_path)
+            self.assertEqual(len(stored), 1)
+            self.assertEqual(stored[0].issue_id, "environmental-followup")
+            self.assertEqual(stored[0].deal_id, "demo-deal")
+            self.assertEqual(stored[0].actual_outcome, "cost")
+            self.assertEqual(stored[0].resolved_by, "seller")
+            self.assertTrue(stored[0].decision_relevant)
 
 
 if __name__ == "__main__":

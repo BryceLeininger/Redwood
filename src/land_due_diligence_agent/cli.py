@@ -6,6 +6,7 @@ import argparse
 from datetime import datetime
 from pathlib import Path
 
+from land_due_diligence_agent.analysis.precedents import ingest_reviewer_feedback_files
 from land_due_diligence_agent.analysis.service import run_analysis
 from land_due_diligence_agent.config import Settings
 from land_due_diligence_agent.ingestion.discovery import discover_documents
@@ -174,6 +175,14 @@ def main(argv: list[str] | None = None) -> int:
     else:
         logger.info("Using LLM provider: %s", llm_provider.provider_name)
 
+    deal_output_root = output_root / slugify(deal_name)
+    prior_feedback_paths = _reviewer_feedback_paths(deal_output_root, exclude_run_dir=run_output_dir)
+    if prior_feedback_paths:
+        ingest_reviewer_feedback_files(
+            feedback_paths=prior_feedback_paths,
+            logger=logger,
+        )
+
     synthesis = run_analysis(
         deal_name=deal_name,
         documents=parsed_documents,
@@ -189,6 +198,10 @@ def main(argv: list[str] | None = None) -> int:
         run_output_dir,
         run_summary=run_summary,
         synthesis=synthesis,
+    )
+    ingest_reviewer_feedback_files(
+        feedback_paths=_reviewer_feedback_paths(deal_output_root),
+        logger=logger,
     )
     logger.info("Wrote %d markdown files.", len(written_paths))
     logger.info("Output files created: %s", ", ".join(path.name for path in written_paths + [run_output_dir / "run.log"]))
@@ -206,3 +219,16 @@ def main(argv: list[str] | None = None) -> int:
         logger.info("Completed without extraction errors.")
 
     return 0
+
+
+def _reviewer_feedback_paths(deal_output_root: Path, *, exclude_run_dir: Path | None = None) -> list[Path]:
+    if not deal_output_root.exists():
+        return []
+    feedback_paths = sorted(
+        deal_output_root.glob("*/12_reviewer_feedback_template.json"),
+        key=lambda path: path.parent.name,
+    )
+    if exclude_run_dir is not None:
+        excluded = exclude_run_dir.resolve()
+        feedback_paths = [path for path in feedback_paths if path.parent.resolve() != excluded]
+    return feedback_paths

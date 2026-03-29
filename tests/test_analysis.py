@@ -340,6 +340,91 @@ class AnalysisTests(unittest.TestCase):
         self.assertIn("environmental-followup", executive_ids)
         self.assertNotIn("entitlement-conditions", executive_ids)
 
+    def test_evaluator_output_is_stable_and_flags_routine_issue(self) -> None:
+        registry = build_canonical_issue_registry(
+            key_risks=[
+                RiskFinding(
+                    category="Title / Access Concerns",
+                    severity="high",
+                    summary="Preliminary title report lists an access easement exception affecting the site layout.",
+                    issue="Title and access clearance is not closed.",
+                    why_it_matters="This goes directly to closability and lenderability.",
+                    likely_implication="Closing should not be treated as clean until the exception is cured or endorsed.",
+                    source_documents=["Title Report"],
+                    citations=[Citation(document_name="Title Report", chunk_id="page-0001", page_number=1)],
+                    gating_flags=["Closing", "Underwriting confidence"],
+                ),
+                RiskFinding(
+                    category="Environmental Risks",
+                    severity="high",
+                    summary="Phase I follow-up remains open.",
+                    issue="Environmental follow-up is not fully closed.",
+                    why_it_matters="Environmental scope still affects underwriting confidence.",
+                    likely_implication="Mitigation cost remains open.",
+                    source_documents=["Phase I ESA"],
+                    citations=[Citation(document_name="Phase I ESA", chunk_id="page-0001", page_number=1)],
+                    gating_flags=["Underwriting confidence"],
+                ),
+                RiskFinding(
+                    category="Utilities / Infrastructure Issues",
+                    severity="high",
+                    summary="Will-serve support remains outstanding.",
+                    issue="Utility capacity and provider confirmation remain open.",
+                    why_it_matters="Provider commitment is still required before the utility path is reliable.",
+                    likely_implication="Schedule and offsite utility scope remain exposed.",
+                    source_documents=["Utility Memo"],
+                    citations=[Citation(document_name="Utility Memo", chunk_id="page-0001", page_number=1)],
+                    gating_flags=["Underwriting confidence", "Vertical start"],
+                ),
+            ],
+            contradictions=[],
+            omission_assessments=[
+                OmissionAssessment(
+                    item="Agency correspondence log",
+                    category="Entitlement Status",
+                    status="unclear whether present",
+                    rationale="No clean correspondence log is in the package.",
+                )
+            ],
+            document_analyses=[],
+        )
+
+        evaluation = registry.evaluator_result
+        self.assertGreaterEqual(evaluation.ranking_quality, 60)
+        self.assertIn("title-access-clearance", evaluation.top_issues_should_be[:2])
+        self.assertIn("environmental-followup", evaluation.top_issues_should_be[:3])
+        self.assertIn("utility-capacity", evaluation.top_issues_should_be[:3])
+        self.assertIn("entitlement-conditions", evaluation.issues_to_remove)
+
+    def test_registry_issue_ids_remain_stable_with_evaluator_enabled(self) -> None:
+        registry = build_canonical_issue_registry(
+            key_risks=[
+                RiskFinding(
+                    category="Title / Access Concerns",
+                    severity="high",
+                    summary="Preliminary title report lists an access easement exception affecting the site layout.",
+                    issue="Title and access clearance is not closed.",
+                    why_it_matters="This goes directly to closability and lenderability.",
+                    likely_implication="Closing should not be treated as clean until the exception is cured or endorsed.",
+                    source_documents=["Title Report"],
+                    citations=[Citation(document_name="Title Report", chunk_id="page-0001", page_number=1)],
+                    gating_flags=["Closing"],
+                )
+            ],
+            contradictions=[],
+            omission_assessments=[
+                OmissionAssessment(
+                    item="ALTA or boundary survey",
+                    category="Title / Access Concerns",
+                    status="not found",
+                    rationale="No survey file is present in the package.",
+                )
+            ],
+            document_analyses=[],
+        )
+
+        self.assertEqual([issue.issue_id for issue in registry.issues], ["title-access-clearance"])
+
     def test_ambiguous_merge_arbiter_is_used(self) -> None:
         arbiter_calls: list[tuple[str, str]] = []
 

@@ -7,6 +7,11 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass
 from typing import Callable
 
+from land_due_diligence_agent.analysis.evaluator import (
+    build_evaluator_adjustments,
+    evaluate_registry,
+    should_revise_registry,
+)
 from land_due_diligence_agent.analysis.risk_rules import (
     EXPECTED_DILIGENCE_ITEMS,
     EXPECTED_DILIGENCE_PATH_HINTS,
@@ -370,7 +375,7 @@ def build_canonical_issue_registry(
         precedent_retriever=precedent_retriever,
     )
     scored_issues = _score_canonical_issues(issues, weights)
-    return CanonicalIssueRegistry(
+    registry = CanonicalIssueRegistry(
         fragments=fragments,
         issues=scored_issues,
         merge_decisions=merge_decisions,
@@ -379,6 +384,8 @@ def build_canonical_issue_registry(
         weights=weights,
         deal_metadata=deal_metadata or DealMetadata(),
     )
+    _evaluate_and_revise_registry(registry)
+    return registry
 
 
 def build_issue_analyses_from_registry(registry: CanonicalIssueRegistry) -> list[IssueAnalysis]:
@@ -519,12 +526,27 @@ def build_section_selections(
     return selections
 
 
-def build_reviewer_feedback_template(registry: CanonicalIssueRegistry) -> list[ReviewerIssueFeedback]:
+def build_reviewer_feedback_template(
+    registry: CanonicalIssueRegistry,
+    *,
+    deal_name: str = "",
+) -> list[ReviewerIssueFeedback]:
     """Build a structured reviewer-feedback template from canonical issues."""
 
     return [
         ReviewerIssueFeedback(
             issue_id=issue.issue_id,
+            canonical_title=issue.title,
+            category=issue.category,
+            deal_id=slugify(deal_name or "deal"),
+            deal_name=deal_name,
+            deal_metadata=registry.deal_metadata,
+            evidence_basis=issue.evidence_basis,
+            issue_strength=issue.issue_strength,
+            false_positive_risk=issue.false_positive_risk,
+            model_materiality=issue.materiality,
+            model_decision_relevant=issue.decision_relevant,
+            model_action=issue.decision_action,
             materiality=issue.materiality,
             decision_relevant=issue.decision_relevant,
             correct_action=issue.decision_action,
@@ -1200,62 +1222,29 @@ def _calibration_notes(issue: CanonicalIssue) -> list[str]:
     if issue.evidence_basis == "omission_only":
         notes.append("issue is being inferred from missing support rather than direct conflicting evidence")
     if issue.precedent_summary.sample_size:
+        outcome_stats = ", ".join(
+            f"{label}={count}"
+            for label, count in sorted(issue.precedent_summary.outcome_stats.items())
+        ) or "none"
         notes.append(
             "precedent sample="
             f"{issue.precedent_summary.sample_size}, "
             f"historical frequency={issue.precedent_summary.historical_frequency}, "
+            f"real rate={_format_precedent_rate(issue.precedent_summary.real_rate)}, "
             f"false-positive rate={_format_precedent_rate(issue.precedent_summary.false_positive_rate)}, "
+            f"outcomes={outcome_stats}, "
             f"confidence adjustment={issue.precedent_summary.confidence_adjustment}, "
             f"score adjustment={issue.precedent_summary.score_adjustment:+d}"
         )
+    if issue.priority_score.evaluator_adjustment:
+        notes.append(f"evaluator rerank adjustment={issue.priority_score.evaluator_adjustment:+d}")
     if issue.top_line_filter_reasons:
         notes.append("filtered from top-line outputs because " + ", ".join(issue.top_line_filter_reasons))
     return notes
 
 
 def _apply_precedent_calibration(issue: CanonicalIssue) -> None:
-    summary = issue.precedent_summary
-    if summary.sample_size == 0:
-        return
-
-    if (
-        summary.confidence_adjustment == "down"
-        and issue.evidence_basis in {"omission_only", "routine_missing_support", "weak_inference"}
-    ):
-        issue.issue_strength = _shift_strength(issue.issue_strength, -1)
-        issue.false_positive_risk = _shift_false_positive_risk(issue.false_positive_risk, 1)
-        issue.normal_friction_flag = True
-    elif summary.confidence_adjustment == "down" and summary.false_positive_rate is not None and summary.false_positive_rate >= 0.5:
-        issue.false_positive_risk = _shift_false_positive_risk(issue.false_positive_risk, 1)
-
-    if (
-        summary.confidence_adjustment == "up"
-        and issue.evidence_basis in {"direct_confirmed_risk", "direct_unresolved_risk", "contradictory_evidence_present"}
-    ):
-        issue.issue_strength = _shift_strength(issue.issue_strength, 1)
-        issue.false_positive_risk = _shift_false_positive_risk(issue.false_positive_risk, -1)
-        if issue.materiality == "medium" and summary.typical_impact in {"cost", "delay", "redesign"}:
-            issue.materiality = "high"
-
-
-def _shift_strength(level: str, steps: int) -> str:
-    order = ["weak", "moderate", "strong"]
-    try:
-        index = order.index(level)
-    except ValueError:
-        return level
-    new_index = max(0, min(len(order) - 1, index + steps))
-    return order[new_index]
-
-
-def _shift_false_positive_risk(level: str, steps: int) -> str:
-    order = ["low", "medium", "high"]
-    try:
-        index = order.index(level)
-    except ValueError:
-        return level
-    new_index = max(0, min(len(order) - 1, index + steps))
-    return order[new_index]
+    del issue
 
 
 def _format_precedent_rate(value: float | None) -> str:
@@ -1278,6 +1267,51 @@ def _score_canonical_issues(
         )
     )
     return issues
+
+
+def _evaluate_and_revise_registry(registry: CanonicalIssueRegistry) -> None:
+    registry.initial_issue_order = [issue.issue_id for issue in registry.issues]
+    registry.evaluator_result = evaluate_registry(registry)
+    if not should_revise_registry(registry.evaluator_result):
+        registry.final_issue_order = registry.initial_issue_order.copy()
+        return
+
+    registry.evaluator_result.revision_applied = True
+    reasons: list[str] = []
+    if registry.evaluator_result.redundancy_score >= 40:
+        reasons.append("high redundancy")
+    if registry.evaluator_result.ranking_quality < 65:
+        reasons.append("poor ranking quality")
+    registry.evaluator_result.revision_reason = ", ".join(reasons) or "evaluator-triggered rerank"
+
+    secondary_merge_ids = {
+        suggestion.secondary_issue_id
+        for suggestion in registry.evaluator_result.issues_to_merge
+    }
+    adjustments = build_evaluator_adjustments(registry, registry.evaluator_result)
+    for issue in registry.issues:
+        adjustment = adjustments.get(issue.issue_id, 0)
+        issue.priority_score.evaluator_adjustment = adjustment
+        issue.priority_score.total += adjustment
+        if issue.issue_id in registry.evaluator_result.issues_to_remove:
+            issue.top_line_filter_reasons = unique_preserve_order(
+                [*issue.top_line_filter_reasons, "evaluator-pruned weak or routine issue"]
+            )
+        if issue.issue_id in secondary_merge_ids:
+            issue.top_line_filter_reasons = unique_preserve_order(
+                [*issue.top_line_filter_reasons, "evaluator-flagged redundancy"]
+            )
+        issue.top_line_eligible = not issue.top_line_filter_reasons
+        issue.calibration_notes = _calibration_notes(issue)
+
+    registry.issues.sort(
+        key=lambda issue: (
+            -issue.priority_score.total,
+            -_STATUS_PRIORITY.get(issue.status, 0),
+            issue.title,
+        )
+    )
+    registry.final_issue_order = [issue.issue_id for issue in registry.issues]
 
 
 def _score_issue(issue: CanonicalIssue, weights: PriorityWeights) -> IssuePriorityScore:
@@ -1323,6 +1357,7 @@ def _score_issue(issue: CanonicalIssue, weights: PriorityWeights) -> IssuePriori
         ic_sensitivity=ic_sensitivity,
         calibration_adjustment=calibration_adjustment,
         precedent_adjustment=precedent_adjustment,
+        evaluator_adjustment=0,
     )
 
 

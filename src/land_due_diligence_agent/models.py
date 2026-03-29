@@ -232,6 +232,7 @@ class IssuePriorityScore:
     ic_sensitivity: int = 0
     calibration_adjustment: int = 0
     precedent_adjustment: int = 0
+    evaluator_adjustment: int = 0
 
 
 @dataclass(slots=True)
@@ -240,6 +241,9 @@ class PrecedentReference:
 
     precedent_id: str
     title: str
+    issue_id: str = ""
+    deal_id: str = ""
+    deal_name: str = ""
     issue_type: str = ""
     canonical_title: str = ""
     category: str = ""
@@ -251,8 +255,10 @@ class PrecedentReference:
     product_match: bool = False
     real_issue: bool | None = None
     materiality: str = "medium"
-    actual_outcome: str = "none"
+    actual_outcome: str = "unknown"
     false_positive_flag: bool = False
+    decision_relevant: bool | None = None
+    resolved_by: str = "unknown"
     resolution_notes: str = ""
     relevance: str = ""
     note: str = ""
@@ -267,12 +273,19 @@ class PrecedentIssueRecord:
     issue_type: str
     canonical_title: str
     category: str
+    issue_id: str = ""
+    deal_id: str = ""
     description: str = ""
     deal_metadata: DealMetadata = field(default_factory=DealMetadata)
+    evidence_basis: str = ""
+    issue_strength: str = ""
     real_issue: bool | None = None
     materiality: str = "medium"
-    actual_outcome: str = "none"
+    decision_relevant: bool | None = None
+    actual_outcome: str = "unknown"
     false_positive_flag: bool = False
+    resolved_by: str = "unknown"
+    notes: str = ""
     resolution_notes: str = ""
 
 
@@ -281,10 +294,12 @@ class PrecedentSummary:
     """Aggregate precedent calibration for one canonical issue."""
 
     historical_frequency: int = 0
+    real_rate: float | None = None
     false_positive_rate: float | None = None
+    outcome_stats: dict[str, int] = field(default_factory=dict)
     typical_impact: str = "none"
     resolution_pattern: str = ""
-    confidence_adjustment: str = "none"
+    confidence_adjustment: str = "neutral"
     score_adjustment: int = 0
     sample_size: int = 0
     sparse_data: bool = True
@@ -304,14 +319,52 @@ class ReviewerIssueFeedback:
     """Reviewer feedback template row for post-run calibration."""
 
     issue_id: str
+    canonical_title: str = ""
+    category: str = ""
+    deal_id: str = ""
+    deal_name: str = ""
+    deal_metadata: DealMetadata = field(default_factory=DealMetadata)
+    evidence_basis: str = ""
+    issue_strength: str = ""
+    false_positive_risk: str = ""
+    model_materiality: str = "medium"
+    model_decision_relevant: bool | None = None
+    model_action: str = ""
     real_issue: bool | None = None
+    false_positive_flag: bool = False
     materiality: str = "medium"
     decision_relevant: bool | None = None
     duplicate_of: str | None = None
     overstated: bool = False
     understated: bool = False
+    actual_outcome: str = "unknown"
+    resolved_by: str = "unknown"
     correct_action: str = ""
     notes: str = ""
+
+
+@dataclass(slots=True)
+class IssueMergeSuggestion:
+    """Evaluator suggestion for redundant issues that should collapse in ranking."""
+
+    primary_issue_id: str
+    secondary_issue_id: str
+    rationale: str = ""
+
+
+@dataclass(slots=True)
+class IssueRegistryEvaluation:
+    """Evaluator output for the ranked canonical issue set."""
+
+    redundancy_score: int = 0
+    false_positive_score: int = 0
+    missed_issue_risk: int = 0
+    ranking_quality: int = 100
+    top_issues_should_be: list[str] = field(default_factory=list)
+    issues_to_remove: list[str] = field(default_factory=list)
+    issues_to_merge: list[IssueMergeSuggestion] = field(default_factory=list)
+    revision_applied: bool = False
+    revision_reason: str = ""
 
 
 @dataclass(slots=True)
@@ -412,6 +465,9 @@ class CanonicalIssueRegistry:
     output_selections: list[OutputIssueSelection] = field(default_factory=list)
     weights: PriorityWeights = field(default_factory=PriorityWeights)
     deal_metadata: DealMetadata = field(default_factory=DealMetadata)
+    evaluator_result: IssueRegistryEvaluation = field(default_factory=IssueRegistryEvaluation)
+    initial_issue_order: list[str] = field(default_factory=list)
+    final_issue_order: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)
