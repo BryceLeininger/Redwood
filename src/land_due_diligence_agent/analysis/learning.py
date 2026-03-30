@@ -25,35 +25,35 @@ _MIN_SAMPLES = 3
 
 @dataclass(slots=True)
 class _FeatureStats:
-    count: int = 0
-    real_issue_count: int = 0
-    real_issue_observations: int = 0
-    false_positive_count: int = 0
-    material_issue_count: int = 0
-    decision_relevant_count: int = 0
-    decision_relevant_observations: int = 0
-    impact_count: int = 0
-    impact_observations: int = 0
+    count: float = 0.0
+    real_issue_count: float = 0.0
+    real_issue_observations: float = 0.0
+    false_positive_count: float = 0.0
+    material_issue_count: float = 0.0
+    decision_relevant_count: float = 0.0
+    decision_relevant_observations: float = 0.0
+    impact_count: float = 0.0
+    impact_observations: float = 0.0
 
-    def add(self, record: PrecedentIssueRecord) -> None:
-        self.count += 1
+    def add(self, record: PrecedentIssueRecord, *, weight: float) -> None:
+        self.count += weight
         if record.real_issue is not None or record.false_positive_flag or record.actual_outcome in {"cost", "delay", "redesign"}:
-            self.real_issue_observations += 1
+            self.real_issue_observations += weight
         if record.real_issue is True or record.actual_outcome in {"cost", "delay", "redesign"}:
-            self.real_issue_count += 1
+            self.real_issue_count += weight
         if record.false_positive_flag:
-            self.false_positive_count += 1
+            self.false_positive_count += weight
         if record.materiality in {"medium", "high"}:
-            self.material_issue_count += 1
+            self.material_issue_count += weight
         if record.decision_relevant is not None:
-            self.decision_relevant_observations += 1
+            self.decision_relevant_observations += weight
         if record.decision_relevant is True:
-            self.decision_relevant_count += 1
+            self.decision_relevant_count += weight
         if record.actual_outcome in {"cost", "delay", "redesign"}:
-            self.impact_count += 1
-            self.impact_observations += 1
+            self.impact_count += weight
+            self.impact_observations += weight
 
-    def rate(self, numerator: int, denominator: int | None = None) -> float:
+    def rate(self, numerator: float, denominator: float | None = None) -> float:
         resolved_denominator = self.count if denominator is None else denominator
         return (numerator + 1.0) / (resolved_denominator + 2.0)
 
@@ -98,7 +98,7 @@ class ContinuousLearningEngine:
             if stats is None or stats.count == 0:
                 continue
             weight = _FEATURE_WEIGHTS.get(feature_name, 0.0)
-            matched_features.append(f"{feature_name}={key} (n={stats.count})")
+            matched_features.append(f"{feature_name}={key} (n={_format_feature_count(stats.count)})")
             weighted_sample += stats.count * weight
             real_rate += stats.rate(stats.real_issue_count, stats.real_issue_observations or stats.count) * weight
             false_rate += stats.rate(stats.false_positive_count) * weight
@@ -178,7 +178,7 @@ def save_learning_snapshot(
     payload = {
         "feature_stats": {
             f"{feature_name}:{key}": {
-                "count": stats.count,
+                "count": round(stats.count, 2),
                 "real_issue_rate": stats.rate(stats.real_issue_count, stats.real_issue_observations or stats.count),
                 "false_positive_rate": stats.rate(stats.false_positive_count),
                 "material_issue_rate": stats.rate(stats.material_issue_count),
@@ -199,11 +199,12 @@ def save_learning_snapshot(
 def _build_feature_stats(records: list[PrecedentIssueRecord]) -> dict[tuple[str, str], _FeatureStats]:
     stats: dict[tuple[str, str], _FeatureStats] = {}
     for record in records:
+        record_weight = _record_learning_weight(record)
         for feature_name, key in _record_feature_keys(record):
             feature_key = (feature_name, key)
             if feature_key not in stats:
                 stats[feature_key] = _FeatureStats()
-            stats[feature_key].add(record)
+            stats[feature_key].add(record, weight=record_weight)
     return stats
 
 
@@ -251,3 +252,24 @@ def _decision_action_hint_for_issue(issue: CanonicalIssue) -> str:
     if issue.blocking_flag or issue.critical_path_flag or issue.decision_relevant:
         return "elevate"
     return "unknown"
+
+
+def _record_learning_weight(record: PrecedentIssueRecord) -> float:
+    if record.label_source == "autonomous":
+        return {
+            "high": 0.45,
+            "medium": 0.30,
+            "low": 0.15,
+        }.get(record.label_confidence, 0.15)
+    return {
+        "high": 1.00,
+        "medium": 0.85,
+        "low": 0.65,
+    }.get(record.label_confidence, 0.85)
+
+
+def _format_feature_count(value: float) -> str:
+    rounded = round(value, 1)
+    if rounded.is_integer():
+        return str(int(rounded))
+    return f"{rounded:.1f}"

@@ -181,6 +181,8 @@ def load_precedent_records(path: Path | None = None) -> list[PrecedentIssueRecor
                     resolved_by=_normalize_resolved_by(str(data.get("resolved_by", "unknown")).strip()),
                     notes=notes,
                     resolution_notes=notes,
+                    label_source=_normalize_label_source(str(data.get("label_source", "reviewer")).strip()),
+                    label_confidence=_normalize_label_confidence(str(data.get("label_confidence", "high")).strip()),
                 )
             )
         )
@@ -704,6 +706,8 @@ def _normalize_record(record: PrecedentIssueRecord) -> PrecedentIssueRecord:
     record.materiality = _normalize_materiality(record.materiality)
     record.actual_outcome = _normalize_outcome(record.actual_outcome)
     record.resolved_by = _normalize_resolved_by(record.resolved_by)
+    record.label_source = _normalize_label_source(record.label_source)
+    record.label_confidence = _normalize_label_confidence(record.label_confidence)
     record.notes = normalize_text(record.notes or record.resolution_notes or record.description)
     record.resolution_notes = record.notes
     record.description = normalize_text(record.description or record.notes)
@@ -736,6 +740,8 @@ def _serialize_precedent_record(record: PrecedentIssueRecord) -> dict[str, objec
         "issue_type": record.issue_type or _record_issue_id(record),
         "description": record.description,
         "resolution_notes": record.notes,
+        "label_source": record.label_source,
+        "label_confidence": record.label_confidence,
     }
 
 
@@ -780,6 +786,8 @@ def _record_from_feedback_row(row: ReviewerIssueFeedback) -> PrecedentIssueRecor
             resolved_by=row.resolved_by,
             notes=row.notes,
             resolution_notes=row.notes,
+            label_source="reviewer",
+            label_confidence="high",
         )
     )
 
@@ -815,6 +823,16 @@ def _normalize_outcome(value: str) -> str:
 def _normalize_resolved_by(value: str) -> str:
     text = value.strip().lower() or "unknown"
     return text if text in {"seller", "buyer", "unknown"} else "unknown"
+
+
+def _normalize_label_source(value: str) -> str:
+    text = value.strip().lower() or "reviewer"
+    return text if text in {"reviewer", "autonomous"} else "reviewer"
+
+
+def _normalize_label_confidence(value: str) -> str:
+    text = value.strip().lower() or "high"
+    return text if text in {"low", "medium", "high"} else "medium"
 
 
 def _optional_bool(value: object) -> bool | None:

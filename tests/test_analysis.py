@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import logging
+import tempfile
 import unittest
 from pathlib import Path
 
+from land_due_diligence_agent.analysis.autonomous_agent import AutonomousLearningAgent, load_autonomous_learning_records
 from land_due_diligence_agent.analysis.front_end import apply_front_end_assessment
 from land_due_diligence_agent.analysis.heuristics import aggregate_risks, analyze_document
 from land_due_diligence_agent.analysis.issue_registry import (
@@ -15,6 +17,7 @@ from land_due_diligence_agent.analysis.issue_registry import (
     build_section_selections,
 )
 from land_due_diligence_agent.analysis.service import run_analysis
+from land_due_diligence_agent.analysis.web_research import WebResearchAgent
 from land_due_diligence_agent.llm.base import LLMProvider
 from land_due_diligence_agent.llm.heuristic_provider import HeuristicProvider
 from land_due_diligence_agent.models import (
@@ -25,6 +28,7 @@ from land_due_diligence_agent.models import (
     DocumentRecord,
     OmissionAssessment,
     RiskFinding,
+    WebResearchResult,
 )
 from land_due_diligence_agent.utils.text import normalize_text
 
@@ -1189,6 +1193,94 @@ class AnalysisTests(unittest.TestCase):
         self.assertTrue(arbiter_calls)
         self.assertTrue(registry.arbitration_records)
         self.assertTrue(registry.arbitration_records[0].used_arbiter)
+
+    def test_autonomous_learning_agent_generates_conservative_pseudo_labels(self) -> None:
+        registry = build_canonical_issue_registry(
+            key_risks=[
+                RiskFinding(
+                    category="Title / Access Concerns",
+                    severity="high",
+                    summary="Access easement exception burdens the planned entry condition.",
+                    issue="Title access clearance unresolved.",
+                    why_it_matters="This affects access control and closability.",
+                    likely_implication="The entry condition remains provisional until the burden is cleared or endorsed.",
+                    source_documents=["Title Report"],
+                    citations=[Citation(document_name="Title Report", chunk_id="page-0001", page_number=1)],
+                    gating_flags=["Closing", "Underwriting confidence"],
+                )
+            ],
+            contradictions=[],
+            omission_assessments=[
+                OmissionAssessment(
+                    item="Drainage calculations",
+                    category="Flood / Drainage Issues",
+                    status="not found",
+                    rationale="No current drainage calculations were found.",
+                )
+            ],
+            document_analyses=[],
+        )
+        apply_front_end_assessment(
+            registry=registry,
+            document_analyses=[],
+            omission_assessments=[],
+            contradictions=[],
+        )
+
+        records, summary = AutonomousLearningAgent().build_records(
+            deal_name="Autonomous Deal",
+            registry=registry,
+        )
+
+        self.assertGreaterEqual(summary.records_generated, 1)
+        self.assertTrue(any(record.label_source == "autonomous" for record in records))
+        self.assertTrue(any(record.real_issue is True for record in records))
+
+    def test_run_analysis_attaches_web_research_results_from_fake_agent(self) -> None:
+        class _FakeWebResearchAgent(WebResearchAgent):
+            def __init__(self) -> None:
+                pass
+
+            def research(self, *, deal_name: str, registry: CanonicalIssueRegistry, document_analyses):
+                return [
+                    WebResearchResult(
+                        issue_id="entitlement-conditions",
+                        title="Entitlement conditions unresolved",
+                        question="What public approval condition still controls this site?",
+                        query=f"{deal_name} entitlement conditions site development",
+                        status="answered",
+                        answer="Public planning materials show outstanding conditions still tied to improvement-plan approval.",
+                        confidence="high",
+                        source_titles=["City Planning Conditions"],
+                        source_urls=["https://example.gov/planning-conditions"],
+                        note="Public-web result is supportive only; confirm with the current approval package.",
+                    )
+                ]
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store_path = Path(temp_dir) / "autonomous_issue_memory.jsonl"
+            synthesis = run_analysis(
+                deal_name="Web Research Deal",
+                documents=[
+                    _document(
+                        "conditions_of_approval.txt",
+                        "At improvement plan stage, the project shall satisfy remaining frontage dedication and utility confirmation conditions.",
+                    )
+                ],
+                llm_provider=HeuristicProvider(),
+                logger=logging.getLogger("test-web-research"),
+                mode="full",
+                autonomous_learning_enabled=True,
+                autonomous_store_path=store_path,
+                web_researcher=_FakeWebResearchAgent(),
+            )
+
+            self.assertTrue(synthesis.web_research_results)
+            self.assertEqual(synthesis.web_research_results[0].status, "answered")
+            self.assertIn("planning materials", synthesis.web_research_results[0].answer.lower())
+            self.assertTrue(synthesis.autonomous_learning_summary.enabled)
+            self.assertTrue(store_path.exists())
+            self.assertTrue(load_autonomous_learning_records(store_path))
 
 
 if __name__ == "__main__":

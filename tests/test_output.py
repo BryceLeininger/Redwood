@@ -8,6 +8,7 @@ import unittest
 from pathlib import Path
 
 from land_due_diligence_agent.models import (
+    AutonomousLearningSummary,
     CanonicalIssue,
     CanonicalIssueRegistry,
     ChallengeFinding,
@@ -37,6 +38,7 @@ from land_due_diligence_agent.models import (
     RiskFinding,
     RunSummary,
     StructuredFact,
+    WebResearchResult,
 )
 from land_due_diligence_agent.output.markdown_writer import (
     _compress_statement,
@@ -381,6 +383,28 @@ class OutputWriterTests(unittest.TestCase):
                     "Request a current, readable alta or boundary survey now.",
                 ],
             ),
+            web_research_results=[
+                WebResearchResult(
+                    issue_id="environmental-followup",
+                    title="Environmental follow-up is not fully closed",
+                    question="What remediation scope remains open and who is paying for it?",
+                    query="Demo Deal Environmental follow-up is not fully closed environmental review remediation",
+                    status="partial",
+                    answer="Public agency materials suggest environmental review remains active, but the package still needs deal-specific closure support.",
+                    confidence="medium",
+                    source_titles=["City Environmental Review"],
+                    source_urls=["https://example.gov/environmental-review"],
+                    source_snippets=["Environmental review remains active for the project area."],
+                    note="Public-web result is supportive only; confirm with current deal-specific support before relying on it.",
+                )
+            ],
+            autonomous_learning_summary=AutonomousLearningSummary(
+                records_generated=1,
+                positive_records=1,
+                negative_records=0,
+                skipped_issues=0,
+                reasoning="Autonomous learning stored one conservative positive pseudo-label from strong internal consensus.",
+            ),
             llm_failures=[
                 LLMCallFailure(
                     stage="document_summary",
@@ -414,7 +438,7 @@ class OutputWriterTests(unittest.TestCase):
             (output_dir / "run.log").write_text("log", encoding="utf-8")
             written = write_markdown_outputs(output_dir, run_summary=run_summary, synthesis=synthesis)
 
-            self.assertEqual(len(written), 14)
+            self.assertEqual(len(written), 15)
             self.assertTrue((output_dir / "00_run_summary.md").exists())
             self.assertTrue((output_dir / "08_error_report.md").exists())
             self.assertTrue((output_dir / "01_executive_summary.md").exists())
@@ -423,6 +447,7 @@ class OutputWriterTests(unittest.TestCase):
             self.assertTrue((output_dir / "11_issue_registry_debug.md").exists())
             self.assertTrue((output_dir / "12_reviewer_feedback_template.json").exists())
             self.assertTrue((output_dir / "13_further_diligence_roadmap.md").exists())
+            self.assertTrue((output_dir / "14_web_research.md").exists())
             content = (output_dir / "01_executive_summary.md").read_text(encoding="utf-8")
             self.assertIn("Demo Deal", content)
             self.assertIn("heuristic", content)
@@ -472,6 +497,7 @@ class OutputWriterTests(unittest.TestCase):
             self.assertIn("Dependency Read", issue_content)
             self.assertIn("Downstream Consequences", issue_content)
             self.assertIn("Learned Read", issue_content)
+            self.assertIn("Public Web Check", issue_content)
             debug_content = (output_dir / "11_issue_registry_debug.md").read_text(encoding="utf-8")
             self.assertIn("Issue Registry Debug", debug_content)
             self.assertIn("Canonical Issue Registry", debug_content)
@@ -493,6 +519,8 @@ class OutputWriterTests(unittest.TestCase):
             self.assertIn("Title Similarity Cluster", debug_content)
             self.assertIn("Package Quality Inputs", debug_content)
             self.assertIn("Reading Priority Debug", debug_content)
+            self.assertIn("Autonomous Learning", debug_content)
+            self.assertIn("Web Research Debug", debug_content)
             self.assertIn("Omission Front-End Classification", debug_content)
             self.assertIn("Output Discipline", debug_content)
             self.assertIn("Repeated Phrases Across Sections", debug_content)
@@ -517,6 +545,10 @@ class OutputWriterTests(unittest.TestCase):
             self.assertNotIn("Top Documents To Read First", roadmap_content)
             self.assertNotIn("Why it matters", roadmap_content)
             self.assertNotIn("What it blocks", roadmap_content)
+            web_research_content = (output_dir / "14_web_research.md").read_text(encoding="utf-8")
+            self.assertIn("Web Research Fallback", web_research_content)
+            self.assertIn("Partial", web_research_content)
+            self.assertIn("City Environmental Review", web_research_content)
             self.assertNotIn(
                 "Environmental scope still affects underwriting confidence.",
                 content,
@@ -578,6 +610,7 @@ class OutputWriterTests(unittest.TestCase):
             self.assertIn("11_issue_registry_debug.md", summary_content)
             self.assertIn("12_reviewer_feedback_template.json", summary_content)
             self.assertIn("13_further_diligence_roadmap.md", summary_content)
+            self.assertIn("14_web_research.md", summary_content)
             self.assertIn("LLM Model: `gpt-4.1`", summary_content)
             self.assertIn("Analysis Mode: `full`", summary_content)
             self.assertIn("OCR fallback was required on 1 file(s) across 1 page(s).", summary_content)

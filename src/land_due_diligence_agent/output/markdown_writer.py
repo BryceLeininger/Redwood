@@ -53,6 +53,7 @@ def write_markdown_outputs(
             ic_brief_content = _build_investment_committee_brief_markdown(synthesis)
             issue_analysis_content = _build_issue_analysis_markdown(synthesis)
             roadmap_content = _build_further_diligence_roadmap_markdown(synthesis)
+            web_research_content = _build_web_research_markdown(synthesis)
             debug_content = _build_issue_registry_debug_markdown(
                 synthesis,
                 section_texts={
@@ -73,6 +74,7 @@ def write_markdown_outputs(
                     (output_dir / "11_issue_registry_debug.md", debug_content),
                     (output_dir / "12_reviewer_feedback_template.json", _build_reviewer_feedback_template_json(synthesis)),
                     (output_dir / "13_further_diligence_roadmap.md", roadmap_content),
+                    (output_dir / "14_web_research.md", web_research_content),
                 ]
             )
 
@@ -106,6 +108,7 @@ def _analysis_output_names(analysis_mode: str) -> list[str]:
         "11_issue_registry_debug.md",
         "12_reviewer_feedback_template.json",
         "13_further_diligence_roadmap.md",
+        "14_web_research.md",
     ]
 
 
@@ -169,6 +172,8 @@ def _build_run_summary_markdown(
                 f"- High confidence documents: {confidence_counts['high']}",
                 f"- Medium confidence documents: {confidence_counts['medium']}",
                 f"- Low confidence documents: {confidence_counts['low']}",
+                f"- Web fallback queries: {run_summary.web_research_queries}",
+                f"- Autonomous learning records: {run_summary.autonomous_learning_records}",
                 "",
             ]
         )
@@ -585,6 +590,19 @@ def _build_issue_analysis_markdown(synthesis: DealSynthesis) -> str:
             )
             lines.append(f"- Read: {_compress_statement(issue.learning_summary.reasoning, max_words=20)}")
             lines.append("")
+        web_result = _web_research_by_issue_id(synthesis, issue.issue_id)
+        if web_result is not None:
+            lines.append("### Public Web Check")
+            lines.append(f"- Status: {web_result.status} | Confidence: {web_result.confidence}")
+            lines.append(f"- Question: {_compress_statement(web_result.question, max_words=18)}")
+            lines.append(f"- Answer: {_compress_statement(web_result.answer or 'No public answer was isolated.', max_words=22)}")
+            if web_result.next_step:
+                lines.append(f"- Next Step: {_compress_statement(web_result.next_step, max_words=18)}")
+            if web_result.source_titles:
+                lines.append("- Sources: " + ", ".join(web_result.source_titles[:3]))
+            if web_result.note:
+                lines.append(f"- Note: {_compress_statement(web_result.note, max_words=18)}")
+            lines.append("")
 
     return "\n".join(lines).rstrip() + "\n"
 
@@ -863,6 +881,14 @@ def _build_issue_registry_debug_markdown(
                 )
                 if reference.resolution_notes:
                     lines.append(f"    Resolution: {reference.resolution_notes}")
+        web_result = _web_research_by_issue_id(synthesis, issue.issue_id)
+        if web_result is not None:
+            lines.append(
+                f"- Web Research: status={web_result.status} | confidence={web_result.confidence} | "
+                f"answer={web_result.answer or 'n/a'}"
+            )
+            if web_result.source_urls:
+                lines.append("- Web Sources: " + " | ".join(web_result.source_urls[:3]))
         lines.append("")
 
     lines.extend(["## Merge Decisions", ""])
@@ -994,6 +1020,33 @@ def _build_issue_registry_debug_markdown(
         lines.append("- No document analyses were available.")
     lines.append("")
 
+    lines.extend(["## Autonomous Learning", ""])
+    lines.append(f"- Enabled: {synthesis.autonomous_learning_summary.enabled}")
+    lines.append(f"- Store Path: {synthesis.autonomous_learning_summary.store_path or 'n/a'}")
+    lines.append(f"- Records Generated: {synthesis.autonomous_learning_summary.records_generated}")
+    lines.append(f"- Positive Records: {synthesis.autonomous_learning_summary.positive_records}")
+    lines.append(f"- Negative Records: {synthesis.autonomous_learning_summary.negative_records}")
+    lines.append(f"- Skipped Issues: {synthesis.autonomous_learning_summary.skipped_issues}")
+    lines.append(f"- Read: {synthesis.autonomous_learning_summary.reasoning or 'None'}")
+    if synthesis.autonomous_learning_summary.events:
+        lines.append("- Events:")
+        for event in synthesis.autonomous_learning_summary.events[:8]:
+            lines.append(f"  - {event}")
+    lines.append("")
+
+    lines.extend(["## Web Research Debug", ""])
+    if synthesis.web_research_results:
+        for result in synthesis.web_research_results:
+            lines.append(
+                f"- {result.issue_id}: status={result.status} | confidence={result.confidence} | query={result.query}"
+            )
+            lines.append(f"  Answer: {result.answer or 'No answer'}")
+            if result.source_urls:
+                lines.append(f"  Sources: {' | '.join(result.source_urls[:3])}")
+    else:
+        lines.append("- No web fallback queries were run.")
+    lines.append("")
+
     if section_texts:
         discipline = _output_discipline_snapshot(section_texts)
         lines.extend(["## Output Discipline", ""])
@@ -1073,6 +1126,42 @@ def _build_further_diligence_roadmap_markdown(synthesis: DealSynthesis) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _build_web_research_markdown(synthesis: DealSynthesis) -> str:
+    lines = ["# Web Research Fallback", ""]
+    if not synthesis.web_research_results:
+        lines.append("- No public-web fallback was triggered.")
+        return "\n".join(lines) + "\n"
+
+    answered = [result for result in synthesis.web_research_results if result.status == "answered"]
+    partial = [result for result in synthesis.web_research_results if result.status == "partial"]
+    unresolved = [result for result in synthesis.web_research_results if result.status in {"not_found", "failed"}]
+
+    for label, results in (
+        ("Answered", answered),
+        ("Partial", partial),
+        ("No Public Answer", unresolved),
+    ):
+        if not results:
+            continue
+        lines.extend([f"## {label}", ""])
+        for result in results:
+            lines.append(f"### {result.title}")
+            lines.append(f"- Question: {_compress_statement(result.question, max_words=18)}")
+            lines.append(f"- Query: `{result.query}`")
+            lines.append(f"- Answer: {_compress_statement(result.answer or 'No public answer was isolated.', max_words=24)}")
+            lines.append(f"- Confidence: {result.confidence}")
+            if result.next_step:
+                lines.append(f"- Next Step: {_compress_statement(result.next_step, max_words=18)}")
+            if result.source_urls:
+                for index, url in enumerate(result.source_urls[:3]):
+                    title = result.source_titles[index] if index < len(result.source_titles) else url
+                    lines.append(f"- Source: [{title}]({url})")
+            if result.note:
+                lines.append(f"- Note: {_compress_statement(result.note, max_words=20)}")
+            lines.append("")
+    return "\n".join(lines).rstrip() + "\n"
+
+
 def _build_reviewer_feedback_template_json(synthesis: DealSynthesis) -> str:
     rows = []
     for row in build_reviewer_feedback_template(
@@ -1117,6 +1206,13 @@ def _format_percentage(value: float | None) -> str:
     if value is None:
         return "n/a"
     return f"{value:.0%}"
+
+
+def _web_research_by_issue_id(synthesis: DealSynthesis, issue_id: str):
+    for result in synthesis.web_research_results:
+        if result.issue_id == issue_id:
+            return result
+    return None
 
 
 HEDGE_WORDS = {"may", "could", "might", "possibly", "potentially", "appears", "seems", "suggests"}
@@ -1568,10 +1664,18 @@ def _build_confidence_change_lines(synthesis: DealSynthesis) -> list[str]:
 
 def _roadmap_investigate_lines(synthesis: DealSynthesis, roadmap) -> list[str]:
     items = [
+        _compress_statement(
+            f"Review public answer on {result.title.lower()}: {result.answer}",
+            max_words=16,
+        )
+        for result in synthesis.web_research_results
+        if result.status in {"answered", "partial"} and result.answer
+    ]
+    items.extend(
         _issue_next_step(issue)
         for issue in synthesis.canonical_issue_registry.issues
         if issue.why_now == "investigate now" and _issue_next_step(issue)
-    ]
+    )
     items.extend(
         _compress_statement(f"Resolve the conflict: {finding.description}", max_words=16)
         for finding in synthesis.contradictions[:2]
@@ -1586,11 +1690,19 @@ def _roadmap_investigate_lines(synthesis: DealSynthesis, roadmap) -> list[str]:
 
 def _roadmap_request_lines(synthesis: DealSynthesis, roadmap) -> list[str]:
     items = [
+        _compress_statement(
+            result.next_step or f"Request direct support for {result.title.lower()}.",
+            max_words=16,
+        )
+        for result in synthesis.web_research_results
+        if result.status in {"not_found", "failed"}
+    ]
+    items.extend(
         _compress_statement(_request_action_text(assessment.recommended_request), max_words=16)
         for assessment in synthesis.omission_assessments
         if assessment.front_end_status in {"missing and important", "stale and potentially unreliable", "conflicting across documents"}
         and assessment.recommended_request
-    ]
+    )
     items.extend(
         _compress_statement(
             f"Verify whether {issue.title.lower()} is truly an issue here.",

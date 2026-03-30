@@ -16,6 +16,10 @@ class Settings:
     openai_api_key: str | None = None
     openai_model: str = "gpt-4.1"
     openai_base_url: str | None = None
+    autonomous_learning_enabled: bool = True
+    web_research_enabled: bool = True
+    web_research_model: str = "gpt-4.1"
+    web_research_max_queries: int = 4
     default_output_dir: str = "data/output"
     log_level: str = "INFO"
 
@@ -42,6 +46,10 @@ class Settings:
             openai_api_key=_clean_env("OPENAI_API_KEY"),
             openai_model=os.getenv("OPENAI_MODEL", "gpt-4.1").strip(),
             openai_base_url=_clean_env("OPENAI_BASE_URL"),
+            autonomous_learning_enabled=_env_bool("AUTONOMOUS_LEARNING_ENABLED", True),
+            web_research_enabled=_env_bool("WEB_RESEARCH_ENABLED", True),
+            web_research_model=os.getenv("WEB_RESEARCH_MODEL", "gpt-4.1").strip(),
+            web_research_max_queries=_env_int("WEB_RESEARCH_MAX_QUERIES", 4),
             default_output_dir=os.getenv("DEFAULT_OUTPUT_DIR", "data/output").strip(),
             log_level=os.getenv("LOG_LEVEL", "INFO").strip().upper(),
         )
@@ -71,3 +79,21 @@ def _clean_env(name: str) -> str | None:
         return None
     os.environ[name] = value
     return value
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() not in {"0", "false", "no", "off"}
+
+
+def _env_int(name: str, default: int) -> int:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    try:
+        parsed = int(value.strip())
+    except ValueError:
+        return default
+    return parsed if parsed > 0 else default

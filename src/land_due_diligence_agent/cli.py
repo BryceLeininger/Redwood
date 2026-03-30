@@ -8,6 +8,7 @@ from pathlib import Path
 
 from land_due_diligence_agent.analysis.precedents import ingest_reviewer_feedback_files
 from land_due_diligence_agent.analysis.service import run_analysis
+from land_due_diligence_agent.analysis.web_research import OpenAIWebResearcher
 from land_due_diligence_agent.config import Settings
 from land_due_diligence_agent.ingestion.discovery import discover_documents
 from land_due_diligence_agent.llm.factory import build_llm_provider
@@ -183,6 +184,18 @@ def main(argv: list[str] | None = None) -> int:
             logger=logger,
         )
 
+    web_researcher = None
+    if settings.web_research_enabled and settings.openai_api_key:
+        web_researcher = OpenAIWebResearcher(
+            api_key=settings.openai_api_key,
+            model=settings.web_research_model,
+            base_url=settings.openai_base_url,
+            max_queries=settings.web_research_max_queries,
+            logger=logger,
+        )
+    elif settings.web_research_enabled:
+        logger.info("Web research fallback is enabled, but no OPENAI_API_KEY was found; skipping web research.")
+
     synthesis = run_analysis(
         deal_name=deal_name,
         documents=parsed_documents,
@@ -190,8 +203,12 @@ def main(argv: list[str] | None = None) -> int:
         logger=logger,
         extraction_errors=extraction_errors,
         mode=run_summary.analysis_mode,
+        autonomous_learning_enabled=settings.autonomous_learning_enabled,
+        web_researcher=web_researcher,
     )
     run_summary.llm_calls_made = synthesis.llm_calls_attempted
+    run_summary.web_research_queries = len(synthesis.web_research_results)
+    run_summary.autonomous_learning_records = synthesis.autonomous_learning_summary.records_generated
 
     run_summary.completed_at = datetime.now().astimezone().isoformat(timespec="seconds")
     written_paths = write_markdown_outputs(

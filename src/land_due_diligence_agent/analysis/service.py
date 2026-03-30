@@ -3,7 +3,13 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
+from land_due_diligence_agent.analysis.autonomous_agent import (
+    default_autonomous_store_path,
+    load_autonomous_learning_records,
+    persist_autonomous_learning_records,
+)
 from land_due_diligence_agent.analysis.front_end import apply_front_end_assessment
 from land_due_diligence_agent.analysis.heuristics import (
     aggregate_risks,
@@ -29,8 +35,16 @@ from land_due_diligence_agent.analysis.multi_pass import (
     build_structured_facts,
 )
 from land_due_diligence_agent.analysis.precedents import build_precedent_engine
+from land_due_diligence_agent.analysis.web_research import OpenAIWebResearcher
 from land_due_diligence_agent.llm.base import LLMProvider
-from land_due_diligence_agent.models import DealSynthesis, DocumentRecord, LLMCallFailure, PriorityAssessment
+from land_due_diligence_agent.models import (
+    AutonomousLearningSummary,
+    DealSynthesis,
+    DocumentRecord,
+    LLMCallFailure,
+    PrecedentIssueRecord,
+    PriorityAssessment,
+)
 
 
 def run_analysis(
@@ -41,6 +55,9 @@ def run_analysis(
     logger: logging.Logger,
     extraction_errors: list[str] | None = None,
     mode: str = "full",
+    autonomous_learning_enabled: bool = False,
+    autonomous_store_path: Path | None = None,
+    web_researcher: OpenAIWebResearcher | None = None,
 ) -> DealSynthesis:
     """Run document summaries plus a deal-level synthesis."""
 
@@ -98,8 +115,18 @@ def run_analysis(
         documents=documents,
         logger=logger,
     )
+    resolved_autonomous_store_path = autonomous_store_path or default_autonomous_store_path(precedent_engine.store_path)
+    autonomous_learning_records = (
+        load_autonomous_learning_records(resolved_autonomous_store_path)
+        if autonomous_learning_enabled and resolved_autonomous_store_path.exists()
+        else []
+    )
+    learning_records = [
+        *precedent_engine.records,
+        *autonomous_learning_records,
+    ]
     learning_engine = build_learning_engine(
-        records=precedent_engine.records,
+        records=learning_records,
         deal_metadata=precedent_engine.deal_metadata,
         snapshot_path=default_learning_snapshot_path(precedent_engine.store_path),
     )
@@ -120,6 +147,18 @@ def run_analysis(
         omission_assessments=omission_assessments,
         contradictions=contradictions,
     )
+    web_research_results = []
+    if analysis_mode == "full" and web_researcher is not None:
+        try:
+            web_research_results = web_researcher.research(
+                deal_name=deal_name,
+                registry=registry,
+                document_analyses=document_analyses,
+            )
+            llm_calls_attempted += len(web_research_results)
+            _apply_web_research_to_registry(registry, web_research_results)
+        except Exception as exc:  # pragma: no cover - network/provider failure path
+            logger.warning("Web research fallback failed: %s", _format_llm_exception(exc))
     registry.output_selections = build_section_selections(
         registry,
         recommendation,
@@ -153,10 +192,10 @@ def run_analysis(
         executive_summary = llm_provider.refine_executive_summary(
             deal_name=deal_name,
             draft_summary=executive_summary,
-        category_rollup=category_rollup,
-        key_risks=key_risks,
-        contradictions=contradictions,
-        missing_items=missing_items,
+            category_rollup=category_rollup,
+            key_risks=key_risks,
+            contradictions=contradictions,
+            missing_items=missing_items,
         )
     except Exception as exc:  # pragma: no cover - network/provider failure path
         detail = _format_llm_exception(exc)
@@ -168,6 +207,20 @@ def run_analysis(
                 model=getattr(llm_provider, "model", llm_provider.provider_name),
                 detail=detail,
             )
+        )
+
+    autonomous_learning_records_out: list[PrecedentIssueRecord] = []
+    autonomous_learning_summary = AutonomousLearningSummary(
+        enabled=autonomous_learning_enabled,
+        store_path=str(resolved_autonomous_store_path),
+        reasoning="Autonomous learning is disabled for this run.",
+    )
+    if analysis_mode == "full" and autonomous_learning_enabled:
+        autonomous_learning_records_out, autonomous_learning_summary = persist_autonomous_learning_records(
+            deal_name=deal_name,
+            registry=registry,
+            store_path=resolved_autonomous_store_path,
+            logger=logger,
         )
 
     return DealSynthesis(
@@ -189,6 +242,9 @@ def run_analysis(
         recommendation=recommendation,
         contradictions=contradictions,
         further_diligence_roadmap=further_diligence_roadmap,
+        web_research_results=web_research_results,
+        autonomous_learning_summary=autonomous_learning_summary,
+        autonomous_learning_records=autonomous_learning_records_out,
         extraction_errors=extraction_errors,
         llm_failures=llm_failures,
         analysis_mode=analysis_mode,
@@ -233,3 +289,11 @@ def _fragment_for_arbiter(fragment) -> dict[str, str]:
         "evidence_basis": fragment.source_type,
         "citations": "; ".join(fragment.source_documents[:3]),
     }
+
+
+def _apply_web_research_to_registry(registry, web_research_results) -> None:
+    for result in web_research_results:
+        if result.status in {"answered", "partial"} and result.answer:
+            registry.front_end_known_points.append(f"Public-file check on {result.title}: {result.answer}")
+        elif result.status == "not_found":
+            registry.front_end_unresolved_points.append(f"Public web search did not resolve {result.title.lower()}.")

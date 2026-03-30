@@ -297,6 +297,8 @@ class PrecedentIssueRecord:
     resolved_by: str = "unknown"
     notes: str = ""
     resolution_notes: str = ""
+    label_source: str = "reviewer"
+    label_confidence: str = "high"
 
 
 @dataclass(slots=True)
@@ -337,6 +339,20 @@ class LearningSummary:
     matched_features: list[str] = field(default_factory=list)
     confidence_adjustment: str = "neutral"
     score_adjustment: int = 0
+    reasoning: str = ""
+
+
+@dataclass(slots=True)
+class AutonomousLearningSummary:
+    """Inspectible summary of autonomous pseudo-label generation for future runs."""
+
+    enabled: bool = False
+    store_path: str = ""
+    records_generated: int = 0
+    positive_records: int = 0
+    negative_records: int = 0
+    skipped_issues: int = 0
+    events: list[str] = field(default_factory=list)
     reasoning: str = ""
 
 
@@ -655,6 +671,24 @@ class FurtherDiligenceRoadmap:
 
 
 @dataclass(slots=True)
+class WebResearchResult:
+    """Public-web fallback result for an unresolved diligence question."""
+
+    issue_id: str
+    title: str
+    question: str
+    query: str
+    status: str = "not_run"
+    answer: str = ""
+    confidence: str = "low"
+    next_step: str = ""
+    source_titles: list[str] = field(default_factory=list)
+    source_urls: list[str] = field(default_factory=list)
+    source_snippets: list[str] = field(default_factory=list)
+    note: str = ""
+
+
+@dataclass(slots=True)
 class DealSynthesis:
     """Deal-level rollup assembled from all document analyses."""
 
@@ -676,6 +710,9 @@ class DealSynthesis:
     recommendation: RecommendationDecision = field(default_factory=RecommendationDecision)
     contradictions: list[ContradictionFinding] = field(default_factory=list)
     further_diligence_roadmap: FurtherDiligenceRoadmap = field(default_factory=FurtherDiligenceRoadmap)
+    web_research_results: list[WebResearchResult] = field(default_factory=list)
+    autonomous_learning_summary: AutonomousLearningSummary = field(default_factory=AutonomousLearningSummary)
+    autonomous_learning_records: list[PrecedentIssueRecord] = field(default_factory=list)
     extraction_errors: list[str] = field(default_factory=list)
     llm_failures: list[LLMCallFailure] = field(default_factory=list)
     analysis_mode: str = "full"
@@ -696,6 +733,8 @@ class RunSummary:
     completed_at: str | None = None
     analysis_mode: str = "fast"
     llm_calls_made: int = 0
+    web_research_queries: int = 0
+    autonomous_learning_records: int = 0
     files_found: int = 0
     files_parsed_successfully: int = 0
     files_failed: int = 0
