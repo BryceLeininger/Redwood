@@ -363,6 +363,13 @@ def _annotate_issues(
             else []
         )
 
+        specificity_gate_reason = _specificity_gate_reason(issue)
+        if specificity_gate_reason:
+            issue.top_line_filter_reasons = unique_preserve_order(
+                [*issue.top_line_filter_reasons, specificity_gate_reason]
+            )
+            issue.top_line_eligible = False
+
         if issue.front_end_flag == "routine item" and not issue.blocking_flag:
             issue.top_line_filter_reasons = unique_preserve_order(
                 [*issue.top_line_filter_reasons, "front-end routine suppression"]
@@ -375,6 +382,9 @@ def _annotate_issues(
                 f"information status={issue.information_status}",
                 f"normality={issue.normality_classification}",
                 f"why now={issue.why_now}",
+                f"specificity={issue.specificity_level}",
+                f"abnormality basis={issue.abnormality_basis}",
+                f"genericity penalty={issue.genericity_penalty}",
                 issue.front_end_flag_reason,
                 issue.unusualness_rationale,
             ]
@@ -600,6 +610,8 @@ def _issue_normality(issue: CanonicalIssue) -> tuple[str, str]:
 
     reach = len(issue.downstream_dependencies)
     score = 0
+    score += 4 if issue.specificity_level == "clearly site-specific" else 1 if issue.specificity_level == "somewhat specific" else -4
+    score += 3 if issue.abnormality_basis in {"direct abnormal finding", "conflict"} else 1 if issue.abnormality_basis in {"unresolved constraint", "missing critical confirmation"} else -3
     score += 5 if issue.information_status == "conflicting across documents" else 0
     score += 3 if issue.blocking_flag else 0
     score += 2 if issue.critical_path_flag else 0
@@ -618,6 +630,8 @@ def _issue_normality(issue: CanonicalIssue) -> tuple[str, str]:
     score -= 1 if issue.information_status == "missing but normally expected" else 0
     score -= 1 if issue.precedent_summary.confidence_adjustment == "down" and issue.precedent_summary.sample_size >= 2 else 0
 
+    if issue.specificity_level == "generic" and not issue.site_specific_trigger and not issue.blocking_flag:
+        return "routine", "This mostly reflects category presence or normal diligence background noise rather than a site-specific issue."
     if issue.information_status == "conflicting across documents" and issue.blocking_flag:
         return "unusual", "This looks unusual because documents conflict on a core path assumption rather than on a routine clean-up item."
     if issue.process_friction_flag and score <= 0:
@@ -681,6 +695,29 @@ def _issue_front_end_flag(issue: CanonicalIssue) -> tuple[str, str]:
         "routine item",
         "The current support does not justify elevating this lane above routine process friction.",
     )
+
+
+def _specificity_gate_reason(issue: CanonicalIssue) -> str:
+    if issue.front_end_flag == "conflict / contradiction concern":
+        return ""
+    if issue.specificity_level == "clearly site-specific" and issue.site_specific_trigger:
+        return ""
+    if (
+        issue.specificity_level == "somewhat specific"
+        and (
+            issue.abnormality_basis == "missing critical confirmation"
+            or issue.blocking_flag
+            or issue.critical_path_flag
+            or bool(issue.site_specific_trigger)
+        )
+    ):
+        return ""
+    if issue.blocking_flag or issue.critical_path_flag:
+        if issue.site_specific_trigger or issue.abnormality_basis in {"unresolved constraint", "direct abnormal finding"}:
+            return ""
+    if issue.front_end_flag in {"document gap", "stale-information concern"} and issue.abnormality_basis == "missing critical confirmation":
+        return ""
+    return "site-specificity gate: generic category presence only"
 
 
 def _why_now(issue: CanonicalIssue) -> str:
@@ -852,7 +889,7 @@ def _package_quality(
 
 def _front_end_known_points(real_flags: list[CanonicalIssue], registry: CanonicalIssueRegistry) -> list[str]:
     points = [
-        f"{issue.title}: {(issue.core_facts[0] if issue.core_facts else issue.likely_implication)}"
+        f"{issue.title}: {(issue.site_specific_trigger or (issue.core_facts[0] if issue.core_facts else issue.likely_implication))}"
         for issue in real_flags[:3]
     ]
     if registry.central_risk_pattern:
@@ -885,21 +922,25 @@ def _front_end_unresolved_points(
 
 def _front_end_routine_points(routine_items: list[CanonicalIssue]) -> list[str]:
     return unique_preserve_order(
-        f"{issue.title}: {issue.unusualness_rationale}"
+        (
+            f"{issue.title}: verify whether this is truly an issue here."
+            if issue.specificity_level == "generic"
+            else f"{issue.title}: {issue.unusualness_rationale}"
+        )
         for issue in routine_items[:3]
     )
 
 
 def _front_end_elevated_points(real_flags: list[CanonicalIssue]) -> list[str]:
     return unique_preserve_order(
-        f"{issue.title}: {issue.unusualness_rationale}"
+        f"{issue.title}: {issue.site_specific_trigger or issue.unusualness_rationale}"
         for issue in real_flags[:4]
     )
 
 
 def _front_end_attention_now_points(issues: list[CanonicalIssue]) -> list[str]:
     return unique_preserve_order(
-        f"{issue.title}: {issue.why_now}"
+        f"{issue.title}: {issue.site_specific_trigger or issue.why_now}"
         for issue in issues
         if issue.why_now == "investigate now"
     )[:4]
@@ -910,14 +951,19 @@ def _front_end_deeper_work(real_flags: list[CanonicalIssue], blind_spots: list[C
     for issue in [*real_flags[:3], *blind_spots[:2]]:
         if issue.research_agenda:
             step = issue.research_agenda[0]
-            points.append(
-                f"{issue.title}: verify {step.verify_what}; request {step.request_item}; use {step.likely_source} ({step.timing})."
-            )
+            if issue.specificity_level == "generic":
+                points.append(f"{issue.title}: verify whether this is truly an issue here.")
+            else:
+                points.append(
+                    f"{issue.title}: verify {step.verify_what}; request {step.request_item}; use {step.likely_source} ({step.timing})."
+                )
     return unique_preserve_order(points)[:5]
 
 
 def _issue_roadmap_line(issue: CanonicalIssue) -> str:
     blocked = issue.downstream_dependencies[0].title if issue.downstream_dependencies else "downstream diligence confidence"
+    if issue.specificity_level == "generic":
+        return f"{issue.title}: verify whether this is truly an issue here."
     return (
         f"{issue.title}: {issue.normality_classification}, {issue.front_end_flag}. "
         f"Why now: {issue.why_now}. "

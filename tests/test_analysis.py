@@ -639,6 +639,171 @@ class AnalysisTests(unittest.TestCase):
         self.assertEqual(issue.front_end_flag, "conflict / contradiction concern")
         self.assertEqual(issue.why_now, "investigate now")
 
+    def test_generic_title_issue_is_suppressed_without_site_specific_trigger(self) -> None:
+        registry = build_canonical_issue_registry(
+            key_risks=[
+                RiskFinding(
+                    category="Title / Access Concerns",
+                    severity="medium",
+                    summary="Title review is part of standard diligence.",
+                    issue="Title exceptions exist.",
+                    why_it_matters="Standard title review is still underway.",
+                    likely_implication="Normal diligence follow-up may still be needed.",
+                    source_documents=["Title Report"],
+                )
+            ],
+            contradictions=[],
+            omission_assessments=[],
+            document_analyses=[],
+        )
+        apply_front_end_assessment(
+            registry=registry,
+            document_analyses=[],
+            omission_assessments=registry.omission_assessments,
+            contradictions=[],
+        )
+
+        issue = next(issue for issue in registry.issues if issue.issue_id == "title-access-clearance")
+        self.assertEqual(issue.specificity_level, "generic")
+        self.assertEqual(issue.abnormality_basis, "routine category only")
+        self.assertEqual(issue.site_specific_trigger, "")
+        self.assertGreater(issue.genericity_penalty, 0)
+        self.assertFalse(issue.top_line_eligible)
+        self.assertIn("site-specificity gate: generic category presence only", issue.top_line_filter_reasons)
+
+    def test_generic_soils_issue_is_suppressed_without_specific_condition(self) -> None:
+        registry = build_canonical_issue_registry(
+            key_risks=[
+                RiskFinding(
+                    category="Geotechnical Risks",
+                    severity="medium",
+                    summary="A geotechnical report is in the package.",
+                    issue="Geotechnical report recommends further review.",
+                    why_it_matters="Geotechnical review remains part of normal diligence.",
+                    likely_implication="Routine design follow-up may still occur.",
+                    source_documents=["Geotech Report"],
+                )
+            ],
+            contradictions=[],
+            omission_assessments=[],
+            document_analyses=[],
+        )
+        apply_front_end_assessment(
+            registry=registry,
+            document_analyses=[],
+            omission_assessments=registry.omission_assessments,
+            contradictions=[],
+        )
+
+        issue = next(issue for issue in registry.issues if issue.issue_id == "geotechnical-scope")
+        self.assertEqual(issue.specificity_level, "generic")
+        self.assertEqual(issue.normality_classification, "routine")
+        self.assertFalse(issue.top_line_eligible)
+        self.assertIn("site-specificity gate: generic category presence only", issue.top_line_filter_reasons)
+
+    def test_generic_access_issue_is_suppressed_without_specific_uncertainty(self) -> None:
+        registry = build_canonical_issue_registry(
+            key_risks=[
+                RiskFinding(
+                    category="Title / Access Concerns",
+                    severity="medium",
+                    summary="Site access should be reviewed as part of diligence.",
+                    issue="Site access review remains open.",
+                    why_it_matters="Connectivity review is still underway.",
+                    likely_implication="Routine diligence follow-up may still be needed.",
+                    source_documents=["Access Memo"],
+                )
+            ],
+            contradictions=[],
+            omission_assessments=[],
+            document_analyses=[],
+        )
+        apply_front_end_assessment(
+            registry=registry,
+            document_analyses=[],
+            omission_assessments=registry.omission_assessments,
+            contradictions=[],
+        )
+
+        issue = next(issue for issue in registry.issues if issue.issue_id == "title-access-clearance")
+        self.assertEqual(issue.specificity_level, "generic")
+        self.assertEqual(issue.site_specific_trigger, "")
+        self.assertFalse(issue.top_line_eligible)
+        self.assertIn("site-specificity gate: generic category presence only", issue.top_line_filter_reasons)
+
+    def test_specific_abnormal_trigger_keeps_issue_elevated(self) -> None:
+        registry = build_canonical_issue_registry(
+            key_risks=[
+                RiskFinding(
+                    category="Geotechnical Risks",
+                    severity="high",
+                    summary="The geotechnical report identifies undocumented fill beneath the proposed pad.",
+                    issue="Undocumented fill affects pad design and foundation scope.",
+                    why_it_matters="Pad design and grading assumptions are not reliable until the fill condition is incorporated.",
+                    likely_implication="Foundation scope and sitework cost can move if the recommendation is not carried through.",
+                    source_documents=["Geotech Report"],
+                    gating_flags=["Underwriting confidence"],
+                )
+            ],
+            contradictions=[],
+            omission_assessments=[],
+            document_analyses=[],
+        )
+        apply_front_end_assessment(
+            registry=registry,
+            document_analyses=[],
+            omission_assessments=registry.omission_assessments,
+            contradictions=[],
+        )
+
+        issue = next(issue for issue in registry.issues if issue.issue_id == "geotechnical-scope")
+        self.assertNotEqual(issue.specificity_level, "generic")
+        self.assertIn(issue.abnormality_basis, {"direct abnormal finding", "unresolved constraint"})
+        self.assertTrue(issue.site_specific_trigger)
+        self.assertTrue(issue.top_line_eligible)
+        self.assertIn(issue.front_end_flag, {"red flag", "yellow flag"})
+
+    def test_top_line_outputs_prefer_site_specific_issues_over_generic_category_presence(self) -> None:
+        registry = build_canonical_issue_registry(
+            key_risks=[
+                RiskFinding(
+                    category="Title / Access Concerns",
+                    severity="medium",
+                    summary="Title review is part of standard diligence.",
+                    issue="Title exceptions exist.",
+                    why_it_matters="Standard title review is still underway.",
+                    likely_implication="Normal diligence follow-up may still be needed.",
+                    source_documents=["Title Report"],
+                ),
+                RiskFinding(
+                    category="Utilities / Infrastructure Issues",
+                    severity="high",
+                    summary="The provider has not issued a will-serve letter for the required offsite utility extension.",
+                    issue="Utility capacity is not confirmed for the offsite extension.",
+                    why_it_matters="The offsite utility path remains unresolved for the current plan.",
+                    likely_implication="Improvement timing and underwriting confidence remain exposed until the provider confirms service.",
+                    source_documents=["Utility Memo"],
+                    gating_flags=["Underwriting confidence"],
+                ),
+            ],
+            contradictions=[],
+            omission_assessments=[],
+            document_analyses=[],
+        )
+        apply_front_end_assessment(
+            registry=registry,
+            document_analyses=[],
+            omission_assessments=registry.omission_assessments,
+            contradictions=[],
+        )
+
+        recommendation = build_recommendation_from_registry(registry)
+        selections = build_section_selections(registry, recommendation, analysis_mode="full")
+        key_risk_ids = [selection.issue_id for selection in selections if selection.output_name == "02_key_risks.md"]
+
+        self.assertIn("utility-capacity", key_risk_ids)
+        self.assertNotIn("title-access-clearance", key_risk_ids)
+
     def test_package_quality_classification_is_deterministic(self) -> None:
         thin_synthesis = run_analysis(
             deal_name="Thin Package",

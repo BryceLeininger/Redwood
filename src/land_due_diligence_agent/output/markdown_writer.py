@@ -694,6 +694,10 @@ def _build_issue_registry_debug_markdown(
         lines.append(f"- Process Friction Flag: {issue.process_friction_flag}")
         lines.append(f"- Unusualness Rationale: {issue.unusualness_rationale}")
         lines.append(f"- Why Now: {issue.why_now}")
+        lines.append(f"- Specificity Level: {issue.specificity_level}")
+        lines.append(f"- Abnormality Basis: {issue.abnormality_basis}")
+        lines.append(f"- Site-Specific Trigger: {issue.site_specific_trigger or 'n/a'}")
+        lines.append(f"- Genericity Penalty: {issue.genericity_penalty}")
         lines.append(f"- Missing Confirmation: {issue.missing_confirmation or 'n/a'}")
         lines.append(f"- Dependency Type: {issue.dependency_type or 'n/a'}")
         lines.append(f"- Critical Path: {issue.critical_path_flag}")
@@ -1321,8 +1325,9 @@ def _render_canonical_issue_risk_block(issue: CanonicalIssue, *, index: int) -> 
     lines = [f"### {index}. {issue.title}"]
     lines.append(f"- Flag: {_issue_status_line(issue)}")
     lines.append(f"- Why It Matters: {_compress_statement(issue.why_it_matters, max_words=16)}")
-    if issue.core_facts:
-        lines.append(f"- Fact: {_compress_statement(issue.core_facts[0], max_words=16)}")
+    basis = issue.site_specific_trigger or (issue.core_facts[0] if issue.core_facts else "")
+    if basis:
+        lines.append(f"- Basis: {_compress_statement(basis, max_words=16)}")
     if issue.normality_classification not in {"routine", "unknown"} and issue.unusualness_rationale:
         lines.append(f"- Read: {_compress_statement(issue.unusualness_rationale, max_words=14)}")
     if issue.why_now and issue.why_now != "unclear":
@@ -1495,7 +1500,12 @@ def _roadmap_request_lines(synthesis: DealSynthesis, roadmap) -> list[str]:
         and assessment.recommended_request
     ]
     items.extend(
-        _issue_next_step(issue)
+        _compress_statement(
+            f"Verify whether {issue.title.lower()} is truly an issue here.",
+            max_words=16,
+        )
+        if issue.specificity_level == "generic"
+        else _issue_next_step(issue)
         for issue in synthesis.canonical_issue_registry.issues
         if issue.why_now in {"investigate after initial read", "investigate before underwriting"} and _issue_next_step(issue)
     )
@@ -1520,7 +1530,12 @@ def _roadmap_read_lines(synthesis: DealSynthesis, roadmap) -> list[str]:
 
 def _roadmap_monitor_lines(synthesis: DealSynthesis, roadmap) -> list[str]:
     items = [
-        _compress_statement(f"Monitor {issue.title.lower()}.", max_words=12)
+        _compress_statement(
+            f"Verify whether {issue.title.lower()} is truly an issue here.",
+            max_words=12,
+        )
+        if issue.specificity_level == "generic"
+        else _compress_statement(f"Monitor {issue.title.lower()}.", max_words=12)
         for issue in synthesis.canonical_issue_registry.issues
         if issue.why_now == "monitor unless other signals worsen"
     ]
@@ -1532,7 +1547,9 @@ def _roadmap_monitor_lines(synthesis: DealSynthesis, roadmap) -> list[str]:
 def _roadmap_routine_lines(synthesis: DealSynthesis, roadmap) -> list[str]:
     items = [
         _compress_statement(
-            f"Treat {issue.title.lower()} as routine unless the support is contradicted.",
+            f"Verify whether {issue.title.lower()} is truly an issue here."
+            if issue.specificity_level == "generic"
+            else f"Treat {issue.title.lower()} as routine unless the support is contradicted.",
             max_words=16,
         )
         for issue in synthesis.canonical_issue_registry.issues

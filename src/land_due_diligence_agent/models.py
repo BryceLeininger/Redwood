@@ -485,6 +485,10 @@ class CanonicalIssue:
     process_friction_flag: bool = False
     unusualness_rationale: str = ""
     why_now: str = "unclear"
+    specificity_level: str = "generic"
+    abnormality_basis: str = "routine category only"
+    site_specific_trigger: str = ""
+    genericity_penalty: int = 0
     missing_confirmation: str = ""
     research_agenda: list[ResearchAgendaItem] = field(default_factory=list)
     output_bucket: str = "appendix"

@@ -348,6 +348,98 @@ _CANONICAL_TITLE_VOCAB = (
     (("schedule",), "Schedule assumptions"),
 )
 
+_SPECIFICITY_TERMS_BY_CATEGORY = {
+    "Title / Access Concerns": (
+        "easement",
+        "exception",
+        "encroachment",
+        "ingress",
+        "egress",
+        "access",
+        "ownership",
+        "control",
+        "route",
+        "dedication",
+    ),
+    "Entitlement Status": (
+        "condition",
+        "rezoning",
+        "extension",
+        "expiration",
+        "permit",
+        "map",
+        "approval",
+        "recordation",
+    ),
+    "Environmental Risks": (
+        "contamination",
+        "remediation",
+        "mitigation",
+        "wetland",
+        "habitat",
+        "phase i",
+        "phase ii",
+        "agency",
+    ),
+    "Geotechnical Risks": (
+        "fill",
+        "slope",
+        "settlement",
+        "liquefaction",
+        "grading",
+        "retaining",
+        "foundation",
+        "drainage",
+        "expansive",
+        "seismic",
+    ),
+    "Flood / Drainage Issues": (
+        "detention",
+        "drainage",
+        "stormwater",
+        "flood",
+        "basin",
+        "hydrology",
+        "channel",
+    ),
+    "Utilities / Infrastructure Issues": (
+        "capacity",
+        "will-serve",
+        "will serve",
+        "provider",
+        "upsizing",
+        "joint trench",
+        "offsite utility",
+        "pressure",
+        "sewer",
+        "water",
+    ),
+    "Offsite Obligations": (
+        "frontage",
+        "offsite",
+        "dedication",
+        "improvement",
+        "cost owner",
+        "buyer-facing",
+        "buyer facing",
+        "signal",
+    ),
+}
+
+_GENERIC_CATEGORY_TERMS = (
+    "report exists",
+    "report available",
+    "further review",
+    "requires further review",
+    "category present",
+    "title exceptions",
+    "geotechnical report",
+    "soils report",
+    "utility review",
+    "site access",
+    "offsite work",
+)
+
 _PRIORITY_DIMENSIONS_BY_KEY = {
     "title_access_clearance": (2, 2, 1, 4, 5, 4, 2, 5),
     "entitlement_conditions": (2, 5, 3, 5, 3, 5, 2, 5),
@@ -1258,6 +1350,54 @@ def _dedupe_standardized_titles(issues: list[CanonicalIssue]) -> None:
             issue.title = _compress_issue_title(f"{issue.title} {qualifier_word}")
 
 
+def _specificity_profile(issue: CanonicalIssue) -> tuple[str, str, str, int]:
+    text_candidates = [
+        *issue.merged_fragment_titles,
+        *issue.core_facts,
+        *issue.best_evidence,
+        issue.why_it_matters,
+        issue.likely_implication,
+    ]
+    trigger = _extract_site_specific_trigger(issue, text_candidates)
+    if issue.status == "conflicted" or issue.evidence_basis == "contradictory_evidence_present":
+        return "clearly site-specific", "conflict", trigger or "Documents conflict on a controlling deal assumption.", 0
+    if issue.evidence_basis in {"direct_unresolved_risk", "direct_confirmed_risk"} and trigger:
+        basis = "unresolved constraint" if any(flag in {"Closing", "Underwriting confidence", "Vertical start"} for flag in issue.gating_flags) else "direct abnormal finding"
+        return "clearly site-specific", basis, trigger, 0
+    if issue.evidence_basis == "omission_only" and issue.materiality == "high":
+        omission_trigger = issue.what_would_resolve_it or trigger
+        return "somewhat specific", "missing critical confirmation", omission_trigger, 8
+    if issue.evidence_basis == "routine_missing_support" and issue.materiality == "high":
+        omission_trigger = issue.what_would_resolve_it or trigger
+        return "somewhat specific", "missing critical confirmation", omission_trigger, 10
+    if trigger:
+        return "somewhat specific", "unresolved constraint", trigger, 6
+    return "generic", "routine category only", "", 18
+
+
+def _extract_site_specific_trigger(issue: CanonicalIssue, candidates: list[str]) -> str:
+    category_terms = _SPECIFICITY_TERMS_BY_CATEGORY.get(issue.category, ())
+    for candidate in candidates:
+        cleaned = normalize_line(candidate)
+        if not cleaned:
+            continue
+        lowered = cleaned.lower()
+        if any(term in lowered for term in _GENERIC_CATEGORY_TERMS):
+            continue
+        if any(term in lowered for term in category_terms):
+            return cleaned
+    if issue.evidence_basis in {"omission_only", "routine_missing_support"}:
+        return ""
+    for candidate in candidates:
+        cleaned = normalize_line(candidate)
+        if not cleaned:
+            continue
+        lowered = cleaned.lower()
+        if any(term in lowered for term in ("unresolved", "unclear", "not confirmed", "not defined", "buyer-facing", "budgetary")):
+            return cleaned
+    return ""
+
+
 def _calibrate_canonical_issues(
     issues: list[CanonicalIssue],
     *,
@@ -1272,6 +1412,12 @@ def _calibrate_canonical_issues(
         issue.evidence_basis = _classify_evidence_basis(issue, omission_status_by_issue_id)
         issue.materiality = _classify_materiality(issue)
         issue.normal_friction_flag = _is_normal_friction(issue)
+        (
+            issue.specificity_level,
+            issue.abnormality_basis,
+            issue.site_specific_trigger,
+            issue.genericity_penalty,
+        ) = _specificity_profile(issue)
         issue.issue_strength = _classify_issue_strength(issue)
         issue.false_positive_risk = _classify_false_positive_risk(issue)
         issue.decision_relevant = _is_decision_relevant(issue)
@@ -1363,6 +1509,8 @@ def _is_decision_relevant(issue: CanonicalIssue) -> bool:
         and issue.evidence_basis in {"omission_only", "routine_missing_support", "weak_inference"}
     ):
         return False
+    if issue.specificity_level == "generic" and not issue.site_specific_trigger:
+        return False
     if "Closing" in issue.gating_flags:
         return True
     if issue.materiality == "high" and issue.false_positive_risk != "high":
@@ -1386,6 +1534,8 @@ def _top_line_filter_reasons(issue: CanonicalIssue) -> list[str]:
         reasons.append("high false-positive risk")
     if issue.normal_friction_flag:
         reasons.append("normal process friction")
+    if issue.specificity_level == "generic" and not issue.site_specific_trigger:
+        reasons.append("generic category presence without site-specific trigger")
     if issue.evidence_basis in {"omission_only", "routine_missing_support"} and issue.materiality != "high":
         reasons.append("omission-only without high criticality")
     if not issue.decision_relevant:
@@ -1395,6 +1545,14 @@ def _top_line_filter_reasons(issue: CanonicalIssue) -> list[str]:
 
 def _calibration_notes(issue: CanonicalIssue) -> list[str]:
     notes = [f"evidence basis={issue.evidence_basis}"]
+    notes.append(
+        "specificity="
+        f"{issue.specificity_level}, "
+        f"abnormality basis={issue.abnormality_basis}, "
+        f"genericity penalty={issue.genericity_penalty}"
+    )
+    if issue.site_specific_trigger:
+        notes.append(f"site-specific trigger={issue.site_specific_trigger}")
     if issue.normal_friction_flag:
         notes.append("looks closer to routine process friction than a deal-specific problem")
     if issue.evidence_basis == "omission_only":
@@ -1553,6 +1711,13 @@ def _calibration_adjustment(issue: CanonicalIssue) -> int:
     materiality_adjustment = {"high": 12, "medium": 0, "low": -12}.get(issue.materiality, 0)
     decision_adjustment = 8 if issue.decision_relevant else -18
     friction_penalty = -16 if issue.normal_friction_flag else 0
+    specificity_adjustment = {
+        "direct abnormal finding": 8,
+        "unresolved constraint": 4,
+        "conflict": 8,
+        "missing critical confirmation": 2,
+        "routine category only": 0,
+    }.get(issue.abnormality_basis, 0) - issue.genericity_penalty
     return (
         basis_adjustment
         + strength_adjustment
@@ -1560,6 +1725,7 @@ def _calibration_adjustment(issue: CanonicalIssue) -> int:
         + materiality_adjustment
         + decision_adjustment
         + friction_penalty
+        + specificity_adjustment
     )
 
 
