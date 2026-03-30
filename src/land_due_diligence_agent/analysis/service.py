@@ -12,6 +12,7 @@ from land_due_diligence_agent.analysis.heuristics import (
     identify_missing_items,
     infer_entitlement_status,
 )
+from land_due_diligence_agent.analysis.learning import build_learning_engine, default_learning_snapshot_path
 from land_due_diligence_agent.analysis.issue_registry import (
     build_adversarial_challenges_from_registry,
     build_canonical_issue_registry,
@@ -97,6 +98,11 @@ def run_analysis(
         documents=documents,
         logger=logger,
     )
+    learning_engine = build_learning_engine(
+        records=precedent_engine.records,
+        deal_metadata=precedent_engine.deal_metadata,
+        snapshot_path=default_learning_snapshot_path(precedent_engine.store_path),
+    )
     registry = build_canonical_issue_registry(
         key_risks=key_risks,
         contradictions=contradictions,
@@ -104,6 +110,7 @@ def run_analysis(
         document_analyses=document_analyses,
         merge_arbiter=_merge_arbiter_for_provider(llm_provider, logger) if analysis_mode == "full" else None,
         precedent_retriever=precedent_engine.retrieve,
+        learning_retriever=learning_engine.retrieve,
         deal_metadata=precedent_engine.deal_metadata,
     )
     recommendation = build_recommendation_from_registry(registry)

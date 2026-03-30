@@ -566,6 +566,25 @@ def _build_issue_analysis_markdown(synthesis: DealSynthesis) -> str:
             )
             lines.append(f"- Read: {_compress_statement(issue.precedent_summary.reasoning, max_words=18)}")
             lines.append("")
+        if issue.learning_summary.sample_size:
+            lines.append("### Learned Read")
+            lines.append(f"- Sample Size: {issue.learning_summary.sample_size}")
+            lines.append(f"- Real-Issue Rate: {_format_percentage(issue.learning_summary.real_issue_rate)}")
+            lines.append(f"- False-Positive Rate: {_format_percentage(issue.learning_summary.false_positive_rate)}")
+            lines.append(f"- Material-Issue Rate: {_format_percentage(issue.learning_summary.material_issue_rate)}")
+            lines.append(f"- Decision-Relevant Rate: {_format_percentage(issue.learning_summary.decision_relevant_rate)}")
+            lines.append(f"- Impact Rate: {_format_percentage(issue.learning_summary.impact_rate)}")
+            if issue.learning_summary.matched_features:
+                lines.append(
+                    "- Matched Features: "
+                    + ", ".join(issue.learning_summary.matched_features[:4])
+                )
+            lines.append(
+                f"- Calibration: {issue.learning_summary.confidence_adjustment} "
+                f"({issue.learning_summary.score_adjustment:+d} priority points)"
+            )
+            lines.append(f"- Read: {_compress_statement(issue.learning_summary.reasoning, max_words=20)}")
+            lines.append("")
 
     return "\n".join(lines).rstrip() + "\n"
 
@@ -767,6 +786,7 @@ def _build_issue_registry_debug_markdown(
         lines.append(
             f"- Score Adjustments: calibration={issue.priority_score.calibration_adjustment:+d}, "
             f"precedent={issue.priority_score.precedent_adjustment:+d}, "
+            f"learning={issue.priority_score.learning_adjustment:+d}, "
             f"evaluator={issue.priority_score.evaluator_adjustment:+d}"
         )
         lines.append(f"- Consequence Cost: {issue.likely_cost_effect or 'n/a'}")
@@ -815,6 +835,23 @@ def _build_issue_registry_debug_markdown(
                 f"score adjustment={issue.precedent_summary.score_adjustment:+d}"
             )
             lines.append(f"- Precedent Read: {issue.precedent_summary.reasoning}")
+        if issue.learning_summary.sample_size:
+            lines.append(
+                f"- Learning Summary: sample={issue.learning_summary.sample_size}, "
+                f"real rate={_format_percentage(issue.learning_summary.real_issue_rate)}, "
+                f"false-positive rate={_format_percentage(issue.learning_summary.false_positive_rate)}, "
+                f"material rate={_format_percentage(issue.learning_summary.material_issue_rate)}, "
+                f"decision-relevant rate={_format_percentage(issue.learning_summary.decision_relevant_rate)}, "
+                f"impact rate={_format_percentage(issue.learning_summary.impact_rate)}, "
+                f"confidence adjustment={issue.learning_summary.confidence_adjustment}, "
+                f"score adjustment={issue.learning_summary.score_adjustment:+d}"
+            )
+            if issue.learning_summary.matched_features:
+                lines.append(
+                    "- Learning Features: "
+                    + ", ".join(issue.learning_summary.matched_features[:6])
+                )
+            lines.append(f"- Learning Read: {issue.learning_summary.reasoning}")
         if issue.precedent_references:
             lines.append("- Retrieved Precedent Matches:")
             for reference in issue.precedent_references[:5]:

@@ -23,6 +23,7 @@ from land_due_diligence_agent.models import (
     IssueCluster,
     IssueDependencyLink,
     IssuePriorityScore,
+    LearningSummary,
     LLMCallFailure,
     OmissionAssessment,
     OutputIssueSelection,
@@ -163,6 +164,7 @@ class OutputWriterTests(unittest.TestCase):
                 evidence_confidence=5,
                 ic_sensitivity=4,
                 precedent_adjustment=6,
+                learning_adjustment=4,
             ),
             precedent_references=[
                 PrecedentReference(
@@ -193,6 +195,22 @@ class OutputWriterTests(unittest.TestCase):
                 sample_size=2,
                 sparse_data=False,
                 reasoning="Historical outcomes are mixed, so the current issue should stay anchored to the cited deal evidence first.",
+            ),
+            learning_summary=LearningSummary(
+                sample_size=4,
+                real_issue_rate=0.75,
+                false_positive_rate=0.25,
+                material_issue_rate=0.75,
+                decision_relevant_rate=0.75,
+                impact_rate=0.5,
+                matched_features=[
+                    "issue_id=environmental-followup (n=4)",
+                    "category=Environmental Risks (n=5)",
+                    "stage=acquisition-dd (n=7)",
+                ],
+                confidence_adjustment="up",
+                score_adjustment=4,
+                reasoning="Reviewer-labeled history says this issue usually proves real and decision-relevant when it appears in similar deals.",
             ),
             dependency_type="legal",
             critical_path_flag=True,
@@ -453,6 +471,7 @@ class OutputWriterTests(unittest.TestCase):
             self.assertIn("Suggested Next Research Step", issue_content)
             self.assertIn("Dependency Read", issue_content)
             self.assertIn("Downstream Consequences", issue_content)
+            self.assertIn("Learned Read", issue_content)
             debug_content = (output_dir / "11_issue_registry_debug.md").read_text(encoding="utf-8")
             self.assertIn("Issue Registry Debug", debug_content)
             self.assertIn("Canonical Issue Registry", debug_content)
@@ -480,8 +499,11 @@ class OutputWriterTests(unittest.TestCase):
             self.assertIn("Average Sentence Length", debug_content)
             self.assertIn("Compression Score", debug_content)
             self.assertIn("Precedent Summary", debug_content)
+            self.assertIn("Learning Summary", debug_content)
+            self.assertIn("Learning Features", debug_content)
             self.assertIn("Retrieved Precedent Matches", debug_content)
             self.assertIn("precedent=+6", debug_content)
+            self.assertIn("learning=+4", debug_content)
             self.assertIn("Dependency Graph", debug_content)
             self.assertIn("Causal Clusters", debug_content)
             self.assertIn("## Evaluator", debug_content)

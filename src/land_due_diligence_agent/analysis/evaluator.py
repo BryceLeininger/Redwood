@@ -96,6 +96,8 @@ def _evaluator_priority(issue: CanonicalIssue) -> int:
     score += 10 if "Underwriting confidence" in issue.gating_flags else 0
     score += 8 if issue.decision_relevant else -12
     score += issue.precedent_summary.score_adjustment
+    if issue.learning_summary.sample_size >= 3:
+        score += issue.learning_summary.score_adjustment
     score -= 12 if issue.normal_friction_flag else 0
     score -= 10 if _unsupported_implication(issue) else 0
     return score

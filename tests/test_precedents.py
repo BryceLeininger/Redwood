@@ -8,6 +8,7 @@ import unittest
 from pathlib import Path
 
 from land_due_diligence_agent.analysis.issue_registry import build_canonical_issue_registry
+from land_due_diligence_agent.analysis.learning import build_learning_engine
 from land_due_diligence_agent.analysis.precedents import (
     PrecedentEngine,
     ingest_reviewer_feedback_files,
@@ -263,6 +264,159 @@ class PrecedentTests(unittest.TestCase):
             self.assertEqual(stored[0].actual_outcome, "cost")
             self.assertEqual(stored[0].resolved_by, "seller")
             self.assertTrue(stored[0].decision_relevant)
+
+    def test_learning_engine_upgrades_repeated_real_issue_pattern(self) -> None:
+        records = [
+            PrecedentIssueRecord(
+                precedent_id=f"u{i}",
+                deal_name=f"Utility Deal {i}",
+                issue_type="utility-capacity",
+                canonical_title="Utility capacity confirmation unresolved",
+                category="Utilities / Infrastructure Issues",
+                issue_id="utility-capacity",
+                deal_id=f"utility-{i}",
+                description="Provider will-serve stayed open and later delayed execution.",
+                deal_metadata=DealMetadata(stage="acquisition-dd", region="west", product="multifamily"),
+                evidence_basis="direct_unresolved_risk",
+                issue_strength="strong",
+                real_issue=True,
+                materiality="high",
+                decision_relevant=True,
+                actual_outcome="delay",
+                false_positive_flag=False,
+                resolved_by="seller",
+            )
+            for i in range(4)
+        ]
+        engine = build_learning_engine(
+            records=records,
+            deal_metadata=DealMetadata(stage="acquisition-dd", region="west", product="multifamily"),
+        )
+
+        summary = engine.retrieve(
+            CanonicalIssue(
+                issue_id="utility-capacity",
+                title="Utility capacity confirmation unresolved",
+                category="Utilities / Infrastructure Issues",
+                status="open",
+                issue_type="utility-capacity",
+                evidence_basis="direct_unresolved_risk",
+                issue_strength="strong",
+                decision_action="verify",
+            )
+        )
+
+        self.assertGreaterEqual(summary.sample_size, 3)
+        self.assertEqual(summary.confidence_adjustment, "up")
+        self.assertGreater(summary.score_adjustment, 0)
+        self.assertGreater(summary.real_issue_rate or 0.0, 0.7)
+
+    def test_learning_engine_downgrades_repeated_false_positive_pattern(self) -> None:
+        records = [
+            PrecedentIssueRecord(
+                precedent_id=f"d{i}",
+                deal_name=f"Drainage Deal {i}",
+                issue_type="stormwater-drainage",
+                canonical_title="Stormwater support not provided",
+                category="Flood / Drainage Issues",
+                issue_id="stormwater-drainage",
+                deal_id=f"drainage-{i}",
+                description="Missing package support later proved routine.",
+                deal_metadata=DealMetadata(stage="acquisition-dd", region="west", product="single-family"),
+                evidence_basis="omission_only",
+                issue_strength="weak",
+                real_issue=False,
+                materiality="low",
+                decision_relevant=False,
+                actual_outcome="none",
+                false_positive_flag=True,
+                resolved_by="seller",
+            )
+            for i in range(4)
+        ]
+        engine = build_learning_engine(
+            records=records,
+            deal_metadata=DealMetadata(stage="acquisition-dd", region="west", product="single-family"),
+        )
+
+        summary = engine.retrieve(
+            CanonicalIssue(
+                issue_id="stormwater-drainage",
+                title="Stormwater support not provided",
+                category="Flood / Drainage Issues",
+                status="not found",
+                issue_type="stormwater-drainage",
+                evidence_basis="omission_only",
+                issue_strength="weak",
+                decision_action="monitor",
+                false_positive_risk="high",
+            )
+        )
+
+        self.assertGreaterEqual(summary.sample_size, 3)
+        self.assertEqual(summary.confidence_adjustment, "down")
+        self.assertLess(summary.score_adjustment, 0)
+        self.assertGreater(summary.false_positive_rate or 0.0, 0.6)
+
+    def test_registry_applies_learning_adjustment_and_snapshot(self) -> None:
+        records = [
+            PrecedentIssueRecord(
+                precedent_id=f"t{i}",
+                deal_name=f"Title Deal {i}",
+                issue_type="title-access-clearance",
+                canonical_title="Title access clearance unresolved",
+                category="Title / Access Concerns",
+                issue_id="title-access-clearance",
+                deal_id=f"title-{i}",
+                description="Access exception delayed or constrained the deal.",
+                deal_metadata=DealMetadata(stage="acquisition-dd", region="west", product="multifamily"),
+                evidence_basis="direct_unresolved_risk",
+                issue_strength="strong",
+                real_issue=True,
+                materiality="high",
+                decision_relevant=True,
+                actual_outcome="delay",
+                false_positive_flag=False,
+            )
+            for i in range(3)
+        ]
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            snapshot_path = Path(temp_dir) / "learned_issue_model.json"
+            engine = build_learning_engine(
+                records=records,
+                deal_metadata=DealMetadata(stage="acquisition-dd", region="west", product="multifamily"),
+                snapshot_path=snapshot_path,
+            )
+
+            registry = build_canonical_issue_registry(
+                key_risks=[
+                    RiskFinding(
+                        category="Title / Access Concerns",
+                        severity="high",
+                        summary="A title exception burdens the site entry condition.",
+                        issue="Title access clearance unresolved.",
+                        why_it_matters="This goes to access control and closability.",
+                        likely_implication="The entry condition stays provisional until the burden is cleared or endorsed.",
+                        source_documents=["Title Report"],
+                        citations=[Citation(document_name="Title Report", chunk_id="page-0001", page_number=1)],
+                        gating_flags=["Closing", "Underwriting confidence"],
+                    )
+                ],
+                contradictions=[],
+                omission_assessments=[],
+                document_analyses=[],
+                learning_retriever=engine.retrieve,
+                deal_metadata=engine.deal_metadata,
+            )
+
+            issue = registry.issues[0]
+            self.assertTrue(snapshot_path.exists())
+            snapshot = json.loads(snapshot_path.read_text(encoding="utf-8"))
+            self.assertIn("feature_stats", snapshot)
+            self.assertGreaterEqual(issue.learning_summary.sample_size, 3)
+            self.assertEqual(issue.learning_summary.confidence_adjustment, "up")
+            self.assertGreater(issue.priority_score.learning_adjustment, 0)
 
 
 if __name__ == "__main__":

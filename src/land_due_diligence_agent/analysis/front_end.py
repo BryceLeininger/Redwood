@@ -601,6 +601,12 @@ def _process_friction_flag(issue: CanonicalIssue) -> bool:
         and issue.evidence_basis in {"omission_only", "routine_missing_support", "weak_inference"}
     ):
         return True
+    if (
+        issue.learning_summary.confidence_adjustment == "down"
+        and issue.learning_summary.sample_size >= 3
+        and issue.evidence_basis in {"omission_only", "routine_missing_support", "weak_inference"}
+    ):
+        return True
     return False
 
 
@@ -623,12 +629,14 @@ def _issue_normality(issue: CanonicalIssue) -> tuple[str, str]:
     score += 1 if issue.issue_strength == "strong" else 0
     score += 1 if issue.decision_relevant else 0
     score += 1 if issue.precedent_summary.confidence_adjustment == "up" and issue.precedent_summary.sample_size >= 2 else 0
+    score += 1 if issue.learning_summary.confidence_adjustment == "up" and issue.learning_summary.sample_size >= 3 else 0
     score -= 4 if issue.process_friction_flag else 0
     score -= 3 if issue.evidence_basis == "routine_missing_support" else 0
     score -= 2 if issue.evidence_basis == "omission_only" else 0
     score -= 2 if issue.false_positive_risk == "high" else 1 if issue.false_positive_risk == "medium" else 0
     score -= 1 if issue.information_status == "missing but normally expected" else 0
     score -= 1 if issue.precedent_summary.confidence_adjustment == "down" and issue.precedent_summary.sample_size >= 2 else 0
+    score -= 1 if issue.learning_summary.confidence_adjustment == "down" and issue.learning_summary.sample_size >= 3 else 0
 
     if issue.specificity_level == "generic" and not issue.site_specific_trigger and not issue.blocking_flag:
         return "routine", "This mostly reflects category presence or normal diligence background noise rather than a site-specific issue."

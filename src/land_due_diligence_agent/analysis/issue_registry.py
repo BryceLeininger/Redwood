@@ -30,6 +30,7 @@ from land_due_diligence_agent.models import (
     IssuePriorityScore,
     MergeDecision,
     MergeArbitrationRecord,
+    LearningSummary,
     OmissionAssessment,
     OutputIssueSelection,
     PrecedentCalibration,
@@ -77,6 +78,7 @@ _RELATION_ORDER = {
 
 MergeArbiter = Callable[[IssueFragment, IssueFragment], tuple[str, str] | None]
 PrecedentRetriever = Callable[[CanonicalIssue], PrecedentCalibration | None]
+LearningRetriever = Callable[[CanonicalIssue], LearningSummary | None]
 
 _ALLOWED_CROSS_CATEGORY_MERGES = {
     frozenset({"Budget / Cost Reliability", "Title / Access Concerns"}),
@@ -510,6 +512,7 @@ def build_canonical_issue_registry(
     weights: PriorityWeights | None = None,
     merge_arbiter: MergeArbiter | None = None,
     precedent_retriever: PrecedentRetriever | None = None,
+    learning_retriever: LearningRetriever | None = None,
     deal_metadata: DealMetadata | None = None,
 ) -> CanonicalIssueRegistry:
     """Build the canonical issue registry from raw deal signals."""
@@ -530,6 +533,7 @@ def build_canonical_issue_registry(
         issues,
         omission_assessments=omission_assessments,
         precedent_retriever=precedent_retriever,
+        learning_retriever=learning_retriever,
     )
     scored_issues = _score_canonical_issues(issues, weights)
     registry = CanonicalIssueRegistry(
@@ -1403,6 +1407,7 @@ def _calibrate_canonical_issues(
     *,
     omission_assessments: list[OmissionAssessment],
     precedent_retriever: PrecedentRetriever | None,
+    learning_retriever: LearningRetriever | None,
 ) -> None:
     omission_status_by_issue_id = {
         _dependency_key_for_omission(assessment).replace("_", "-"): assessment.status
@@ -1427,6 +1432,10 @@ def _calibrate_canonical_issues(
                 issue.precedent_references = calibration.matches
                 issue.precedent_summary = calibration.summary
                 _apply_precedent_calibration(issue)
+        if learning_retriever is not None:
+            learning_summary = learning_retriever(issue)
+            if learning_summary is not None:
+                issue.learning_summary = learning_summary
         issue.decision_relevant = _is_decision_relevant(issue)
         issue.top_line_filter_reasons = _top_line_filter_reasons(issue)
         issue.top_line_eligible = not issue.top_line_filter_reasons
@@ -1553,6 +1562,13 @@ def _calibration_notes(issue: CanonicalIssue) -> list[str]:
     )
     if issue.site_specific_trigger:
         notes.append(f"site-specific trigger={issue.site_specific_trigger}")
+    if issue.learning_summary.sample_size:
+        notes.append(
+            "learning="
+            f"{issue.learning_summary.confidence_adjustment}, "
+            f"sample={issue.learning_summary.sample_size}, "
+            f"score adjustment={issue.learning_summary.score_adjustment:+d}"
+        )
     if issue.normal_friction_flag:
         notes.append("looks closer to routine process friction than a deal-specific problem")
     if issue.evidence_basis == "omission_only":
@@ -1664,6 +1680,7 @@ def _score_issue(issue: CanonicalIssue, weights: PriorityWeights) -> IssuePriori
     ic_sensitivity = max(base[7], 5 if issue.status in {"conflicted", "not found"} else 0)
     calibration_adjustment = _calibration_adjustment(issue)
     precedent_adjustment = issue.precedent_summary.score_adjustment * weights.precedent_signal
+    learning_adjustment = issue.learning_summary.score_adjustment * weights.learning_signal
 
     total = (
         cost_exposure * weights.cost_exposure
@@ -1678,6 +1695,7 @@ def _score_issue(issue: CanonicalIssue, weights: PriorityWeights) -> IssuePriori
         + ic_sensitivity * weights.ic_sensitivity
         + calibration_adjustment
         + precedent_adjustment
+        + learning_adjustment
     )
     return IssuePriorityScore(
         total=total,
@@ -1693,6 +1711,7 @@ def _score_issue(issue: CanonicalIssue, weights: PriorityWeights) -> IssuePriori
         ic_sensitivity=ic_sensitivity,
         calibration_adjustment=calibration_adjustment,
         precedent_adjustment=precedent_adjustment,
+        learning_adjustment=learning_adjustment,
         evaluator_adjustment=0,
     )
 

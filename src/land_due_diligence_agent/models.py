@@ -221,6 +221,7 @@ class PriorityWeights:
     seller_shiftability_penalty: int = 3
     ic_sensitivity: int = 5
     precedent_signal: int = 1
+    learning_signal: int = 1
 
 
 @dataclass(slots=True)
@@ -240,6 +241,7 @@ class IssuePriorityScore:
     ic_sensitivity: int = 0
     calibration_adjustment: int = 0
     precedent_adjustment: int = 0
+    learning_adjustment: int = 0
     evaluator_adjustment: int = 0
 
 
@@ -320,6 +322,22 @@ class PrecedentCalibration:
 
     matches: list[PrecedentReference] = field(default_factory=list)
     summary: PrecedentSummary = field(default_factory=PrecedentSummary)
+
+
+@dataclass(slots=True)
+class LearningSummary:
+    """Local learned calibration built from reviewer-labeled historical records."""
+
+    sample_size: int = 0
+    real_issue_rate: float | None = None
+    false_positive_rate: float | None = None
+    material_issue_rate: float | None = None
+    decision_relevant_rate: float | None = None
+    impact_rate: float | None = None
+    matched_features: list[str] = field(default_factory=list)
+    confidence_adjustment: str = "neutral"
+    score_adjustment: int = 0
+    reasoning: str = ""
 
 
 @dataclass(slots=True)
@@ -465,6 +483,7 @@ class CanonicalIssue:
     calibration_notes: list[str] = field(default_factory=list)
     precedent_references: list[PrecedentReference] = field(default_factory=list)
     precedent_summary: PrecedentSummary = field(default_factory=PrecedentSummary)
+    learning_summary: LearningSummary = field(default_factory=LearningSummary)
     dependency_type: str = ""
     upstream_dependencies: list[IssueDependencyLink] = field(default_factory=list)
     downstream_dependencies: list[IssueDependencyLink] = field(default_factory=list)
