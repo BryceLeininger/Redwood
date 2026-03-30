@@ -242,6 +242,142 @@ class AnalysisTests(unittest.TestCase):
         self.assertIsNotNone(utility_issue)
         self.assertGreaterEqual(len(utility_issue.merged_fragment_ids), 3)
         self.assertEqual(utility_issue.decision_action, "condition closing")
+        self.assertEqual(utility_issue.title, "Utility capacity confirmation unresolved")
+
+    def test_standardized_titles_use_controlled_vocabulary_and_length_limits(self) -> None:
+        registry = build_canonical_issue_registry(
+            key_risks=[
+                RiskFinding(
+                    category="Utilities / Infrastructure Issues",
+                    severity="high",
+                    summary="Utility provider coordination remains open.",
+                    issue="Potential utility coordination issues may impact schedule.",
+                    why_it_matters="Provider commitment is still required.",
+                    likely_implication="Schedule remains exposed.",
+                    source_documents=["Utility Memo"],
+                ),
+                RiskFinding(
+                    category="Offsite Obligations",
+                    severity="high",
+                    summary="Frontage scope still sits with the buyer.",
+                    issue="Frontage improvements and offsite work requirements remain undefined.",
+                    why_it_matters="Scope owner remains open.",
+                    likely_implication="Buyer-facing cost remains exposed.",
+                    source_documents=["Offsite Memo"],
+                ),
+                RiskFinding(
+                    category="Geotechnical Risks",
+                    severity="high",
+                    summary="Soils recommendations still control grading and foundation scope.",
+                    issue="Geotechnical recommendations still need to be carried into plan and budget.",
+                    why_it_matters="Design assumptions remain exposed.",
+                    likely_implication="Cost and design remain exposed.",
+                    source_documents=["Geotech Memo"],
+                ),
+                RiskFinding(
+                    category="Title / Access Concerns",
+                    severity="high",
+                    summary="Title exceptions still affect the current access layout.",
+                    issue="Title exceptions could potentially affect access.",
+                    why_it_matters="Closability remains exposed.",
+                    likely_implication="Closing remains conditional.",
+                    source_documents=["Title Memo"],
+                ),
+            ],
+            contradictions=[],
+            omission_assessments=[],
+            document_analyses=[],
+        )
+
+        issue_by_id = {issue.issue_id: issue for issue in registry.issues}
+        self.assertEqual(issue_by_id["utility-capacity"].title, "Utility capacity confirmation unresolved")
+        self.assertEqual(issue_by_id["offsite-frontage"].title, "Offsite improvement scope buyer-facing")
+        self.assertEqual(issue_by_id["geotechnical-scope"].title, "Geotechnical recommendations not incorporated")
+        self.assertEqual(issue_by_id["title-access-clearance"].title, "Title access clearance unresolved")
+        for issue in registry.issues:
+            self.assertLessEqual(len(issue.title.split()), 10)
+            self.assertNotRegex(issue.title.lower(), r"\b(risk|issue|concern|potentially|possibly)\b")
+
+    def test_title_normalization_preserves_raw_titles_for_debug(self) -> None:
+        registry = build_canonical_issue_registry(
+            key_risks=[
+                RiskFinding(
+                    category="Utilities / Infrastructure Issues",
+                    severity="high",
+                    summary="Provider confirmation remains missing.",
+                    issue="Utility confirmation missing.",
+                    why_it_matters="Provider commitment is still required.",
+                    likely_implication="Schedule remains exposed.",
+                    source_documents=["Utility Memo"],
+                ),
+                RiskFinding(
+                    category="Schedule Risks",
+                    severity="medium",
+                    summary="Utility path remains open.",
+                    issue="Utility capacity not confirmed.",
+                    why_it_matters="The utility path still depends on provider coordination.",
+                    likely_implication="Schedule remains provisional.",
+                    source_documents=["Schedule Memo"],
+                ),
+            ],
+            contradictions=[],
+            omission_assessments=[
+                OmissionAssessment(
+                    item="Utility availability / will-serve documentation",
+                    category="Utilities / Infrastructure Issues",
+                    status="not found",
+                    rationale="No current will-serve letter is in the package.",
+                )
+            ],
+            document_analyses=[],
+        )
+
+        utility_issue = next(issue for issue in registry.issues if issue.issue_id == "utility-capacity")
+        self.assertEqual(utility_issue.title, "Utility capacity confirmation unresolved")
+        self.assertTrue(any("Utility confirmation missing" in title for title in utility_issue.merged_fragment_titles))
+        self.assertTrue(any("Utility capacity not confirmed" in title for title in utility_issue.merged_fragment_titles))
+
+    def test_normalized_titles_are_unique_and_category_prefixed(self) -> None:
+        registry = build_canonical_issue_registry(
+            key_risks=[
+                RiskFinding(
+                    category="Environmental Risks",
+                    severity="high",
+                    summary="Environmental follow-up remains open.",
+                    issue="Environmental follow-up is not fully closed.",
+                    why_it_matters="Environmental scope still affects underwriting confidence.",
+                    likely_implication="Mitigation cost remains open.",
+                    source_documents=["Phase I"],
+                ),
+                RiskFinding(
+                    category="Budget / Cost Reliability",
+                    severity="medium",
+                    summary="Pricing still reads as budgetary.",
+                    issue="Cost package is still budgetary.",
+                    why_it_matters="Basis remains provisional.",
+                    likely_implication="Basis can move if pricing tightens.",
+                    source_documents=["Budget"],
+                ),
+                RiskFinding(
+                    category="Schedule Risks",
+                    severity="medium",
+                    summary="The critical path still depends on unconfirmed assumptions.",
+                    issue="Critical path still relies on unconfirmed assumptions.",
+                    why_it_matters="Timing remains provisional.",
+                    likely_implication="Map timing remains open.",
+                    source_documents=["Schedule"],
+                ),
+            ],
+            contradictions=[],
+            omission_assessments=[],
+            document_analyses=[],
+        )
+
+        titles = [issue.title for issue in registry.issues]
+        self.assertEqual(len(titles), len(set(titles)))
+        self.assertTrue(any(title.startswith("Environmental") for title in titles))
+        self.assertTrue(any(title.startswith("Cost") for title in titles))
+        self.assertTrue(any(title.startswith("Schedule") for title in titles))
 
     def test_registry_ranking_and_output_selection_are_stable(self) -> None:
         documents = [

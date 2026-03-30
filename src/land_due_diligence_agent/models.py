@@ -124,6 +124,7 @@ class IssueFragment:
     category: str
     dependency_key: str
     status: str
+    source_title: str = ""
     core_facts: list[str] = field(default_factory=list)
     best_evidence: list[str] = field(default_factory=list)
     why_it_matters: str = ""

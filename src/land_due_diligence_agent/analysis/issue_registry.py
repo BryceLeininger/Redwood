@@ -285,6 +285,69 @@ _ISSUE_TEMPLATE_BY_KEY = {
     },
 }
 
+_STANDARD_TITLE_BY_KEY = {
+    "title_access_clearance": "Title access clearance unresolved",
+    "entitlement_conditions": "Entitlement condition closeout unresolved",
+    "geotechnical_scope": "Geotechnical recommendations not incorporated",
+    "geotech_budget_alignment": "Geotechnical scope not in budget",
+    "stormwater_drainage": "Stormwater drainage scope unresolved",
+    "fee_stack": "Fee schedule not confirmed",
+    "offsite_frontage": "Offsite improvement scope buyer-facing",
+    "utility_capacity": "Utility capacity confirmation unresolved",
+    "environmental_followup": "Environmental follow-up unresolved",
+    "budget_reliability": "Cost package remains budgetary",
+    "schedule_path": "Schedule assumptions not confirmed",
+}
+
+_CATEGORY_TITLE_PREFIX = {
+    "Title / Access Concerns": "Title",
+    "Entitlement Status": "Entitlement",
+    "Environmental Risks": "Environmental",
+    "Geotechnical Risks": "Geotechnical",
+    "Flood / Drainage Issues": "Stormwater",
+    "Utilities / Infrastructure Issues": "Utility",
+    "Offsite Obligations": "Offsite",
+    "Fee / Exaction Burden": "Fee",
+    "Budget / Cost Reliability": "Cost",
+    "Schedule Risks": "Schedule",
+}
+
+_CATEGORY_FALLBACK_SUBJECT = {
+    "Title / Access Concerns": "access clearance",
+    "Entitlement Status": "condition status",
+    "Environmental Risks": "follow-up",
+    "Geotechnical Risks": "scope",
+    "Flood / Drainage Issues": "drainage scope",
+    "Utilities / Infrastructure Issues": "capacity confirmation",
+    "Offsite Obligations": "improvement scope",
+    "Fee / Exaction Burden": "schedule",
+    "Budget / Cost Reliability": "support",
+    "Schedule Risks": "assumptions",
+}
+
+_CANONICAL_TITLE_VOCAB = (
+    (("utility", "capacity"), "Utility capacity confirmation"),
+    (("utility", "will serve"), "Utility capacity confirmation"),
+    (("utility", "provider"), "Utility coordination status"),
+    (("offsite", "frontage"), "Offsite improvement scope"),
+    (("offsite", "improvement"), "Offsite improvement scope"),
+    (("title", "access"), "Title access clearance"),
+    (("title", "exception"), "Title exception clearance"),
+    (("environmental", "remediation"), "Environmental follow-up"),
+    (("environmental", "mitigation"), "Environmental follow-up"),
+    (("environmental", "wetland"), "Environmental follow-up"),
+    (("geotechnical", "recommend"), "Geotechnical recommendations"),
+    (("geotech", "recommend"), "Geotechnical recommendations"),
+    (("stormwater",), "Stormwater drainage scope"),
+    (("drainage",), "Stormwater drainage scope"),
+    (("fee",), "Fee schedule"),
+    (("pricing",), "Cost package"),
+    (("budget",), "Cost package"),
+    (("document",), "Documentation"),
+    (("support",), "Support"),
+    (("schedule",), "Schedule assumptions"),
+)
+
 _PRIORITY_DIMENSIONS_BY_KEY = {
     "title_access_clearance": (2, 2, 1, 4, 5, 4, 2, 5),
     "entitlement_conditions": (2, 5, 3, 5, 3, 5, 2, 5),
@@ -370,6 +433,7 @@ def build_canonical_issue_registry(
         fragments,
         merge_arbiter=merge_arbiter,
     )
+    _normalize_issue_titles(issues)
     _calibrate_canonical_issues(
         issues,
         omission_assessments=omission_assessments,
@@ -763,6 +827,7 @@ def _build_issue_fragments(
                 fragment_id=f"risk-{index:02d}-{slugify(risk.category)}",
                 source_type="risk",
                 title=template["title"],
+                source_title=normalize_line(risk.issue or risk.summary or template["title"]),
                 category=template["category"],
                 dependency_key=dependency_key,
                 status="open",
@@ -796,6 +861,7 @@ def _build_issue_fragments(
                 fragment_id=f"contradiction-{index:02d}-{slugify(dependency_key)}",
                 source_type="contradiction",
                 title=template["title"],
+                source_title=normalize_line(contradiction.description or template["title"]),
                 category=template["category"],
                 dependency_key=dependency_key,
                 status="conflicted",
@@ -828,6 +894,7 @@ def _build_issue_fragments(
                 fragment_id=f"omission-{index:02d}-{slugify(omission.item)}",
                 source_type="omission",
                 title=template["title"],
+                source_title=normalize_line(omission.item or template["title"]),
                 category=template["category"],
                 dependency_key=dependency_key,
                 status=omission.status,
@@ -1088,7 +1155,10 @@ def _merge_issue_fragments(
                     if flag
                 )[:4],
                 merged_fragment_ids=[fragment.fragment_id for fragment in ordered_fragments],
-                merged_fragment_titles=unique_preserve_order(fragment.title for fragment in ordered_fragments),
+                merged_fragment_titles=unique_preserve_order(
+                    fragment.source_title or fragment.title
+                    for fragment in ordered_fragments
+                ),
             )
         )
         merge_decisions.append(
@@ -1096,7 +1166,10 @@ def _merge_issue_fragments(
                 canonical_issue_id=issue_id,
                 dependency_key=dependency_key,
                 fragment_ids=[fragment.fragment_id for fragment in ordered_fragments],
-                fragment_titles=unique_preserve_order(fragment.title for fragment in ordered_fragments),
+                fragment_titles=unique_preserve_order(
+                    fragment.source_title or fragment.title
+                    for fragment in ordered_fragments
+                ),
                 rationale=_merge_rationale(dependency_key, ordered_fragments),
             )
         )
@@ -1108,6 +1181,81 @@ def _merge_issue_fragments(
         )
     )
     return issues, merge_decisions, arbitration_records
+
+
+def _normalize_issue_titles(issues: list[CanonicalIssue]) -> None:
+    for issue in issues:
+        issue.title = _standardized_title_for_issue(issue)
+    _dedupe_standardized_titles(issues)
+
+
+def _standardized_title_for_issue(issue: CanonicalIssue) -> str:
+    dependency_key = issue.issue_id.replace("-", "_")
+    mapped_title = _STANDARD_TITLE_BY_KEY.get(dependency_key)
+    if mapped_title:
+        return mapped_title
+    raw_titles = issue.merged_fragment_titles or [issue.title]
+    raw_text = " ".join(
+        part
+        for part in [*raw_titles, issue.title, issue.what_would_resolve_it, issue.why_it_matters]
+        if part
+    )
+    subject = _canonical_subject_from_text(raw_text, issue.category)
+    status = _fallback_title_status(issue)
+    return _compress_issue_title(f"{subject} {status}".strip())
+
+
+def _canonical_subject_from_text(text: str, category: str) -> str:
+    normalized = text.lower()
+    for keywords, subject in _CANONICAL_TITLE_VOCAB:
+        if all(keyword in normalized for keyword in keywords):
+            return subject
+    prefix = _CATEGORY_TITLE_PREFIX.get(category, category.split("/")[0].strip())
+    subject = _CATEGORY_FALLBACK_SUBJECT.get(category, "status")
+    return f"{prefix} {subject}".strip()
+
+
+def _fallback_title_status(issue: CanonicalIssue) -> str:
+    if issue.status == "conflicted":
+        return "conflicting"
+    if issue.status == "not found":
+        return "not provided"
+    if issue.status == "unclear whether present":
+        return "unclear"
+    if issue.status == "present but weak":
+        return "support weak"
+    if issue.status == "partially resolved":
+        return "partially resolved"
+    return "unresolved"
+
+
+def _compress_issue_title(title: str) -> str:
+    normalized = normalize_line(title)
+    normalized = re.sub(r"\b(issue|risk|concern|potential|potentially|possibly)\b", "", normalized, flags=re.IGNORECASE)
+    normalized = re.sub(r"\bmay\b", "", normalized, flags=re.IGNORECASE)
+    normalized = re.sub(r"\s+", " ", normalized).strip(" -")
+    words: list[str] = []
+    seen: set[str] = set()
+    for word in normalized.split():
+        lowered = word.lower()
+        if lowered in seen and lowered not in {"not"}:
+            continue
+        seen.add(lowered)
+        words.append(word)
+    return " ".join(words[:10]).strip()
+
+
+def _dedupe_standardized_titles(issues: list[CanonicalIssue]) -> None:
+    by_title: dict[str, list[CanonicalIssue]] = defaultdict(list)
+    for issue in issues:
+        by_title[issue.title.lower()].append(issue)
+    for duplicates in by_title.values():
+        if len(duplicates) <= 1:
+            continue
+        for issue in duplicates:
+            qualifier = _CATEGORY_FALLBACK_SUBJECT.get(issue.category, issue.issue_id.replace("-", " "))
+            qualifier_word = qualifier.split()[-1]
+            issue.title = _compress_issue_title(f"{issue.title} {qualifier_word}")
 
 
 def _calibrate_canonical_issues(
@@ -1709,6 +1857,7 @@ def _fallback_fragments_from_documents(document_analyses: list[DocumentAnalysis]
                 fragment_id=f"fallback-{index:02d}",
                 source_type="document",
                 title=template["title"],
+                source_title=normalize_line(analysis.document.title or template["title"]),
                 category=template["category"],
                 dependency_key=dependency_key,
                 status="unclear whether present",

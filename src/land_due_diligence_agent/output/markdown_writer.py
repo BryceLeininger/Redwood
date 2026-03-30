@@ -659,8 +659,20 @@ def _build_issue_registry_debug_markdown(
 
     lines.extend(["## Canonical Issue Registry", ""])
     for issue in registry.issues:
+        original_title = issue.merged_fragment_titles[0] if issue.merged_fragment_titles else issue.title
+        normalization_occurred = any(
+            merged_title.strip().lower() != issue.title.strip().lower()
+            for merged_title in (issue.merged_fragment_titles or [issue.title])
+        )
         lines.append(f"### {issue.title}")
         lines.append(f"- Issue ID: `{issue.issue_id}`")
+        lines.append(f"- Original Extracted Title: {original_title}")
+        lines.append(f"- Normalized Title: {issue.title}")
+        lines.append(f"- Title Normalized: {normalization_occurred}")
+        lines.append(
+            "- Title Similarity Cluster: "
+            + (", ".join(issue.merged_fragment_titles) if issue.merged_fragment_titles else issue.title)
+        )
         lines.append(f"- Category: {issue.category}")
         lines.append(f"- Status: {issue.status}")
         lines.append(f"- Priority Score: {issue.priority_score.total}")
