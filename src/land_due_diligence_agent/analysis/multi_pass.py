@@ -120,6 +120,8 @@ def build_structured_facts(document_analyses: list[DocumentAnalysis]) -> list[St
         for risk in analysis.risks:
             if risk.category not in _CONFIG_BY_RISK_CATEGORY:
                 continue
+            if risk.generic_signal_only:
+                continue
             if analysis.focus_areas and risk.category not in analysis.focus_areas:
                 continue
 

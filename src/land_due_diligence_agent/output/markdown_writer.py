@@ -373,21 +373,76 @@ def _build_document_summaries_markdown(synthesis: DealSynthesis) -> str:
         if analysis.document.warnings:
             lines.append(f"- Extraction Warnings: {'; '.join(analysis.document.warnings)}")
         lines.append("")
-        lines.append(analysis.summary)
+        lines.append("### Front-End Read")
+        lines.append(f"- {_compress_statement(analysis.document_takeaway or analysis.summary, max_words=22, max_sentences=2, single_idea=False)}")
         lines.append("")
 
-        if analysis.risks:
-            lines.append("### Detected Risks")
-            for risk in analysis.risks:
-                lines.append(f"- {risk.category} ({risk.severity}): {risk.summary}")
+        if analysis.key_points:
+            lines.append("### What It Establishes")
+            lines.extend(
+                f"- {_compress_statement(point, max_words=22, max_sentences=1, single_idea=False)}"
+                for point in analysis.key_points[:3]
+            )
+            lines.append("")
+
+        if analysis.open_loops:
+            lines.append("### What It Still Leaves Open")
+            lines.extend(
+                f"- {_compress_statement(point, max_words=22, max_sentences=1, single_idea=False)}"
+                for point in analysis.open_loops[:3]
+            )
+            lines.append("")
+
+        linked_issues = _linked_issues_for_document(synthesis, analysis)
+        if linked_issues:
+            lines.append("### Linked Deal Issues")
+            for issue in linked_issues[:3]:
+                basis = issue.site_specific_trigger or (issue.core_facts[0] if issue.core_facts else issue.why_it_matters)
+                lines.append(
+                    f"- {issue.title} [{issue.front_end_flag}]: {_compress_statement(basis, max_words=18)}"
+                )
+            lines.append("")
+
+        specific_risks = [risk for risk in analysis.risks if not getattr(risk, "generic_signal_only", False)]
+        if specific_risks:
+            lines.append("### Document-Specific Signals")
+            for risk in specific_risks[:4]:
+                lines.append(
+                    f"- {risk.category} ({risk.severity}): {_compress_statement(risk.summary, max_words=20, max_sentences=1, single_idea=False)}"
+                )
             lines.append("")
 
         if analysis.seller_questions:
-            lines.append("### Document-Specific Questions")
-            for question in analysis.seller_questions:
-                lines.append(f"- {question}")
+            lines.append("### Next Questions")
+            for question in analysis.seller_questions[:5]:
+                lines.append(f"- {_compress_statement(question, max_words=20, max_sentences=1, single_idea=False)}")
             lines.append("")
     return "\n".join(lines).rstrip() + "\n"
+
+
+def _linked_issues_for_document(synthesis: DealSynthesis, analysis) -> list[CanonicalIssue]:
+    aliases = {
+        analysis.document.title.lower(),
+        analysis.document.relative_path.name.lower(),
+        analysis.document.relative_path.as_posix().lower(),
+    }
+    linked: list[CanonicalIssue] = []
+    for issue in synthesis.canonical_issue_registry.issues:
+        source_aliases = {name.lower() for name in issue.source_documents}
+        source_aliases.update(citation.document_name.lower() for citation in issue.citations)
+        if not aliases.intersection(source_aliases):
+            continue
+        linked.append(issue)
+    linked.sort(
+        key=lambda issue: (
+            -int(issue.top_line_eligible),
+            -int(issue.front_end_flag in {"red flag", "yellow flag", "conflict / contradiction concern"}),
+            -int(issue.specificity_level == "clearly site-specific"),
+            -issue.priority_score.total,
+            issue.title,
+        )
+    )
+    return linked
 
 
 def _build_issue_analysis_markdown(synthesis: DealSynthesis) -> str:

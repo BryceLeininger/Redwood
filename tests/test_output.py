@@ -80,6 +80,14 @@ class OutputWriterTests(unittest.TestCase):
             confidence="high",
             confidence_reason="Text extraction was strong with no OCR-related warnings.",
             focus_areas=["Environmental Risks"],
+            document_takeaway="This is a control document for residual environmental scope and cost owner.",
+            key_points=[
+                "Phase I ESA leaves environmental follow-up open.",
+                "Residual remediation scope is still unresolved.",
+            ],
+            open_loops=[
+                "This file does not by itself close the environmental follow-up scope or cost owner.",
+            ],
             document_role="primary",
             staleness_status="present and adequate",
             staleness_reason="No obvious staleness signal was isolated.",
@@ -415,6 +423,14 @@ class OutputWriterTests(unittest.TestCase):
             self.assertIn("Next:", key_risk_content)
             self.assertIn("Source: Memo p. 1", key_risk_content)
             self.assertIn("Potential Contradictions / Tensions", key_risk_content)
+            document_summary_content = (output_dir / "05_document_summaries.md").read_text(encoding="utf-8")
+            self.assertIn("Document Summaries", document_summary_content)
+            self.assertIn("Front-End Read", document_summary_content)
+            self.assertIn("What It Establishes", document_summary_content)
+            self.assertIn("What It Still Leaves Open", document_summary_content)
+            self.assertIn("Linked Deal Issues", document_summary_content)
+            self.assertIn("Document-Specific Signals", document_summary_content)
+            self.assertIn("Next Questions", document_summary_content)
             synthesis_content = (output_dir / "07_deal_synthesis.md").read_text(encoding="utf-8")
             self.assertIn("Initial Judgment", synthesis_content)
             self.assertIn("Routine Vs Elevated", synthesis_content)

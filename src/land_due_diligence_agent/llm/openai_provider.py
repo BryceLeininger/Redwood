@@ -151,12 +151,13 @@ class OpenAIProvider(LLMProvider):
             missing_text = "- No document-specific missing items detected."
         prompt_intro = (
             "Rewrite the following land acquisition diligence document summary into two concise paragraphs. "
-            "Keep the tone factual, avoid hype, and emphasize implications for an acquisitions reviewer."
+            "Keep the tone factual, avoid hype, and emphasize what this specific document actually establishes, what it does not resolve, and why a front-end acquisitions reviewer should care. "
+            "Do not restate generic diligence categories. Use only deal-specific facts that appear in the extracted text or structured signals below."
         )
         if compact:
             prompt_intro = (
                 "Rewrite the following land acquisition diligence document summary into one short, factual paragraph. "
-                "Prioritize the highest-value risks and caveats only."
+                "Prioritize the highest-value document-specific facts and caveats only. Do not invent risk from category presence."
             )
         return (
             f"{prompt_intro}\n\n"
@@ -212,7 +213,7 @@ class OpenAIProvider(LLMProvider):
             "Do not use generic phrases like 'mixed picture' or 'the package suggests'. Avoid 'may' and 'could' unless uncertainty comes from missing data, OCR limits, or incomplete reports. "
             "Where the documents conflict or pull in different directions, call out the contradiction directly and explain why it changes underwriting or execution confidence. "
             "Make clear what is known, what remains unresolved, and what is gating before closing, underwriting confidence, or vertical start. "
-            "Do not simply list diligence categories."
+            "Do not simply list diligence categories. Do not elevate a category just because the package contains that type of document."
         )
         if compact:
             prompt_intro = (

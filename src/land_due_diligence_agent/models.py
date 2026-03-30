@@ -73,6 +73,9 @@ class RiskFinding:
     gating_flags: list[str] = field(default_factory=list)
     uncertainty_reason: str = ""
     citations: list[Citation] = field(default_factory=list)
+    specificity_score: int = 0
+    specificity_basis: str = ""
+    generic_signal_only: bool = False
 
 
 @dataclass(slots=True)
@@ -603,6 +606,9 @@ class DocumentAnalysis:
     confidence_reason: str
     focus_areas: list[str] = field(default_factory=list)
     missing_items: list[str] = field(default_factory=list)
+    document_takeaway: str = ""
+    key_points: list[str] = field(default_factory=list)
+    open_loops: list[str] = field(default_factory=list)
     document_role: str = "supporting"
     staleness_status: str = "present and adequate"
     staleness_reason: str = ""

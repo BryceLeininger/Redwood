@@ -7,6 +7,7 @@ import unittest
 from pathlib import Path
 
 from land_due_diligence_agent.analysis.front_end import apply_front_end_assessment
+from land_due_diligence_agent.analysis.heuristics import aggregate_risks, analyze_document
 from land_due_diligence_agent.analysis.issue_registry import (
     build_canonical_issue_registry,
     build_overall_read_draft,
@@ -803,6 +804,69 @@ class AnalysisTests(unittest.TestCase):
 
         self.assertIn("utility-capacity", key_risk_ids)
         self.assertNotIn("title-access-clearance", key_risk_ids)
+
+    def test_document_analysis_suppresses_generic_joint_trench_presence_signal(self) -> None:
+        analysis = analyze_document(
+            _document(
+                "joint_trench_plans.txt",
+                (
+                    "JOINT TRENCH COMPOSITE 1\" = 30' SCALE PROJECT MANAGER CHECKED BY DRAWN BY "
+                    "PROJECT NUMBER SHEET OF LAST UPDATED 03-20-2024 UTILITY DESIGN CONSULTANTS & ENGINEERS."
+                ),
+            )
+        )
+
+        self.assertFalse(
+            any(
+                risk.category == "Utilities / Infrastructure Issues" and not risk.generic_signal_only
+                for risk in analysis.risks
+            )
+        )
+
+    def test_document_analysis_keeps_specific_title_exception_signal(self) -> None:
+        analysis = analyze_document(
+            _document(
+                "title_report.txt",
+                (
+                    "Schedule B Exception 12 grants a reciprocal access easement across Lot 2. "
+                    "The current vehicular entry shown on the site plan relies on that easement."
+                ),
+            )
+        )
+
+        risk = next(risk for risk in analysis.risks if risk.category == "Title / Access Concerns")
+        self.assertFalse(risk.generic_signal_only)
+        self.assertGreaterEqual(risk.specificity_score, 6)
+        self.assertIn("easement", risk.specificity_basis.lower())
+        self.assertIn("access", risk.specificity_basis.lower())
+
+    def test_aggregate_risks_prefers_specific_basis_over_generic_category_presence(self) -> None:
+        generic_utility = analyze_document(
+            _document(
+                "joint_trench_plans.txt",
+                (
+                    "JOINT TRENCH COMPOSITE 1\" = 30' SCALE PROJECT MANAGER CHECKED BY DRAWN BY "
+                    "PROJECT NUMBER SHEET OF LAST UPDATED 03-20-2024 UTILITY DESIGN CONSULTANTS & ENGINEERS."
+                ),
+            )
+        )
+        specific_utility = analyze_document(
+            _document(
+                "utility_memo.txt",
+                (
+                    "The provider has not issued a will-serve letter for the offsite water extension. "
+                    "Utility capacity remains unconfirmed for the current plan."
+                ),
+            )
+        )
+
+        utility_risk = next(
+            risk
+            for risk in aggregate_risks([generic_utility, specific_utility])
+            if risk.category == "Utilities / Infrastructure Issues"
+        )
+        self.assertIn("will-serve", utility_risk.issue.lower())
+        self.assertFalse(utility_risk.generic_signal_only)
 
     def test_package_quality_classification_is_deterministic(self) -> None:
         thin_synthesis = run_analysis(

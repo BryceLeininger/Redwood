@@ -84,6 +84,70 @@ _RISK_GATING_MAP = {
     "Utilities / Infrastructure Issues": ("Underwriting confidence", "Vertical start"),
     "Schedule Risks": ("Underwriting confidence",),
 }
+_CATEGORY_SPECIFICITY_TERMS = {
+    "Entitlement Status": ("condition of approval", "final map", "tentative map", "permit", "recordation", "dedication", "modification"),
+    "Environmental Risks": ("recognized environmental condition", "phase ii", "remediation", "hazardous", "wetlands", "mitigation", "habitat", "mmrp"),
+    "Flood / Drainage Issues": ("stormwater", "drainage", "detention", "hydrology", "maintenance agreement", "offsite drainage", "basin", "floodplain"),
+    "Geotechnical Risks": ("fill", "liquefaction", "settlement", "overexcavation", "foundation", "grading", "retaining", "expansive soil"),
+    "Offsite Obligations": ("frontage", "resurface", "grind and overlay", "encroachment permit", "offsite", "dedication", "reimbursement", "cost owner"),
+    "Fee / Exaction Burden": ("impact fee", "capacity fee", "school fee", "public works fee", "map check fee", "public art"),
+    "Budget / Cost Reliability": ("budgetary", "allowance", "contingency", "proposal", "preliminary", "unit cost", "cost estimate"),
+    "Utilities / Infrastructure Issues": ("will serve", "will-serve", "capacity", "joint trench", "utility easement", "public utility", "sewer service", "water service", "upsizing", "offsite utility"),
+    "Title / Access Concerns": ("schedule b", "exception", "easement", "encroachment", "access", "ingress", "egress", "right-of-way", "no build"),
+    "Schedule Risks": ("critical path", "backlog", "delay", "phasing", "moratorium", "long lead", "continuous progress"),
+}
+_DIRECT_SIGNAL_TERMS = (
+    "shall",
+    "must",
+    "required",
+    "subject to",
+    "prior to",
+    "pending",
+    "draft",
+    "preliminary",
+    "not issued",
+    "not provided",
+    "buyer",
+    "developer",
+    "responsible",
+    "reimbursement",
+    "budgetary",
+    "allowance",
+    "unconfirmed",
+    "affect",
+    "depends on",
+    "constraint",
+)
+_GENERIC_DOCUMENT_TERMS = (
+    "project manager",
+    "checked by",
+    "drawn by",
+    "drawing number",
+    "sheet title",
+    "table of contents",
+    "cover sheet",
+    "last updated",
+    "copyright",
+    "all rights reserved",
+    "prepared by",
+    "not to scale",
+    "scale:",
+)
+_GENERIC_EXISTENCE_TERMS = (
+    "has been prepared",
+    "report on this property has been prepared",
+    "document provides",
+    "document details",
+    "consisting of",
+)
+_ANTI_GENERIC_DOCUMENT_CATEGORIES = {
+    "Title / Access Concerns",
+    "Environmental Risks",
+    "Flood / Drainage Issues",
+    "Geotechnical Risks",
+    "Offsite Obligations",
+    "Utilities / Infrastructure Issues",
+}
 
 
 def analyze_document(document: DocumentRecord) -> DocumentAnalysis:
@@ -109,21 +173,47 @@ def analyze_document(document: DocumentRecord) -> DocumentAnalysis:
 
         evidence_texts = [text for text, _ in evidence_records]
         citations = _unique_citations([citation for _, citation in evidence_records])
+        specificity_basis, specificity_score = _best_document_signal(
+            category=rule.category,
+            evidence_records=evidence_records,
+            severe_keywords=rule.severe_keywords,
+            in_focus_area=in_focus_area,
+        )
+        generic_signal_only = specificity_score < 5
+        if generic_signal_only and rule.category in _ANTI_GENERIC_DOCUMENT_CATEGORIES:
+            continue
 
         score = _score_risk(evidence_texts, rule.keywords, rule.severe_keywords, in_focus_area)
+        score += max(0, specificity_score // 4)
         if not in_focus_area and focus_areas and not _keep_cross_focus_signal(score, evidence_texts):
             continue
 
         severity = _score_to_severity(score)
 
-        summary = _build_risk_summary(document, rule.category, severity, evidence_texts, in_focus_area)
+        issue_text = _document_issue_text_from_basis(rule.category, specificity_basis)
+        why_it_matters = _build_why_it_matters_text(rule.category, document.title, specificity_basis.lower())
+        likely_implication = _build_implication_text(rule.category, document.title, specificity_basis.lower(), 0)
+        summary = _build_risk_summary(
+            document=document,
+            category=rule.category,
+            severity=severity,
+            basis_sentence=specificity_basis,
+        )
         risks.append(
             RiskFinding(
                 category=rule.category,
                 severity=severity,
                 summary=summary,
                 evidence=evidence_texts,
+                issue=issue_text,
+                why_it_matters=why_it_matters,
+                likely_implication=likely_implication,
+                source_documents=[document.title],
+                anchor=specificity_basis,
                 citations=citations,
+                specificity_score=specificity_score,
+                specificity_basis=specificity_basis,
+                generic_signal_only=generic_signal_only,
             )
         )
 
@@ -139,6 +229,9 @@ def analyze_document(document: DocumentRecord) -> DocumentAnalysis:
         ),
     )
     missing_items = _infer_document_gap_hints(text_lower, focus_areas, confidence)
+    key_points = _build_document_key_points(document, risks)
+    open_loops = _build_document_open_loops(risks, missing_items, confidence)
+    document_takeaway = _build_document_takeaway(document, focus_areas, risks)
     reading_priority = _estimate_reading_priority(document, focus_areas, risks, confidence)
     reading_reason = _build_reading_reason(focus_areas, risks, confidence)
     summary = _build_document_summary(
@@ -148,6 +241,9 @@ def analyze_document(document: DocumentRecord) -> DocumentAnalysis:
         missing_items=missing_items,
         confidence=confidence,
         confidence_reason=confidence_reason,
+        document_takeaway=document_takeaway,
+        key_points=key_points,
+        open_loops=open_loops,
     )
 
     return DocumentAnalysis(
@@ -161,6 +257,9 @@ def analyze_document(document: DocumentRecord) -> DocumentAnalysis:
         confidence_reason=confidence_reason,
         focus_areas=focus_areas,
         missing_items=missing_items,
+        document_takeaway=document_takeaway,
+        key_points=key_points,
+        open_loops=open_loops,
     )
 
 
@@ -237,6 +336,8 @@ def aggregate_risks(document_analyses: list[DocumentAnalysis]) -> list[RiskFindi
         ranked_entries = sorted(
             entries,
             key=lambda entry: (
+                -entry[1].specificity_score,
+                -(0 if entry[1].generic_signal_only else 1),
                 -(1 if entry[1].category in entry[0].focus_areas else 0),
                 -_SEVERITY_RANK[entry[1].severity],
                 -entry[0].reading_priority,
@@ -489,6 +590,19 @@ def _build_aggregate_risk(
     ranked_entries: list[tuple[DocumentAnalysis, RiskFinding]],
 ) -> tuple[int, RiskFinding] | None:
     focused_entries = [entry for entry in ranked_entries if category in entry[0].focus_areas] or ranked_entries
+    specific_entries = [entry for entry in focused_entries if not entry[1].generic_signal_only]
+    if specific_entries:
+        focused_entries = sorted(
+            specific_entries,
+            key=lambda entry: (
+                -entry[1].specificity_score,
+                -_SEVERITY_RANK[entry[1].severity],
+                -entry[0].reading_priority,
+                -_CONFIDENCE_RANK[entry[0].confidence],
+            ),
+        )
+    elif all(entry[1].generic_signal_only for entry in focused_entries):
+        return None
     lead_analysis, lead_risk = focused_entries[0]
     source_documents: list[str] = []
     citations: list[Citation] = []
@@ -518,10 +632,10 @@ def _build_aggregate_risk(
     if not _should_include_aggregate(category, lead_risk.severity, decision_score):
         return None
 
-    anchor = _build_anchor_text(category, lead_analysis)
-    issue = _build_issue_text(category, anchor, evidence_text, low_confidence_sources)
-    why_it_matters = _build_why_it_matters_text(category, anchor, evidence_text)
-    likely_implication = _build_implication_text(category, anchor, evidence_text, low_confidence_sources)
+    anchor = lead_risk.specificity_basis or _build_anchor_text(category, lead_analysis)
+    issue = lead_risk.issue or _build_issue_text(category, anchor, evidence_text, low_confidence_sources)
+    why_it_matters = lead_risk.why_it_matters or _build_why_it_matters_text(category, anchor, evidence_text)
+    likely_implication = lead_risk.likely_implication or _build_implication_text(category, anchor, evidence_text, low_confidence_sources)
     uncertainty_reason = _build_uncertainty_reason(category, evidence_text, low_confidence_sources, focused_entries)
     gating_flags = list(_RISK_GATING_MAP.get(category, ("Underwriting confidence",)))
 
@@ -545,6 +659,8 @@ def _build_aggregate_risk(
             gating_flags=gating_flags,
             uncertainty_reason=uncertainty_reason,
             citations=_unique_citations(citations)[:3],
+            specificity_score=lead_risk.specificity_score,
+            specificity_basis=lead_risk.specificity_basis,
         ),
     )
 
@@ -1253,6 +1369,62 @@ def _collect_evidence(
     return selected
 
 
+def _best_document_signal(
+    *,
+    category: str,
+    evidence_records: list[tuple[str, Citation]],
+    severe_keywords: tuple[str, ...],
+    in_focus_area: bool,
+) -> tuple[str, int]:
+    scored = [
+        (
+            _signal_sentence_score(
+                category=category,
+                sentence=sentence,
+                severe_keywords=severe_keywords,
+                in_focus_area=in_focus_area,
+            ),
+            _clean_sentence(sentence),
+        )
+        for sentence, _ in evidence_records
+    ]
+    scored.sort(key=lambda item: (-item[0], len(item[1])))
+    if not scored:
+        return "No supporting sentence was isolated.", 0
+    best_score, best_sentence = scored[0]
+    return clip_text(best_sentence, 220), max(best_score, 0)
+
+
+def _signal_sentence_score(
+    *,
+    category: str,
+    sentence: str,
+    severe_keywords: tuple[str, ...],
+    in_focus_area: bool,
+) -> int:
+    lower_sentence = sentence.lower()
+    severe_hits = _count_keyword_hits(lower_sentence, severe_keywords)
+    specific_hits = sum(
+        _keyword_present(lower_sentence, term)
+        for term in _CATEGORY_SPECIFICITY_TERMS.get(category, ())
+    )
+    direct_hits = sum(_keyword_present(lower_sentence, term) for term in _DIRECT_SIGNAL_TERMS)
+    numeric_hit = 1 if re.search(r"\$|\b\d+(?:,\d{3})+\b|\b\d+%|\b\d{4}\b|half of the street", lower_sentence) else 0
+    metadata_penalty = sum(term in lower_sentence for term in _GENERIC_DOCUMENT_TERMS) * 3
+    existence_penalty = 2 if any(term in lower_sentence for term in _GENERIC_EXISTENCE_TERMS) else 0
+    uppercase_penalty = 2 if sum(character.isupper() for character in sentence) > max(25, len(sentence) // 2) else 0
+    return (
+        (severe_hits * 7)
+        + (specific_hits * 3)
+        + (direct_hits * 2)
+        + numeric_hit
+        + (1 if in_focus_area else 0)
+        - metadata_penalty
+        - existence_penalty
+        - uppercase_penalty
+    )
+
+
 def _format_evidence_with_citation(text: str, citation: Citation) -> str:
     return f"{_format_citation_label(citation)}: {text}"
 
@@ -1298,15 +1470,14 @@ def _score_to_severity(score: int) -> str:
 
 
 def _build_risk_summary(
+    *,
     document: DocumentRecord,
     category: str,
     severity: str,
-    evidence: list[str],
-    in_focus_area: bool,
+    basis_sentence: str,
 ) -> str:
-    lead = evidence[0] if evidence else "No supporting evidence captured."
-    focus_prefix = "Category-aligned source document." if in_focus_area else "Supporting signal detected."
-    return f"{focus_prefix} {category} appears {severity} priority based on extracted text. Lead indicator: {lead}"
+    del document, category, severity
+    return _normalize_point(basis_sentence)
 
 
 def _build_document_summary(
@@ -1317,22 +1488,141 @@ def _build_document_summary(
     missing_items: list[str],
     confidence: str,
     confidence_reason: str,
+    document_takeaway: str,
+    key_points: list[str],
+    open_loops: list[str],
 ) -> str:
-    cleaned_text = _clean_sentence(document.normalized_text)
-    base_summary = extractive_summary(cleaned_text, max_sentences=2)
-    focus_text = ", ".join(focus_areas[:3]) or "General diligence support"
-    aligned_risks = [risk for risk in risks if risk.category in focus_areas]
-    lead_risks = aligned_risks or risks
-    risk_text = ", ".join(risk.category for risk in lead_risks[:3]) or "no concentrated risk signals surfaced from extracted text"
-    gap_text = (
-        f" Potential follow-up: {', '.join(missing_items)}."
-        if missing_items
-        else ""
-    )
+    document_kind = _document_kind(document, focus_areas)
+    key_text = " ".join(_normalize_point(point) for point in key_points[:2]) or "No concentrated document-specific point was isolated from the readable text."
+    open_text = " ".join(_normalize_point(point) for point in open_loops[:2])
+    gap_text = f" Potential follow-up: {', '.join(missing_items[:2])}." if missing_items else ""
     return (
-        f"{document.title} is primarily a {focus_text.lower()} document. {base_summary}\n\n"
-        f"Primary review themes: {risk_text}. Confidence: {confidence.title()} ({confidence_reason}).{gap_text}"
+        f"{document.title} is a {document_kind}. {key_text}\n\n"
+        f"Front-end read: {_normalize_point(document_takeaway or 'This file is useful only to the extent it adds specific, readable support to the deal.')} "
+        f"{open_text} Confidence: {confidence.title()} ({confidence_reason}).{gap_text}"
     ).strip()
+
+
+def _document_issue_text_from_basis(category: str, basis_sentence: str) -> str:
+    cleaned = _normalize_point(basis_sentence)
+    if not cleaned:
+        return f"{category} still needs direct review."
+    return cleaned
+
+
+def _build_document_key_points(document: DocumentRecord, risks: list[RiskFinding]) -> list[str]:
+    points = [
+        risk.specificity_basis
+        for risk in risks
+        if not risk.generic_signal_only and risk.specificity_basis
+    ]
+    if not points:
+        cleaned_text = _clean_sentence(document.normalized_text)
+        points.extend(split_sentences(extractive_summary(cleaned_text, max_sentences=2))[:2])
+    return unique_preserve_order(_normalize_point(point) for point in points if point)[:3]
+
+
+def _build_document_open_loops(
+    risks: list[RiskFinding],
+    missing_items: list[str],
+    confidence: str,
+) -> list[str]:
+    loops: list[str] = []
+    lead_risk = next((risk for risk in risks if not risk.generic_signal_only), None)
+    if lead_risk is not None:
+        loops.append(_document_open_loop_text(lead_risk.category))
+    loops.extend(f"Request or verify: {item}." for item in missing_items[:2])
+    if confidence == "low":
+        loops.append("Manual review is still needed because extraction quality was weak.")
+    return unique_preserve_order(_normalize_point(loop) for loop in loops if loop)[:3]
+
+
+def _build_document_takeaway(
+    document: DocumentRecord,
+    focus_areas: list[str],
+    risks: list[RiskFinding],
+) -> str:
+    lead_risk = next((risk for risk in risks if not risk.generic_signal_only), None)
+    primary_focus = _primary_focus_area(focus_areas)
+    category = lead_risk.category if lead_risk is not None else primary_focus
+    if category == "Title / Access Concerns":
+        return "This is a control document for access rights, easements, and title burdens that have to match the current plan."
+    if category == "Entitlement Status":
+        return "This is a control document for what the city approved and which conditions still govern permit-stage execution."
+    if category == "Environmental Risks":
+        return "This file matters if it defines residual environmental scope, mitigation, or agency closeout."
+    if category == "Flood / Drainage Issues":
+        return "This file matters if it controls drainage design assumptions, maintenance obligations, or civil review scope."
+    if category == "Geotechnical Risks":
+        return "This is a control document for grading, retaining, and foundation assumptions that should carry into cost and design."
+    if category == "Offsite Obligations":
+        return "This file matters if it allocates frontage, offsite work, or cost ownership that sits outside the core site budget."
+    if category == "Fee / Exaction Burden":
+        return "This file matters if it fixes the city fee stack or shows where basis can still move."
+    if category == "Budget / Cost Reliability":
+        return "This file matters if it is the basis for sitework cost assumptions or reveals where pricing is still provisional."
+    if category == "Utilities / Infrastructure Issues":
+        return "This file matters if it confirms utility layout, service assumptions, or offsite utility scope."
+    if category == "Schedule Risks":
+        return "This file matters if it changes the real path from current approvals to executable improvements and vertical work."
+    return f"This { _document_kind(document, focus_areas) } is useful only if it adds specific support beyond category presence."
+
+
+def _document_kind(document: DocumentRecord, focus_areas: list[str]) -> str:
+    title = document.title.lower()
+    path_text = document.relative_path.as_posix().lower()
+    if "title" in title or "title" in path_text:
+        return "title or access control document"
+    if "resolution" in title or "resolution" in path_text:
+        return "city approval resolution"
+    if "map" in title or "map" in path_text:
+        return "subdivision or map control document"
+    if "agreement" in title or "agreement" in path_text:
+        return "rights-and-obligations agreement"
+    if "geotech" in title or "soil" in title or "geotech" in path_text or "soil" in path_text:
+        return "geotechnical support document"
+    if "phase i" in title or "environment" in title or "phase i" in path_text or "environment" in path_text:
+        return "environmental support document"
+    if "joint trench" in title or "utility" in title or "joint trench" in path_text or "utility" in path_text:
+        return "utility design document"
+    if "budget" in title or "underwriting" in title or "cost" in title:
+        return "cost or underwriting support file"
+    if focus_areas:
+        return f"{_primary_focus_area(focus_areas).lower()} document"
+    return "diligence support document"
+
+
+def _document_open_loop_text(category: str) -> str:
+    if category == "Title / Access Concerns":
+        return "This file still needs to be reconciled against the live plan set and current title matrix."
+    if category == "Entitlement Status":
+        return "This file does not by itself prove that every permit-stage condition is now closed."
+    if category == "Environmental Risks":
+        return "This file does not by itself close the environmental follow-up scope or cost owner."
+    if category == "Flood / Drainage Issues":
+        return "This file does not by itself close the active drainage scope or maintenance burden."
+    if category == "Geotechnical Risks":
+        return "This file still needs to be traced into grading, retaining, foundation, and cost assumptions."
+    if category == "Offsite Obligations":
+        return "This file does not by itself lock the full frontage or offsite scope and cost owner."
+    if category == "Fee / Exaction Burden":
+        return "This file does not by itself confirm the final fee stack being underwritten."
+    if category == "Budget / Cost Reliability":
+        return "This file does not by itself make the current pricing decision-grade."
+    if category == "Utilities / Infrastructure Issues":
+        return "This file does not by itself confirm capacity, provider acceptance, or every offsite utility requirement."
+    if category == "Schedule Risks":
+        return "This file does not by itself prove the current schedule path is still realistic."
+    return "This file does not by itself close the live diligence question."
+
+
+def _normalize_point(text: str) -> str:
+    cleaned = clip_text(_clean_sentence(text), 220).strip()
+    if not cleaned:
+        return ""
+    if cleaned[-1] not in ".!?":
+        cleaned += "."
+    return cleaned
 
 
 def _estimate_reading_priority(
@@ -1416,7 +1706,7 @@ def _count_keyword_hits(text: str, keywords: tuple[str, ...]) -> int:
 @lru_cache(maxsize=512)
 def _keyword_pattern(keyword: str) -> re.Pattern[str]:
     escaped = re.escape(keyword)
-    escaped = escaped.replace(r"\ ", r"\s+").replace(r"\-", r"[-\s]?")
+    escaped = escaped.replace(r"\ ", r"[-\s]+").replace(r"\-", r"[-\s]?")
     return re.compile(rf"(?<!\w){escaped}(?!\w)", re.IGNORECASE)
 
 
