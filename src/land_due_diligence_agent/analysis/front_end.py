@@ -42,6 +42,14 @@ _TIME_SENSITIVE_CATEGORIES = {
     "Schedule Risks",
     "Offsite Obligations",
 }
+_SHORT_DATE_RE = re.compile(
+    r"\b(?:0?[1-9]|1[0-2])[-/.\s](?:0?[1-9]|[12]\d|3[01])[-/.\s](\d{2})(?!\d)"
+)
+_MONTH_YEAR_RE = re.compile(
+    r"\b(?:jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|sept|september|oct|october|nov|november|dec|december)"
+    r"(?:[-/.\s]+\d{1,2})?[-/.\s,]+(\d{2,4})\b",
+    re.IGNORECASE,
+)
 _LEGAL_CATEGORIES = {
     "Title / Access Concerns",
     "Entitlement Status",
@@ -533,8 +541,9 @@ def _document_role(analysis: DocumentAnalysis) -> str:
 
 
 def _document_staleness(analysis: DocumentAnalysis) -> tuple[str, str]:
-    text = f"{analysis.document.title} {analysis.document.relative_path.as_posix()} {analysis.document.normalized_text[:1800]}".lower()
-    years = [int(year) for year in re.findall(r"\b(19\d{2}|20\d{2})\b", text)]
+    header_text = f"{analysis.document.title} {analysis.document.relative_path.as_posix()}"
+    years = _extract_visible_years(header_text)
+    years.extend(_extract_visible_years(analysis.document.normalized_text[:800]))
     latest_year = max(years) if years else None
     time_sensitive = bool(set(analysis.focus_areas).intersection(_TIME_SENSITIVE_CATEGORIES))
     if latest_year is not None:
@@ -545,6 +554,21 @@ def _document_staleness(analysis: DocumentAnalysis) -> tuple[str, str]:
                 f"The latest visible date appears to be {latest_year}, which is old for this diligence lane.",
             )
     return "present and adequate", "No obvious staleness signal was isolated."
+
+
+def _extract_visible_years(text: str) -> list[int]:
+    years = [int(year) for year in re.findall(r"\b(19\d{2}|20\d{2})\b", text)]
+    years.extend(_expand_short_year(int(year)) for year in _SHORT_DATE_RE.findall(text))
+    for year in _MONTH_YEAR_RE.findall(text):
+        if len(year) == 2:
+            years.append(_expand_short_year(int(year)))
+        else:
+            years.append(int(year))
+    return years
+
+
+def _expand_short_year(year: int) -> int:
+    return 2000 + year if year <= (_CURRENT_YEAR % 100) + 2 else 1900 + year
 
 
 def _issue_information_status(issue: CanonicalIssue, source_analyses: list[DocumentAnalysis]) -> tuple[str, str]:

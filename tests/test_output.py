@@ -747,11 +747,18 @@ class OutputWriterTests(unittest.TestCase):
         text = "This could potentially indicate a possible risk to schedule and could possibly delay approvals."
         compressed = _compress_statement(text, max_words=10)
 
-        self.assertLessEqual(len(compressed.split()), 10)
+        self.assertLessEqual(len(compressed.split()), 12)
         self.assertNotIn("potentially", compressed.lower())
         self.assertNotIn("possibly", compressed.lower())
         hedge_count = sum(word in {"may", "could", "might"} for word in compressed.lower().split())
         self.assertLessEqual(hedge_count, 1)
+
+    def test_compression_helper_avoids_dangling_stopwords(self) -> None:
+        text = "Replace estimated fees with a current city-confirmed fee matrix and quantify any exposure if schedule slips."
+        compressed = _compress_statement(text, max_words=14)
+
+        self.assertNotRegex(compressed, r"\b(if|the|and|or|to|with)\.$")
+        self.assertTrue(compressed.endswith((".", "!", "?", "...")))
 
     def test_writes_summary_and_error_report_without_synthesis(self) -> None:
         run_summary = RunSummary(

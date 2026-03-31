@@ -3,25 +3,44 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from collections.abc import Iterable
 
 
 _SPACE_RE = re.compile(r"[ \t]+")
 _SENTENCE_RE = re.compile(r"(?<=[.!?])\s+")
+_MOJIBAKE_SENTINELS = ("Ã", "Â", "â€", "â€™", "â€œ", "â€", "�")
 _MOJIBAKE_REPLACEMENTS = {
     "\u00a0": " ",
-    "Â ": " ",
+    "Ã‚ ": " ",
+    "Ã‚": "",
+    "Â·": "",
     "Â": "",
+    "Ã¢â‚¬â„¢": "'",
+    "Ã¢â‚¬Ëœ": "'",
+    "Ã¢â‚¬Å“": '"',
+    "Ã¢â‚¬\u009d": '"',
+    "Ã¢â‚¬\x9d": '"',
+    "Ã¢â‚¬â€": "-",
+    "Ã¢â‚¬\"": "-",
+    "Ã¢â‚¬\x94": "-",
+    "Ã¢â‚¬â€œ": "-",
+    "Ãƒâ€”": "x",
     "â€™": "'",
     "â€˜": "'",
     "â€œ": '"',
-    "â€\u009d": '"',
-    "â€\x9d": '"',
-    "â€”": "-",
-    "â€\"": "-",
-    "â€\x94": "-",
+    "â€": '"',
     "â€“": "-",
+    "â€”": "-",
+    "â€‘": "-",
+    "â€¢": "-",
     "Ã—": "x",
+    "’": "'",
+    "‘": "'",
+    "“": '"',
+    "”": '"',
+    "–": "-",
+    "—": "-",
 }
 
 
@@ -55,13 +74,30 @@ def repair_text_artifacts(text: str) -> str:
     if not text:
         return ""
 
-    repaired = text
+    repaired = _maybe_redecode_mojibake(text)
     for source, target in _MOJIBAKE_REPLACEMENTS.items():
         repaired = repaired.replace(source, target)
 
+    repaired = unicodedata.normalize("NFKC", repaired)
     repaired = re.sub(r"[\u200b-\u200d\u2060]", "", repaired)
     repaired = re.sub(r"\s+([,.;:!?])", r"\1", repaired)
+    repaired = re.sub(r"([([{])\s+", r"\1", repaired)
+    repaired = re.sub(r"\s+([)\]}])", r"\1", repaired)
     return repaired.strip()
+
+
+def _maybe_redecode_mojibake(text: str) -> str:
+    if _mojibake_score(text) < 2:
+        return text
+    try:
+        candidate = text.encode("cp1252").decode("utf-8")
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        return text
+    return candidate if _mojibake_score(candidate) < _mojibake_score(text) else text
+
+
+def _mojibake_score(text: str) -> int:
+    return sum(text.count(marker) for marker in _MOJIBAKE_SENTINELS)
 
 
 def split_sentences(text: str) -> list[str]:

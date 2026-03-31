@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 
 from land_due_diligence_agent.analysis.autonomous_agent import AutonomousLearningAgent, load_autonomous_learning_records
-from land_due_diligence_agent.analysis.front_end import apply_front_end_assessment
+from land_due_diligence_agent.analysis.front_end import _document_staleness, apply_front_end_assessment
 from land_due_diligence_agent.analysis.heuristics import aggregate_risks, analyze_document
 from land_due_diligence_agent.analysis.issue_registry import (
     build_canonical_issue_registry,
@@ -25,6 +25,7 @@ from land_due_diligence_agent.models import (
     CanonicalIssueRegistry,
     Citation,
     ContradictionFinding,
+    DocumentAnalysis,
     DocumentRecord,
     OmissionAssessment,
     RiskFinding,
@@ -51,6 +52,13 @@ class AnalysisTests(unittest.TestCase):
         self.assertEqual(
             normalize_text(text),
             "The deal's geotech scope-and cost basis-need review.",
+        )
+
+    def test_normalize_text_repairs_cp1252_utf8_mojibake(self) -> None:
+        text = 'There are no publicly available sources that confirm whether an offsite improvement scope confirmation for the â€œharkenâ€ package has been produced in a current, projectâ€‘specific form.'
+        self.assertEqual(
+            normalize_text(text),
+            'There are no publicly available sources that confirm whether an offsite improvement scope confirmation for the "harken" package has been produced in a current, project-specific form.',
         )
 
     def test_generates_key_risks_and_questions(self) -> None:
@@ -89,6 +97,35 @@ class AnalysisTests(unittest.TestCase):
         self.assertTrue(synthesis.seller_questions)
         self.assertTrue(any("ALTA" in item for item in synthesis.missing_items))
         self.assertTrue(all(risk.citations for risk in synthesis.key_risks))
+
+    def test_layout_legend_noise_does_not_create_utility_risk(self) -> None:
+        document = _document(
+            "joint_trench_plans.txt",
+            (
+                'JT JT JT SD SD SD 12" W 8" SS FIRE SERVICE WITH METER AND BFP TYP '
+                "DOMESTIC SERVICE WITH MASTER METER AND BFP TYP PROJECT NUMBER SHEET "
+                "DRAWN BY CHECKED BY SCALE 1 20 TRANSFORMER PAD RIM 24.5 INV 11.5."
+            ),
+        )
+
+        analysis = analyze_document(document)
+
+        self.assertFalse(any(risk.category == "Utilities / Infrastructure Issues" for risk in analysis.risks))
+
+    def test_market_language_does_not_misclassify_access_or_will_serve(self) -> None:
+        document = _document(
+            "market_study.txt",
+            (
+                "Access to ground floor retail and restaurants supports buyer demand. "
+                "Lupine Hills Elementary, Hercules Middle, and Hercules High will serve the subject."
+            ),
+        )
+
+        analysis = analyze_document(document)
+        categories = {risk.category for risk in analysis.risks}
+
+        self.assertNotIn("Title / Access Concerns", categories)
+        self.assertNotIn("Utilities / Infrastructure Issues", categories)
 
     def test_detects_cross_document_tensions(self) -> None:
         documents = [
@@ -131,6 +168,27 @@ class AnalysisTests(unittest.TestCase):
         self.assertTrue(synthesis.challenge_findings)
         self.assertTrue(any("frontage" in finding.description.lower() or "access" in finding.description.lower() for finding in synthesis.contradictions))
         self.assertTrue(all(finding.citations for finding in synthesis.contradictions))
+
+    def test_document_staleness_uses_short_dates_from_title(self) -> None:
+        analysis = DocumentAnalysis(
+            document=_document(
+                "dd/Reciprocal Easement Agreement and Budget 6-24-24.pdf",
+                "Recorded easement agreement dated 2010 governs the underlying rights and reimbursement mechanics.",
+            ),
+            summary="",
+            risks=[],
+            seller_questions=[],
+            reading_priority=0,
+            reading_reason="",
+            confidence="high",
+            confidence_reason="",
+            focus_areas=["Offsite Obligations"],
+        )
+
+        status, reason = _document_staleness(analysis)
+
+        self.assertEqual(status, "present and adequate")
+        self.assertIn("No obvious staleness signal", reason)
 
     def test_fast_mode_limits_analysis_depth_and_llm_calls(self) -> None:
         class CountingProvider(LLMProvider):

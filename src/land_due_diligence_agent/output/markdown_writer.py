@@ -246,18 +246,18 @@ def _build_executive_summary_markdown(
         [
             f"- Package read: {registry.package_quality or 'adequate'}.",
             f"- Confidence in initial read: {registry.confidence_in_initial_read}.",
-            f"- Overall read: {_compress_statement(synthesis.executive_summary or synthesis.entitlement_status, max_words=18)}",
+            f"- Overall read: {_compress_statement(synthesis.executive_summary or synthesis.entitlement_status, max_words=26, max_sentences=2, single_idea=False)}",
         ]
     )
     lines.extend(["", "## Biggest Flags", ""])
     if top_issues:
         for issue in top_issues:
-            lines.append(f"- [{issue.front_end_flag.upper()}] {issue.title}.")
+            lines.append(f"- [{_front_end_flag_label(issue)}] {issue.title}.")
     else:
         lines.append("- No concentrated red or yellow flag was elevated from the current package.")
     lines.extend(["", "## Biggest Blind Spots", ""])
     lines.extend(
-        f"- {_compress_statement(item, max_words=18)}"
+        f"- {_compress_statement(item, max_words=24, single_idea=False)}"
         for item in (
             registry.front_end_unresolved_points
             or ["No major blind spot was isolated beyond the current issue set."]
@@ -404,7 +404,7 @@ def _build_document_summaries_markdown(synthesis: DealSynthesis) -> str:
             for issue in linked_issues[:3]:
                 basis = issue.site_specific_trigger or (issue.core_facts[0] if issue.core_facts else issue.why_it_matters)
                 lines.append(
-                    f"- {issue.title} [{issue.front_end_flag}]: {_compress_statement(basis, max_words=18)}"
+                    f"- {issue.title} [{_front_end_flag_label(issue).lower()}]: {_compress_statement(basis, max_words=20, single_idea=False)}"
                 )
             lines.append("")
 
@@ -1216,6 +1216,26 @@ def _web_research_by_issue_id(synthesis: DealSynthesis, issue_id: str):
 
 
 HEDGE_WORDS = {"may", "could", "might", "possibly", "potentially", "appears", "seems", "suggests"}
+TRIMMABLE_END_WORDS = {
+    "a",
+    "an",
+    "and",
+    "as",
+    "at",
+    "by",
+    "for",
+    "from",
+    "if",
+    "in",
+    "into",
+    "of",
+    "on",
+    "or",
+    "that",
+    "the",
+    "to",
+    "with",
+}
 FILLER_PHRASES = (
     "it is important to note that",
     "it is important to note",
@@ -1242,8 +1262,24 @@ def _trim_words(text: str, *, max_words: int) -> str:
     words = text.split()
     if len(words) <= max_words:
         return text
-    trimmed = " ".join(words[:max_words]).rstrip(",;:")
-    return _ensure_terminal_punctuation(trimmed)
+
+    hard_limit = min(len(words), max_words + max(2, max_words // 4))
+    candidate = " ".join(words[:hard_limit])
+    min_words = max(4, max_words // 2)
+
+    for match in reversed(list(re.finditer(r"[.!?]", candidate))):
+        prefix = candidate[: match.end()].strip()
+        if len(prefix.split()) >= min_words:
+            return prefix
+
+    trimmed_words = words[:max_words]
+    while (
+        len(trimmed_words) > min_words
+        and re.sub(r"[^a-z]", "", trimmed_words[-1].lower()) in TRIMMABLE_END_WORDS
+    ):
+        trimmed_words.pop()
+    trimmed = " ".join(trimmed_words).rstrip(",;:")
+    return f"{trimmed}..."
 
 
 def _strip_markdown(text: str) -> str:
@@ -1311,7 +1347,11 @@ def _request_action_text(request_text: str) -> str:
         action = re.sub(r"^send\b", "Request", action, count=1, flags=re.IGNORECASE)
     elif re.match(r"^share\b", action, flags=re.IGNORECASE):
         action = re.sub(r"^share\b", "Request", action, count=1, flags=re.IGNORECASE)
-    elif re.match(r"^(confirm|reconcile|refresh|review|read|monitor|obtain|resolve|request)\b", action, flags=re.IGNORECASE):
+    elif re.match(
+        r"^(allocate|clear|confirm|deliver|identify|lock|monitor|obtain|read|refresh|reconcile|replace|request|resolve|review|state|verify)\b",
+        action,
+        flags=re.IGNORECASE,
+    ):
         action = action[0].upper() + action[1:]
     else:
         action = f"Request {action[0].lower() + action[1:]}"
@@ -1343,10 +1383,26 @@ def _issue_next_step(issue: CanonicalIssue) -> str:
     return ""
 
 
+def _front_end_flag_label(issue: CanonicalIssue) -> str:
+    if issue.front_end_flag == "conflict / contradiction concern":
+        return "CONFLICT"
+    if issue.blocking_flag:
+        return "BLOCKER"
+    if issue.critical_path_flag:
+        return "CRITICAL PATH"
+    mapping = {
+        "red flag": "RED FLAG",
+        "yellow flag": "YELLOW FLAG",
+        "document gap": "BLIND SPOT",
+        "stale-information concern": "STALE SUPPORT",
+        "routine item": "ROUTINE ITEM",
+    }
+    return mapping.get(issue.front_end_flag, issue.front_end_flag.upper())
+
+
 def _read_first_line(recommendation) -> str:
-    return _compress_statement(
-        f"Read {recommendation.title} (`{recommendation.relative_path}`) first.",
-        max_words=12,
+    return _ensure_terminal_punctuation(
+        _clean_output_text(f"Read {recommendation.title} (`{recommendation.relative_path}`) first.")
     )
 
 

@@ -23,7 +23,13 @@ from land_due_diligence_agent.models import (
     ReadingRecommendation,
     RiskFinding,
 )
-from land_due_diligence_agent.utils.text import clip_text, extractive_summary, split_sentences, unique_preserve_order
+from land_due_diligence_agent.utils.text import (
+    clip_text,
+    extractive_summary,
+    repair_text_artifacts,
+    split_sentences,
+    unique_preserve_order,
+)
 
 
 _SEVERITY_RANK = {"low": 1, "medium": 2, "high": 3}
@@ -140,6 +146,24 @@ _GENERIC_EXISTENCE_TERMS = (
     "document details",
     "consisting of",
 )
+_LAYOUT_NOISE_TOKENS = {
+    "jt",
+    "sd",
+    "ss",
+    "sl",
+    "tow",
+    "bow",
+    "rim",
+    "inv",
+    "typ",
+    "up",
+    "dn",
+    "wm",
+    "svc",
+    "dca",
+    "mh",
+    "cb",
+}
 _ANTI_GENERIC_DOCUMENT_CATEGORIES = {
     "Title / Access Concerns",
     "Environmental Risks",
@@ -164,6 +188,7 @@ def analyze_document(document: DocumentRecord) -> DocumentAnalysis:
     for rule in CATEGORY_RULES:
         in_focus_area = rule.category in focus_areas
         evidence_records = _collect_evidence(
+            category=rule.category,
             sentence_records=sentence_records,
             keywords=rule.keywords,
             severe_keywords=rule.severe_keywords,
@@ -179,16 +204,30 @@ def analyze_document(document: DocumentRecord) -> DocumentAnalysis:
             severe_keywords=rule.severe_keywords,
             in_focus_area=in_focus_area,
         )
+        if specificity_score <= 0:
+            continue
         generic_signal_only = specificity_score < 5
+        if generic_signal_only and not in_focus_area:
+            continue
         if generic_signal_only and rule.category in _ANTI_GENERIC_DOCUMENT_CATEGORIES:
             continue
 
         score = _score_risk(evidence_texts, rule.keywords, rule.severe_keywords, in_focus_area)
         score += max(0, specificity_score // 4)
-        if not in_focus_area and focus_areas and not _keep_cross_focus_signal(score, evidence_texts):
-            continue
-
         severity = _score_to_severity(score)
+        if severity == "low" and specificity_score < 5:
+            continue
+        if (
+            not in_focus_area
+            and focus_areas
+            and not _keep_cross_focus_signal(
+                score,
+                evidence_texts,
+                specificity_score=specificity_score,
+                severity=severity,
+            )
+        ):
+            continue
 
         issue_text = _document_issue_text_from_basis(rule.category, specificity_basis)
         why_it_matters = _build_why_it_matters_text(rule.category, document.title, specificity_basis.lower())
@@ -1336,6 +1375,7 @@ def _build_sentence_records(document: DocumentRecord) -> list[tuple[str, Citatio
 
 def _collect_evidence(
     *,
+    category: str,
     sentence_records: list[tuple[str, Citation]],
     keywords: tuple[str, ...],
     severe_keywords: tuple[str, ...],
@@ -1351,9 +1391,19 @@ def _collect_evidence(
         cleaned = _clean_sentence(sentence)
         if not _is_substantive_sentence(cleaned):
             continue
+        if not _passes_category_context_guard(category, cleaned):
+            continue
 
         severe_count = _count_keyword_hits(lower_sentence, severe_keywords)
-        score = (match_count * 3) + (severe_count * 5)
+        signal_score = _signal_sentence_score(
+            category=category,
+            sentence=cleaned,
+            severe_keywords=severe_keywords,
+            in_focus_area=False,
+        )
+        if signal_score <= 0:
+            continue
+        score = (match_count * 3) + (severe_count * 5) + signal_score
         scored_sentences.append((score, cleaned, citation))
 
     scored_sentences.sort(key=lambda item: (-item[0], len(item[1])))
@@ -1695,8 +1745,18 @@ def _matches_expected_item(
     return any(hint in path_text for hint in path_hints) or any(_keyword_present(text_lower, keyword) for keyword in keywords)
 
 
-def _keep_cross_focus_signal(score: int, evidence: list[str]) -> bool:
-    return len(evidence) >= 2 or score >= 2
+def _keep_cross_focus_signal(
+    score: int,
+    evidence: list[str],
+    *,
+    specificity_score: int,
+    severity: str,
+) -> bool:
+    if specificity_score >= 8 and severity in {"medium", "high"}:
+        return True
+    if len(evidence) >= 2 and specificity_score >= 6:
+        return True
+    return score >= 3 and specificity_score >= 5
 
 
 def _count_keyword_hits(text: str, keywords: tuple[str, ...]) -> int:
@@ -1743,10 +1803,11 @@ def _select_lead_document_titles(document_analyses: list[DocumentAnalysis], *, l
 
 
 def _clean_sentence(text: str) -> str:
-    text = _PAGE_MARKER_RE.sub("", text)
+    text = repair_text_artifacts(_PAGE_MARKER_RE.sub("", text))
+    text = text.replace("|", " ")
     text = text.replace("\n", " ").strip()
     text = re.sub(r"\s+", " ", text)
-    return text
+    return text.strip(" -")
 
 
 def _is_substantive_sentence(sentence: str) -> bool:
@@ -1761,5 +1822,79 @@ def _is_substantive_sentence(sentence: str) -> bool:
     alpha_count = sum(character.isalpha() for character in sentence)
     if alpha_count < 30:
         return False
+    if _is_layout_noise_sentence(sentence):
+        return False
 
+    return True
+
+
+def _is_layout_noise_sentence(sentence: str) -> bool:
+    lower_sentence = sentence.lower()
+    tokens = re.findall(r"[a-z0-9/%'-]+", lower_sentence)
+    if len(tokens) < 8:
+        return False
+    layout_hits = sum(token in _LAYOUT_NOISE_TOKENS for token in tokens)
+    short_token_ratio = sum(len(token) <= 3 for token in tokens) / len(tokens)
+    numeric_ratio = sum(any(character.isdigit() for character in token) for token in tokens) / len(tokens)
+    return (layout_hits >= 4 and short_token_ratio >= 0.35) or (
+        "|" in sentence and layout_hits >= 2 and numeric_ratio >= 0.2
+    )
+
+
+def _passes_category_context_guard(category: str, sentence: str) -> bool:
+    lower_sentence = sentence.lower()
+    if category == "Title / Access Concerns" and _keyword_present(lower_sentence, "access"):
+        return any(
+            _keyword_present(lower_sentence, term)
+            for term in (
+                "title",
+                "easement",
+                "encroachment",
+                "ingress",
+                "egress",
+                "right-of-way",
+                "exception",
+                "survey",
+                "entry",
+                "drive",
+                "driveway",
+            )
+        )
+    if category == "Utilities / Infrastructure Issues" and (
+        _keyword_present(lower_sentence, "will serve") or _keyword_present(lower_sentence, "will-serve")
+    ):
+        return any(
+            _keyword_present(lower_sentence, term)
+            for term in (
+                "utility",
+                "capacity",
+                "service",
+                "provider",
+                "water",
+                "sewer",
+                "district",
+                "pg&e",
+                "electric",
+                "gas",
+                "joint trench",
+            )
+        )
+    if category == "Offsite Obligations" and _keyword_present(lower_sentence, "frontage"):
+        return any(
+            _keyword_present(lower_sentence, term)
+            for term in (
+                "offsite",
+                "improvement",
+                "dedication",
+                "reimbursement",
+                "permit",
+                "required",
+                "shall",
+                "must",
+                "buyer",
+                "developer",
+                "responsible",
+                "cost",
+            )
+        )
     return True
