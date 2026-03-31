@@ -1,0 +1,220 @@
+{
+  "feature_stats": {
+    "category:Entitlement Status": {
+      "count": 1.0,
+      "decision_relevant_rate": 0.3333333333333333,
+      "false_positive_rate": 0.3333333333333333,
+      "impact_rate": 0.6666666666666666,
+      "material_issue_rate": 0.6666666666666666,
+      "real_issue_rate": 0.6666666666666666
+    },
+    "category:Environmental Risks": {
+      "count": 2.0,
+      "decision_relevant_rate": 0.25,
+      "false_positive_rate": 0.5,
+      "impact_rate": 0.6666666666666666,
+      "material_issue_rate": 0.75,
+      "real_issue_rate": 0.5
+    },
+    "category:Fee / Exaction Burden": {
+      "count": 1.0,
+      "decision_relevant_rate": 0.3333333333333333,
+      "false_positive_rate": 0.3333333333333333,
+      "impact_rate": 0.6666666666666666,
+      "material_issue_rate": 0.6666666666666666,
+      "real_issue_rate": 0.6666666666666666
+    },
+    "category:Flood / Drainage Issues": {
+      "count": 2.0,
+      "decision_relevant_rate": 0.25,
+      "false_positive_rate": 0.75,
+      "impact_rate": 0.25,
+      "material_issue_rate": 0.25,
+      "real_issue_rate": 0.25
+    },
+    "category:Geotechnical Risks": {
+      "count": 2.0,
+      "decision_relevant_rate": 0.25,
+      "false_positive_rate": 0.25,
+      "impact_rate": 0.75,
+      "material_issue_rate": 0.75,
+      "real_issue_rate": 0.75
+    },
+    "category:Offsite Obligations": {
+      "count": 2.0,
+      "decision_relevant_rate": 0.25,
+      "false_positive_rate": 0.25,
+      "impact_rate": 0.75,
+      "material_issue_rate": 0.75,
+      "real_issue_rate": 0.75
+    },
+    "category:Title / Access Concerns": {
+      "count": 2.0,
+      "decision_relevant_rate": 0.25,
+      "false_positive_rate": 0.25,
+      "impact_rate": 0.75,
+      "material_issue_rate": 0.75,
+      "real_issue_rate": 0.75
+    },
+    "category:Utilities / Infrastructure Issues": {
+      "count": 2.0,
+      "decision_relevant_rate": 0.25,
+      "false_positive_rate": 0.5,
+      "impact_rate": 0.6666666666666666,
+      "material_issue_rate": 0.5,
+      "real_issue_rate": 0.5
+    },
+    "decision_action:downgrade": {
+      "count": 4.0,
+      "decision_relevant_rate": 0.16666666666666666,
+      "false_positive_rate": 0.8333333333333334,
+      "impact_rate": 0.16666666666666666,
+      "material_issue_rate": 0.3333333333333333,
+      "real_issue_rate": 0.16666666666666666
+    },
+    "decision_action:unknown": {
+      "count": 10.0,
+      "decision_relevant_rate": 0.08333333333333333,
+      "false_positive_rate": 0.08333333333333333,
+      "impact_rate": 0.9166666666666666,
+      "material_issue_rate": 0.9166666666666666,
+      "real_issue_rate": 0.9166666666666666
+    },
+    "evidence_basis:unknown": {
+      "count": 14.0,
+      "decision_relevant_rate": 0.0625,
+      "false_positive_rate": 0.3125,
+      "impact_rate": 0.9166666666666666,
+      "material_issue_rate": 0.75,
+      "real_issue_rate": 0.6875
+    },
+    "global:all": {
+      "count": 14.0,
+      "decision_relevant_rate": 0.0625,
+      "false_positive_rate": 0.3125,
+      "impact_rate": 0.9166666666666666,
+      "material_issue_rate": 0.75,
+      "real_issue_rate": 0.6875
+    },
+    "issue_id:entitlement-conditions": {
+      "count": 1.0,
+      "decision_relevant_rate": 0.3333333333333333,
+      "false_positive_rate": 0.3333333333333333,
+      "impact_rate": 0.6666666666666666,
+      "material_issue_rate": 0.6666666666666666,
+      "real_issue_rate": 0.6666666666666666
+    },
+    "issue_id:environmental-followup": {
+      "count": 2.0,
+      "decision_relevant_rate": 0.25,
+      "false_positive_rate": 0.5,
+      "impact_rate": 0.6666666666666666,
+      "material_issue_rate": 0.75,
+      "real_issue_rate": 0.5
+    },
+    "issue_id:fee-stack": {
+      "count": 1.0,
+      "decision_relevant_rate": 0.3333333333333333,
+      "false_positive_rate": 0.3333333333333333,
+      "impact_rate": 0.6666666666666666,
+      "material_issue_rate": 0.6666666666666666,
+      "real_issue_rate": 0.6666666666666666
+    },
+    "issue_id:geotechnical-scope": {
+      "count": 2.0,
+      "decision_relevant_rate": 0.25,
+      "false_positive_rate": 0.25,
+      "impact_rate": 0.75,
+      "material_issue_rate": 0.75,
+      "real_issue_rate": 0.75
+    },
+    "issue_id:offsite-frontage": {
+      "count": 2.0,
+      "decision_relevant_rate": 0.25,
+      "false_positive_rate": 0.25,
+      "impact_rate": 0.75,
+      "material_issue_rate": 0.75,
+      "real_issue_rate": 0.75
+    },
+    "issue_id:stormwater-drainage": {
+      "count": 2.0,
+      "decision_relevant_rate": 0.25,
+      "false_positive_rate": 0.75,
+      "impact_rate": 0.25,
+      "material_issue_rate": 0.25,
+      "real_issue_rate": 0.25
+    },
+    "issue_id:title-access-clearance": {
+      "count": 2.0,
+      "decision_relevant_rate": 0.25,
+      "false_positive_rate": 0.25,
+      "impact_rate": 0.75,
+      "material_issue_rate": 0.75,
+      "real_issue_rate": 0.75
+    },
+    "issue_id:utility-capacity": {
+      "count": 2.0,
+      "decision_relevant_rate": 0.25,
+      "false_positive_rate": 0.5,
+      "impact_rate": 0.6666666666666666,
+      "material_issue_rate": 0.5,
+      "real_issue_rate": 0.5
+    },
+    "issue_strength:unknown": {
+      "count": 14.0,
+      "decision_relevant_rate": 0.0625,
+      "false_positive_rate": 0.3125,
+      "impact_rate": 0.9166666666666666,
+      "material_issue_rate": 0.75,
+      "real_issue_rate": 0.6875
+    },
+    "product:multifamily": {
+      "count": 4.0,
+      "decision_relevant_rate": 0.16666666666666666,
+      "false_positive_rate": 0.3333333333333333,
+      "impact_rate": 0.8,
+      "material_issue_rate": 0.8333333333333334,
+      "real_issue_rate": 0.6666666666666666
+    },
+    "product:single-family": {
+      "count": 8.0,
+      "decision_relevant_rate": 0.1,
+      "false_positive_rate": 0.4,
+      "impact_rate": 0.8571428571428571,
+      "material_issue_rate": 0.6,
+      "real_issue_rate": 0.6
+    },
+    "product:townhome": {
+      "count": 2.0,
+      "decision_relevant_rate": 0.25,
+      "false_positive_rate": 0.25,
+      "impact_rate": 0.75,
+      "material_issue_rate": 0.75,
+      "real_issue_rate": 0.75
+    },
+    "region:south": {
+      "count": 3.0,
+      "decision_relevant_rate": 0.2,
+      "false_positive_rate": 0.4,
+      "impact_rate": 0.75,
+      "material_issue_rate": 0.6,
+      "real_issue_rate": 0.6
+    },
+    "region:west": {
+      "count": 11.0,
+      "decision_relevant_rate": 0.07692307692307693,
+      "false_positive_rate": 0.3076923076923077,
+      "impact_rate": 0.9,
+      "material_issue_rate": 0.7692307692307693,
+      "real_issue_rate": 0.6923076923076923
+    },
+    "stage:acquisition-dd": {
+      "count": 14.0,
+      "decision_relevant_rate": 0.0625,
+      "false_positive_rate": 0.3125,
+      "impact_rate": 0.9166666666666666,
+      "material_issue_rate": 0.75,
+      "real_issue_rate": 0.6875
+    }
+  }
+}
