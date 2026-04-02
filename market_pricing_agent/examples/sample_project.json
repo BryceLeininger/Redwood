@@ -1,0 +1,13 @@
+{
+  "name": "Willow Bend",
+  "submarket": "Northlake",
+  "product_type": "single_family_detached",
+  "avg_living_area_sqft": 2400,
+  "quality_tier": "market",
+  "target_position": "market",
+  "bedrooms": 4,
+  "bathrooms": 3,
+  "garage_spaces": 2,
+  "lot_width_ft": 50,
+  "notes": "Entry move-up program close to major job centers and retail."
+}

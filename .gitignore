@@ -2,3 +2,7 @@ generated_agents/outlook_local_cache.json
 generated_agents/outlook_agent_learning.json
 .graph_token_cache.bin
 outlook_addin/certs/
+.venv/
+__pycache__/
+*.pyc
+market_pricing_agent/outputs/

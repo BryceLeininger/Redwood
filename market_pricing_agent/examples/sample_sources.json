@@ -1,0 +1,23 @@
+{
+  "submarket": "Northlake",
+  "sources": [
+    {
+      "name": "Builder Alpha - Oak Hollow",
+      "kind": "community",
+      "source_type": "html",
+      "location": "sample_builder_community_alpha.html"
+    },
+    {
+      "name": "Builder Beta - Cedar Ridge",
+      "kind": "community",
+      "source_type": "html",
+      "location": "sample_builder_community_beta.html"
+    },
+    {
+      "name": "Northlake Recent Resales",
+      "kind": "resale",
+      "source_type": "csv",
+      "location": "sample_resales.csv"
+    }
+  ]
+}
