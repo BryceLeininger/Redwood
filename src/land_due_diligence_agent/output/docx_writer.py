@@ -68,6 +68,12 @@ _FRONT_END_PRIORITY = {
     "document gap": 4,
     "routine item": 5,
 }
+_ACQUISITION_SEVERITY_PRIORITY = {
+    "CRITICAL": 0,
+    "HIGH": 1,
+    "MODERATE": 2,
+    "LOW": 3,
+}
 
 
 @dataclass(slots=True)
@@ -173,6 +179,7 @@ def _write_structured_report(document: Document, result: DealRunResult, synthesi
         critical_missing=critical_missing,
     )
     _add_deal_overview(document, result, synthesis, fact_index)
+    _add_gating_items_section(document, synthesis, material_issues)
     _add_category_section(
         document=document,
         title="Entitlement & Zoning",
@@ -252,6 +259,7 @@ def _write_structured_report(document: Document, result: DealRunResult, synthesi
         conflict_types={"purchase_price"},
     )
     _add_key_risks_section(document, material_issues)
+    _add_recommended_next_steps_section(document, synthesis, material_issues, critical_missing)
     _add_missing_information_section(document, result, synthesis, critical_missing)
     _add_questions_for_seller_section(document, material_issues, critical_missing)
 
@@ -266,6 +274,19 @@ def _add_executive_summary(
     critical_missing: list[OmissionAssessment],
 ) -> None:
     _add_section(document, "Executive Summary")
+
+    _add_subsection(document, "IC Read")
+    _add_bullet_items(
+        document,
+        [
+            _SectionBullet(text=clip_text(synthesis.executive_summary, 420)),
+            _SectionBullet(
+                text=(
+                    f"Current recommendation posture: {synthesis.recommendation.posture}. "
+                    f"This is being driven by {', '.join(issue.title for issue in material_issues[:2]) or 'the current package quality and unresolved diligence items'}.")
+            ),
+        ],
+    )
 
     _add_subsection(document, "Deal Snapshot")
     _add_bullet_items(
@@ -309,6 +330,37 @@ def _add_executive_summary(
     _add_bullet_items(
         document,
         missing_summary or [_SectionBullet(text="No additional critical missing item was isolated beyond the current issue set.")],
+    )
+
+
+def _add_gating_items_section(
+    document: Document,
+    synthesis: DealSynthesis,
+    material_issues: list[CanonicalIssue],
+) -> None:
+    _add_section(document, "Deal Killers / Gating Items")
+    roadmap_items = synthesis.further_diligence_roadmap.deal_killers_or_gating_items[:6]
+    if roadmap_items:
+        _add_bullet_items(document, [_SectionBullet(text=item) for item in roadmap_items])
+        return
+
+    gating_issues = [issue for issue in material_issues if issue.gating_item][:5]
+    if not gating_issues:
+        _add_bullet_items(
+            document,
+            [_SectionBullet(text="No current issue reads as a clear deal killer, but the deal still depends on resolving the highest-severity open items.")],
+        )
+        return
+
+    _add_bullet_items(
+        document,
+        [
+            _SectionBullet(
+                text=f"{issue.title} [{issue.acquisition_severity}]: {_issue_deal_impact(issue)}",
+                references=_issue_reference_labels(issue),
+            )
+            for issue in gating_issues
+        ],
     )
 
 
@@ -377,11 +429,40 @@ def _add_key_risks_section(document: Document, material_issues: list[CanonicalIs
         _add_bullet_items(
             document,
             [
+                _SectionBullet(text=f"Severity / gating: {_issue_severity_line(issue)}"),
                 _SectionBullet(text=f"What it is: {_issue_what_line(issue)}"),
                 _SectionBullet(text=f"Likely explanation: {_issue_likely_explanation(issue)}"),
-                _SectionBullet(text=f"Why it matters: {_issue_deal_impact(issue)}", references=_issue_reference_labels(issue)),
+                _SectionBullet(text=f"Deal impact: {_issue_deal_impact(issue)}", references=_issue_reference_labels(issue)),
+                _SectionBullet(text=f"Likely reality vs noise: {_issue_reality_vs_noise(issue)}"),
+                _SectionBullet(text=f"Needed to clear: {_issue_request_text(issue)}"),
             ],
         )
+
+
+def _add_recommended_next_steps_section(
+    document: Document,
+    synthesis: DealSynthesis,
+    material_issues: list[CanonicalIssue],
+    critical_missing: list[OmissionAssessment],
+) -> None:
+    _add_section(document, "Recommended Next Steps")
+    roadmap_steps = synthesis.further_diligence_roadmap.recommended_next_steps[:8]
+    if roadmap_steps:
+        for step in roadmap_steps:
+            document.add_paragraph(step, style="List Number")
+        return
+
+    fallback_steps = _build_seller_request_items(material_issues, critical_missing)[:8]
+    if not fallback_steps:
+        _add_bullet_items(document, [_SectionBullet(text="No additional concrete next step was isolated from the current package.")])
+        return
+
+    for item in fallback_steps:
+        document.add_paragraph(item.text, style="List Number")
+        if item.note:
+            _add_note_line(document, f"Why: {item.note}")
+        if item.references:
+            _add_reference_line(document, item.references)
 
 
 def _add_missing_information_section(
@@ -588,7 +669,17 @@ def _build_seller_request_items(
 ) -> list[_SectionBullet]:
     items: list[_SectionBullet] = []
 
-    for issue in material_issues[:5]:
+    ordered_issues = sorted(
+        material_issues,
+        key=lambda issue: (
+            _ACQUISITION_SEVERITY_PRIORITY.get(issue.acquisition_severity, 4),
+            0 if issue.gating_item else 1,
+            -issue.priority_score.total,
+            issue.title,
+        ),
+    )
+
+    for issue in ordered_issues[:5]:
         items.append(
             _SectionBullet(
                 text=_issue_request_text(issue),
@@ -656,7 +747,9 @@ def _material_issues(synthesis: DealSynthesis) -> list[CanonicalIssue]:
     issues = [issue for issue in synthesis.canonical_issue_registry.issues if _issue_is_material(issue)]
     issues.sort(
         key=lambda issue: (
+            _ACQUISITION_SEVERITY_PRIORITY.get(issue.acquisition_severity, 4),
             _FRONT_END_PRIORITY.get(issue.front_end_flag, 9),
+            0 if issue.gating_item else 1,
             0 if issue.blocking_flag else 1,
             0 if issue.critical_path_flag else 1,
             -issue.priority_score.total,
@@ -810,12 +903,15 @@ def _issue_known_line(issue: CanonicalIssue) -> str:
 
 
 def _issue_summary_line(issue: CanonicalIssue) -> str:
-    return clip_text(issue.likely_implication or issue.why_it_matters or issue.title, 190)
+    affects = ", ".join(issue.affects[:2]) or "deal execution"
+    summary = issue.practical_impact or issue.likely_implication or issue.why_it_matters or issue.title
+    return clip_text(f"{issue.acquisition_severity}; affects {affects}. {summary}", 200)
 
 
 def _issue_section_detail(issue: CanonicalIssue) -> str:
-    detail = issue.why_it_matters or issue.likely_implication or issue.what_would_resolve_it
-    return clip_text(detail, 190)
+    affects = ", ".join(issue.affects[:2]) or "deal execution"
+    detail = issue.practical_impact or issue.why_it_matters or issue.likely_implication or issue.what_would_resolve_it
+    return clip_text(f"{issue.acquisition_severity}; affects {affects}. {detail}", 200)
 
 
 def _issue_what_line(issue: CanonicalIssue) -> str:
@@ -827,6 +923,8 @@ def _issue_what_line(issue: CanonicalIssue) -> str:
 
 
 def _issue_likely_explanation(issue: CanonicalIssue) -> str:
+    if issue.likely_explanation:
+        return clip_text(issue.likely_explanation, 220)
     if issue.status == "conflicted":
         return "Different documents appear to be using different assumptions or plan versions, and no controlling source has been established."
     if issue.status in {"not found", "unclear whether present", "present but weak"}:
@@ -847,6 +945,8 @@ def _issue_likely_explanation(issue: CanonicalIssue) -> str:
 
 
 def _issue_deal_impact(issue: CanonicalIssue) -> str:
+    if issue.practical_impact:
+        return clip_text(issue.practical_impact, 220)
     impact_lines = unique_preserve_order(
         [
             issue.likely_underwriting_effect,
@@ -879,6 +979,24 @@ def _issue_request_text(issue: CanonicalIssue) -> str:
     if issue.open_questions:
         return issue.open_questions[0].rstrip("?") + "?"
     return f"Please confirm how {issue.title.lower()} is being resolved and provide the controlling support."
+
+
+def _issue_severity_line(issue: CanonicalIssue) -> str:
+    affects = ", ".join(issue.affects[:3]) or "deal execution"
+    gating = "gating item" if issue.gating_item else "non-gating item"
+    return f"{issue.acquisition_severity}; {gating}; affects {affects}."
+
+
+def _issue_reality_vs_noise(issue: CanonicalIssue) -> str:
+    if issue.reality_vs_noise:
+        return clip_text(issue.reality_vs_noise, 220)
+    if issue.information_status == "conflicting across documents":
+        return "Likely real inconsistency because readable documents conflict on a controlling assumption."
+    if issue.information_status == "stale and potentially unreliable":
+        return "Likely stale support rather than a true contradiction."
+    if issue.confidence == "low":
+        return "Signal remains weak and should not be over-weighted until confirmed."
+    return "Likely real issue because the current readable support is specific enough to merit attention."
 
 
 def _omission_request_text(assessment: OmissionAssessment) -> str:

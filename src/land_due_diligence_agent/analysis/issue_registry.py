@@ -68,6 +68,12 @@ _CATEGORY_PRIORITY = {
     "Budget / Cost Reliability": 84,
     "Schedule Risks": 80,
 }
+_ACQUISITION_SEVERITY_PRIORITY = {
+    "CRITICAL": 0,
+    "HIGH": 1,
+    "MODERATE": 2,
+    "LOW": 3,
+}
 
 _RELATION_ORDER = {
     "separate": 0,
@@ -615,35 +621,48 @@ def build_recommendation_from_registry(registry: CanonicalIssueRegistry) -> Reco
         for issue_id in registry.blocker_issue_ids
         if issue_id in issue_by_id
     ]
-    top_issues = (blocking_issues or issues)[:3]
-    max_closing = max(issue.priority_score.closing_risk for issue in top_issues)
+    ordered_issues = _ordered_by_acquisition_signal(issues)
+    gating_issues = [issue for issue in ordered_issues if issue.gating_item]
+    top_issues = (gating_issues or blocking_issues or ordered_issues)[:3]
     max_cost = max(issue.priority_score.cost_exposure for issue in top_issues)
-    unresolved_title = any(issue.issue_id == "title-access-clearance" for issue in top_issues)
-    unsupported_core = any(issue.status in {"not found", "unclear whether present"} for issue in top_issues)
-    retrade_signal = any(issue.decision_action in {"reprice", "restructure"} for issue in top_issues)
+    critical_issues = [issue for issue in top_issues if issue.acquisition_severity == "CRITICAL"]
+    severe_issues = [issue for issue in top_issues if issue.acquisition_severity in {"CRITICAL", "HIGH"}]
+    retrade_signal = any(
+        issue.decision_action in {"reprice", "restructure"}
+        and any(effect in {"price", "construction cost"} for effect in issue.affects)
+        for issue in top_issues
+    )
 
     if any(issue.decision_action == "treat as fatal" for issue in top_issues):
         posture = "no-go"
-    elif any(issue.schedule_impact_classification in {"immediate blocker", "pre-close blocker"} for issue in top_issues):
-        posture = "pause"
-    elif unresolved_title and max_closing >= 5 and unsupported_core:
+    elif critical_issues:
         posture = "pause"
     elif retrade_signal and max_cost >= 4:
         posture = "retrade"
-    elif any(issue.blocking_flag or issue.critical_path_flag for issue in top_issues):
+    elif severe_issues:
         posture = "proceed with conditions"
-    elif any(issue.gating_flags for issue in top_issues):
+    elif any(issue.blocking_flag or issue.critical_path_flag or issue.gating_flags for issue in top_issues):
         posture = "proceed with conditions"
     else:
         posture = "proceed"
 
     reasons = [_issue_blocked_line(issue) for issue in top_issues[:3]]
     conditions = unique_preserve_order(_issue_condition_line(issue) for issue in top_issues[:3])[:3]
-    if blocking_issues:
+    if posture == "no-go":
         lead_blockers = ", ".join(issue.title.lower() for issue in top_issues[:2])
         rationale = normalize_line(
-            f"{posture.title()} is the current posture because the real gating path runs through {lead_blockers}. "
+            f"No-go is the current posture because the deal still turns on {lead_blockers}, and at least one of those items is reading as a fatal condition rather than a fixable diligence gap."
+        )
+    elif posture == "pause":
+        lead_blockers = ", ".join(issue.title.lower() for issue in top_issues[:2])
+        rationale = normalize_line(
+            f"Pause is the current posture because the real gating path runs through {lead_blockers}. "
             f"{registry.critical_path_summary}"
+        )
+    elif posture == "retrade":
+        lead_drivers = ", ".join(issue.title.lower() for issue in top_issues[:2])
+        rationale = normalize_line(
+            f"Retrade is the current posture because the live underwriting risk sits in {lead_drivers}, and those items can still move basis or required structure before the deal is financeable."
         )
     else:
         rationale = (
@@ -670,12 +689,21 @@ def build_section_selections(
     del recommendation
     issues = registry.issues
     top_line_issues = [issue for issue in issues if issue.top_line_eligible]
-    front_end_flags = [issue for issue in top_line_issues if issue.front_end_flag in {"red flag", "yellow flag"}]
-    blocker_front_end_flags = [issue for issue in front_end_flags if issue.blocking_flag or issue.critical_path_flag]
+    severity_issues = [
+        issue
+        for issue in _ordered_by_acquisition_signal(top_line_issues)
+        if issue.acquisition_severity in {"CRITICAL", "HIGH", "MODERATE"}
+    ]
+    front_end_flags = [issue for issue in severity_issues if issue.front_end_flag in {"red flag", "yellow flag"}]
+    blocker_front_end_flags = [
+        issue
+        for issue in severity_issues
+        if issue.gating_item or issue.blocking_flag or issue.critical_path_flag
+    ]
     if analysis_mode == "fast":
-        executive_ids = [issue.issue_id for issue in (front_end_flags or top_line_issues)[:3]]
+        executive_ids = [issue.issue_id for issue in (severity_issues or front_end_flags or top_line_issues)[:3]]
         key_risk_ids = executive_ids
-        seller_ids = [issue.issue_id for issue in issues[:3]]
+        seller_ids = [issue.issue_id for issue in (_ordered_by_acquisition_signal(issues) or issues)[:3]]
         return _selection_records(
             executive_ids=executive_ids,
             key_risk_ids=key_risk_ids,
@@ -684,10 +712,10 @@ def build_section_selections(
             appendix_ids=[issue.issue_id for issue in issues],
         )
 
-    executive_ids = [issue.issue_id for issue in (front_end_flags or top_line_issues)[:4]]
-    key_risk_ids = [issue.issue_id for issue in (front_end_flags or top_line_issues)[:5]]
-    ic_ids = [issue.issue_id for issue in (blocker_front_end_flags or front_end_flags or top_line_issues)[:3]]
-    seller_ids = [issue.issue_id for issue in issues[:5]]
+    executive_ids = [issue.issue_id for issue in (severity_issues or front_end_flags or top_line_issues)[:4]]
+    key_risk_ids = [issue.issue_id for issue in (severity_issues or front_end_flags or top_line_issues)[:5]]
+    ic_ids = [issue.issue_id for issue in (blocker_front_end_flags or severity_issues or front_end_flags or top_line_issues)[:3]]
+    seller_ids = [issue.issue_id for issue in (_ordered_by_acquisition_signal(issues) or issues)[:5]]
     appendix_ids = [issue.issue_id for issue in issues]
 
     selections = _selection_records(
@@ -835,45 +863,62 @@ def build_overall_read_draft(
 ) -> str:
     """Build a short overall read from canonical issues only."""
 
-    issues = ([issue for issue in registry.issues if issue.top_line_eligible] or registry.issues)[:3]
+    issues = _ordered_by_acquisition_signal([issue for issue in registry.issues if issue.top_line_eligible] or registry.issues)[:3]
     if not issues:
         return f"{deal_name} does not currently present a concentrated diligence issue, but the package should still be checked for completeness."
 
-    real_flags = [issue for issue in registry.issues if issue.front_end_flag in {"red flag", "yellow flag"}][:2]
+    lead_issues = [issue for issue in issues if issue.acquisition_severity in {"CRITICAL", "HIGH", "MODERATE"}] or issues
     issue_text = "; ".join(
-        f"{issue.title.lower()} ({issue.likely_implication.lower()})"
-        for issue in (real_flags or issues)[:2]
+        f"{issue.title.lower()} [{issue.acquisition_severity.lower()}], affecting {', '.join(issue.affects[:2]) or 'deal execution'}"
+        for issue in lead_issues[:2]
     )
+    known_text = "; ".join(registry.front_end_known_points[:2]) or "readable support still provides only a partial picture"
     unresolved_text = "; ".join(registry.front_end_unresolved_points[:2]) or "remaining blind spots still limit confidence"
+    next_step_text = "; ".join(
+        issue.what_would_resolve_it.rstrip(".")
+        for issue in lead_issues[:2]
+        if issue.what_would_resolve_it
+    ) or "confirm the controlling documents behind the lead assumptions"
     challenge_text = (
         f" The main pushback is that {challenge_findings[0].concern.lower()}"
         if challenge_findings
         else ""
     )
-    return (
-        f"{deal_name} currently reads as '{recommendation.posture}'. {entitlement_status} "
-        f"{registry.central_risk_pattern} {registry.cluster_pattern} {registry.critical_path_summary} "
-        f"The package currently feels {registry.package_quality or 'adequate'} with {registry.confidence_in_initial_read} confidence in the initial read. "
-        f"The lead front-end flags are {issue_text}. "
-        f"{registry.concern_pattern} "
+    return normalize_line(
+        f"{deal_name} currently reads as '{recommendation.posture}'. {entitlement_status} What appears to be real so far: {known_text}. "
+        f"The issues actually driving the deal are {issue_text}. "
         f"The biggest blind spots are {unresolved_text}. "
-        f"This reads as a {registry.fragility_classification} deal.{challenge_text}"
-    ).strip()
+        f"Pattern read: {registry.central_risk_pattern} {registry.cluster_pattern} This still reads as a {registry.fragility_classification} deal. "
+        f"Next, the team should {next_step_text}. {registry.critical_path_summary} {challenge_text}"
+    )
 
 
 def build_seller_questions_from_registry(registry: CanonicalIssueRegistry) -> list[str]:
     """Build negotiation and verification questions from canonical issues."""
 
     questions: list[str] = []
-    for issue in registry.issues[:6]:
+    for issue in _ordered_by_acquisition_signal(registry.issues)[:6]:
         source_hint = _source_hint(issue.citations[:2], issue.source_documents[:2])
+        request_line = issue.what_would_resolve_it or issue.missing_confirmation or "provide the current controlling document"
         questions.append(
-            f"Please confirm how {issue.title.lower()} is being resolved, provide the current support, and state exactly what clears it for underwriting.{source_hint}"
+            f"{issue.title}: please provide the current controlling support and state exactly what clears this item for underwriting.{source_hint}"
         )
-        if issue.what_would_resolve_it:
-            questions.append(f"What current document or deliverable satisfies this condition: {issue.what_would_resolve_it}{source_hint}")
+        questions.append(f"{issue.title}: {request_line.rstrip('.')}.{source_hint}")
 
     return unique_preserve_order(questions)[:8]
+
+
+def _ordered_by_acquisition_signal(issues: list[CanonicalIssue]) -> list[CanonicalIssue]:
+    return sorted(
+        issues,
+        key=lambda issue: (
+            _ACQUISITION_SEVERITY_PRIORITY.get(issue.acquisition_severity, 4),
+            0 if issue.gating_item else 1,
+            0 if issue.blocking_flag else 1,
+            -issue.priority_score.total,
+            issue.title,
+        ),
+    )
 
 
 def _matching_analyses_for_rule(

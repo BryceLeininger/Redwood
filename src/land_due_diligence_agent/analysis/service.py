@@ -140,13 +140,13 @@ def run_analysis(
         learning_retriever=learning_engine.retrieve,
         deal_metadata=precedent_engine.deal_metadata,
     )
-    recommendation = build_recommendation_from_registry(registry)
     reading_order, further_diligence_roadmap = apply_front_end_assessment(
         registry=registry,
         document_analyses=document_analyses,
         omission_assessments=omission_assessments,
         contradictions=contradictions,
     )
+    recommendation = build_recommendation_from_registry(registry)
     web_research_results = []
     if analysis_mode == "full" and web_researcher is not None:
         try:

@@ -128,6 +128,12 @@ _WHY_NOW_ORDER = {
     "likely routine unless contradicted": 4,
     "unclear": 5,
 }
+_ACQUISITION_SEVERITY_ORDER = {
+    "CRITICAL": 0,
+    "HIGH": 1,
+    "MODERATE": 2,
+    "LOW": 3,
+}
 
 
 def apply_front_end_assessment(
@@ -290,6 +296,16 @@ def build_further_diligence_roadmap(
         for issue in prioritized_issues
         if issue.why_now == "likely routine unless contradicted"
     ][:5]
+    gating_items = [
+        _gating_item_line(issue)
+        for issue in prioritized_issues
+        if issue.gating_item
+    ][:6]
+    recommended_next_steps = _recommended_next_steps(
+        issues=prioritized_issues,
+        omission_assessments=omission_assessments,
+        reading_order=reading_order,
+    )
 
     return FurtherDiligenceRoadmap(
         top_real_flags=real_flags,
@@ -298,6 +314,8 @@ def build_further_diligence_roadmap(
         top_stale_materials_to_refresh=stale_lines,
         top_public_consultant_internal_research=research_lines,
         top_documents_to_read_first=read_first,
+        deal_killers_or_gating_items=gating_items,
+        recommended_next_steps=recommended_next_steps,
         follow_up_order=follow_up_order,
         investigate_immediately=investigate_immediately,
         request_or_verify_soon=request_or_verify_soon,
@@ -365,6 +383,12 @@ def _annotate_issues(
         issue.front_end_flag, issue.front_end_flag_reason = _issue_front_end_flag(issue)
         issue.why_now = _why_now(issue)
         issue.missing_confirmation = issue.what_would_resolve_it or _default_missing_confirmation(issue)
+        issue.affects = _issue_affects(issue)
+        issue.likely_explanation = _issue_likely_explanation(issue)
+        issue.practical_impact = _issue_practical_impact(issue)
+        issue.reality_vs_noise = _issue_reality_vs_noise(issue)
+        issue.acquisition_severity, issue.acquisition_severity_reason = _issue_acquisition_severity(issue)
+        issue.gating_item = _issue_is_gating_item(issue)
         issue.research_agenda = (
             [_research_agenda_item(issue)]
             if issue.front_end_flag != "routine item" or issue.why_now != "likely routine unless contradicted"
@@ -390,11 +414,16 @@ def _annotate_issues(
                 f"information status={issue.information_status}",
                 f"normality={issue.normality_classification}",
                 f"why now={issue.why_now}",
+                f"acquisition severity={issue.acquisition_severity}",
+                f"affects={', '.join(issue.affects) or 'none'}",
                 f"specificity={issue.specificity_level}",
                 f"abnormality basis={issue.abnormality_basis}",
                 f"genericity penalty={issue.genericity_penalty}",
                 issue.front_end_flag_reason,
                 issue.unusualness_rationale,
+                issue.acquisition_severity_reason,
+                issue.practical_impact,
+                issue.reality_vs_noise,
             ]
         )
 
@@ -729,6 +758,138 @@ def _issue_front_end_flag(issue: CanonicalIssue) -> tuple[str, str]:
     )
 
 
+def _issue_affects(issue: CanonicalIssue) -> list[str]:
+    affects: list[str] = []
+    if (
+        issue.priority_score.cost_exposure >= 4
+        or issue.category in {"Fee / Exaction Burden", "Budget / Cost Reliability", "Offsite Obligations"}
+        or issue.decision_action in {"reprice", "restructure"}
+    ):
+        affects.append("price")
+    if (
+        issue.priority_score.schedule_exposure >= 4
+        or issue.schedule_impact_classification != "non-blocking"
+        or issue.blocking_flag
+        or issue.critical_path_flag
+    ):
+        affects.append("timeline")
+    if issue.priority_score.entitlement_fragility >= 4 or issue.category == "Entitlement Status":
+        affects.append("entitlement risk")
+    if (
+        issue.category in {
+            "Environmental Risks",
+            "Geotechnical Risks",
+            "Flood / Drainage Issues",
+            "Utilities / Infrastructure Issues",
+            "Offsite Obligations",
+            "Fee / Exaction Burden",
+            "Budget / Cost Reliability",
+        }
+        or "Vertical start" in issue.gating_flags
+    ):
+        affects.append("construction cost")
+    if issue.category == "Title / Access Concerns" or issue.priority_score.closing_risk >= 4 or "Closing" in issue.gating_flags:
+        affects.append("legal/title risk")
+    return unique_preserve_order(affects)
+
+
+def _issue_likely_explanation(issue: CanonicalIssue) -> str:
+    if issue.status == "conflicted":
+        return "Different readable documents appear to be using different assumptions or plan versions, and no controlling source has been established."
+    if issue.status in {"not found", "unclear whether present", "present but weak"}:
+        return "The package does not contain a current controlling document that cleanly closes this issue."
+
+    category_explanations = {
+        "Title / Access Concerns": "Title exceptions, access rights, or ownership structure have not yet been reconciled to the current closing plan.",
+        "Entitlement Status": "Project approvals may be farther along than the actual condition closeout, zoning compliance, or permit path support.",
+        "Environmental Risks": "Environmental follow-up still appears open or not fully allocated into basis, schedule, or deal structure.",
+        "Geotechnical Risks": "Soils recommendations exist, but the current plan and cost stack do not clearly show they are fully carried through.",
+        "Flood / Drainage Issues": "Drainage or flood-control requirements still appear to depend on civil redesign or later permit-stage confirmation.",
+        "Utilities / Infrastructure Issues": "Provider confirmation and required utility scope are still not locked for the current plan.",
+        "Offsite Obligations": "Frontage or offsite scope still appears buyer-facing, or the responsible party is not fixed in the current support.",
+        "Fee / Exaction Burden": "Current fee support looks preliminary, stale, or not fully confirmed by the governing agency.",
+        "Budget / Cost Reliability": "Current cost support remains budgetary, incomplete, or not auditable enough to lock underwriting assumptions.",
+        "Schedule Risks": "The current schedule still depends on assumptions that are not fully confirmed in the package.",
+    }
+    return category_explanations.get(issue.category, "The current package still lacks a clean controlling basis for this issue.")
+
+
+def _issue_practical_impact(issue: CanonicalIssue) -> str:
+    impact_lines = unique_preserve_order(
+        [
+            issue.likely_underwriting_effect if "price" in issue.affects else "",
+            issue.likely_cost_effect if "construction cost" in issue.affects or "price" in issue.affects else "",
+            issue.likely_schedule_effect if "timeline" in issue.affects else "",
+            issue.likely_closing_effect if "legal/title risk" in issue.affects else "",
+            issue.likely_yield_or_product_effect if "price" in issue.affects else "",
+            issue.likely_implication if "entitlement risk" in issue.affects else "",
+            issue.why_it_matters,
+        ]
+    )
+    filtered = [line for line in impact_lines if line]
+    if filtered:
+        return " ".join(filtered[:3])
+    return issue.likely_implication or issue.why_it_matters or issue.title
+
+
+def _issue_reality_vs_noise(issue: CanonicalIssue) -> str:
+    if issue.information_status == "conflicting across documents":
+        return "Likely real inconsistency because readable documents conflict on a controlling deal assumption, not just on fragmentary text."
+    if issue.information_status == "stale and potentially unreliable":
+        return "Likely stale support rather than a true contradiction; refresh the current controlling document before relying on older references."
+    if issue.specificity_level == "generic" and not issue.site_specific_trigger:
+        return "Likely noise or routine category presence until a site-specific trigger is confirmed."
+    if issue.evidence_basis in {"omission_only", "routine_missing_support"}:
+        return "Likely a package completeness problem rather than a proven property defect, but it still limits underwriting confidence."
+    if issue.confidence == "low":
+        return "Signal is weak and should not be over-weighted until it is confirmed in a cleaner controlling document."
+    return "Likely real issue because readable, site-specific support points to a live deal constraint."
+
+
+def _issue_acquisition_severity(issue: CanonicalIssue) -> tuple[str, str]:
+    max_impact = max(
+        issue.priority_score.cost_exposure,
+        issue.priority_score.schedule_exposure,
+        issue.priority_score.entitlement_fragility,
+        issue.priority_score.closing_risk,
+        issue.priority_score.yield_exposure,
+    )
+
+    if issue.decision_action == "treat as fatal":
+        return "CRITICAL", "The issue is explicitly modeled as a deal-stopping condition."
+    if issue.blocking_flag and issue.schedule_impact_classification in {"immediate blocker", "pre-close blocker"}:
+        return "CRITICAL", "The issue blocks a core decision gate or closing path and can stop the deal until resolved."
+    if issue.blocking_flag and issue.priority_score.closing_risk >= 5:
+        return "CRITICAL", "The issue directly threatens closability or legal control of the deal."
+    if issue.blocking_flag and max_impact >= 4 and issue.false_positive_risk != "high":
+        return "CRITICAL", "The issue is decision-relevant, blocks progress, and can materially move price or timing."
+    if (
+        issue.critical_path_flag
+        or issue.front_end_flag in {"red flag", "conflict / contradiction concern"}
+        or max_impact >= 5
+        or issue.priority_score.total >= 95
+    ):
+        return "HIGH", "The issue is unlikely to kill the deal on its own, but it can materially change underwriting, timing, or execution risk."
+    if (
+        issue.front_end_flag in {"yellow flag", "document gap", "stale-information concern"}
+        or issue.decision_relevant
+        or max_impact >= 3
+        or issue.priority_score.total >= 70
+    ):
+        return "MODERATE", "The issue needs clarification before relying on the package, but it does not currently read as fatal."
+    return "LOW", "The issue currently reads as informational, minor, or closer to diligence background noise than to a decision driver."
+
+
+def _issue_is_gating_item(issue: CanonicalIssue) -> bool:
+    if issue.acquisition_severity == "CRITICAL":
+        return True
+    if issue.blocking_flag and issue.schedule_impact_classification in {"pre-underwriting blocker", "pre-final-map blocker"}:
+        return True
+    if issue.priority_score.closing_risk >= 5 and issue.decision_relevant:
+        return True
+    return False
+
+
 def _specificity_gate_reason(issue: CanonicalIssue) -> str:
     if issue.front_end_flag == "conflict / contradiction concern":
         return ""
@@ -997,7 +1158,7 @@ def _issue_roadmap_line(issue: CanonicalIssue) -> str:
     if issue.specificity_level == "generic":
         return f"{issue.title}: verify whether this is truly an issue here."
     return (
-        f"{issue.title}: {issue.normality_classification}, {issue.front_end_flag}. "
+        f"{issue.title}: {issue.acquisition_severity}, {issue.normality_classification}, {issue.front_end_flag}. "
         f"Why now: {issue.why_now}. "
         f"What it blocks: {blocked.lower()}."
     )
@@ -1038,6 +1199,61 @@ def _build_follow_up_order(
         steps.append(f"Resolve the contradiction: {finding.description}")
     steps.extend(research_lines[:3])
     return unique_preserve_order(steps)[:7]
+
+
+def _gating_item_line(issue: CanonicalIssue) -> str:
+    affects = ", ".join(issue.affects) or "deal viability"
+    confirm_line = _normalized_next_step(
+        issue.missing_confirmation or issue.what_would_resolve_it or _default_missing_confirmation(issue)
+    )
+    return (
+        f"{issue.title} [{issue.acquisition_severity}]: {confirm_line} "
+        f"Affects {affects}."
+    )
+
+
+def _recommended_next_steps(
+    *,
+    issues: list[CanonicalIssue],
+    omission_assessments: list[OmissionAssessment],
+    reading_order: list[ReadingRecommendation],
+) -> list[str]:
+    steps: list[str] = []
+
+    for issue in issues:
+        if issue.acquisition_severity not in {"CRITICAL", "HIGH", "MODERATE"}:
+            continue
+        steps.append(_normalized_next_step(issue.what_would_resolve_it or issue.missing_confirmation or issue.title))
+        if len(steps) >= 6:
+            break
+
+    for assessment in omission_assessments:
+        if assessment.front_end_status not in {"missing and important", "stale and potentially unreliable", "conflicting across documents"}:
+            continue
+        steps.append(_normalized_next_step(assessment.recommended_request or assessment.item))
+        if len(steps) >= 8:
+            break
+
+    for recommendation in reading_order:
+        if recommendation.bucket != "must read personally":
+            continue
+        steps.append(f"Review {recommendation.title} directly because other conclusions depend on it.")
+        if len(steps) >= 8:
+            break
+
+    return unique_preserve_order(steps)[:8]
+
+
+def _normalized_next_step(text: str) -> str:
+    cleaned = text.strip().rstrip(".")
+    if not cleaned:
+        return "Confirm the controlling source before relying on the current assumption."
+    lowered = cleaned.lower()
+    if lowered.startswith(("provide ", "replace ", "reconcile ", "confirm ", "refresh ", "review ", "state ", "obtain ")):
+        return cleaned[0].upper() + cleaned[1:] + "."
+    if lowered.startswith(("a current", "current ", "updated ", "an updated", "a refreshed", "refreshed ")):
+        return f"Obtain {cleaned}."
+    return f"Confirm {cleaned}."
 
 
 def _source_analyses_for_issue(issue: CanonicalIssue, document_analyses: list[DocumentAnalysis]) -> list[DocumentAnalysis]:

@@ -515,6 +515,13 @@ class CanonicalIssue:
     likely_closing_effect: str = ""
     likely_structure_effect: str = ""
     likely_underwriting_effect: str = ""
+    acquisition_severity: str = "LOW"
+    acquisition_severity_reason: str = ""
+    affects: list[str] = field(default_factory=list)
+    practical_impact: str = ""
+    likely_explanation: str = ""
+    reality_vs_noise: str = ""
+    gating_item: bool = False
     front_end_flag: str = "routine item"
     front_end_flag_reason: str = ""
     information_status: str = "present and adequate"
@@ -662,6 +669,8 @@ class FurtherDiligenceRoadmap:
     top_stale_materials_to_refresh: list[str] = field(default_factory=list)
     top_public_consultant_internal_research: list[str] = field(default_factory=list)
     top_documents_to_read_first: list[str] = field(default_factory=list)
+    deal_killers_or_gating_items: list[str] = field(default_factory=list)
+    recommended_next_steps: list[str] = field(default_factory=list)
     follow_up_order: list[str] = field(default_factory=list)
     investigate_immediately: list[str] = field(default_factory=list)
     request_or_verify_soon: list[str] = field(default_factory=list)

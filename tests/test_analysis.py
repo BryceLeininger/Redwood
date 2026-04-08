@@ -652,10 +652,57 @@ class AnalysisTests(unittest.TestCase):
         self.assertEqual(synthesis.recommended_reading_order[0].bucket, "must read personally")
         self.assertTrue(synthesis.recommended_reading_order[0].rationale_factors)
         self.assertTrue(synthesis.further_diligence_roadmap.top_documents_to_read_first)
+        self.assertTrue(synthesis.further_diligence_roadmap.recommended_next_steps)
         self.assertTrue(
             synthesis.further_diligence_roadmap.top_real_flags
             or synthesis.further_diligence_roadmap.top_contradictions_to_resolve
         )
+
+    def test_front_end_assigns_acquisition_severity_and_gating_outputs(self) -> None:
+        registry = build_canonical_issue_registry(
+            key_risks=[
+                RiskFinding(
+                    category="Title / Access Concerns",
+                    severity="high",
+                    summary="An access easement exception still burdens the planned entry condition.",
+                    issue="Title access clearance unresolved.",
+                    why_it_matters="Legal access control is not yet closed for the current entry configuration.",
+                    likely_implication="Closing and site plan reliability remain exposed until access is cleared or redesigned.",
+                    source_documents=["Title Report"],
+                    citations=[Citation(document_name="Title Report", chunk_id="page-0001", page_number=1)],
+                    gating_flags=["Closing", "Underwriting confidence"],
+                )
+            ],
+            contradictions=[],
+            omission_assessments=[
+                OmissionAssessment(
+                    item="ALTA or boundary survey",
+                    category="Title / Access Concerns",
+                    status="not found",
+                    rationale="No current survey was found in the package.",
+                )
+            ],
+            document_analyses=[],
+        )
+
+        _reading_order, roadmap = apply_front_end_assessment(
+            registry=registry,
+            document_analyses=[],
+            omission_assessments=registry.omission_assessments,
+            contradictions=[],
+        )
+
+        issue = next(issue for issue in registry.issues if issue.issue_id == "title-access-clearance")
+        self.assertEqual(issue.acquisition_severity, "CRITICAL")
+        self.assertTrue(issue.gating_item)
+        self.assertIn("legal/title risk", issue.affects)
+        self.assertTrue(issue.practical_impact)
+        self.assertTrue(issue.reality_vs_noise)
+        self.assertTrue(roadmap.deal_killers_or_gating_items)
+        self.assertTrue(roadmap.recommended_next_steps)
+
+        recommendation = build_recommendation_from_registry(registry)
+        self.assertEqual(recommendation.posture, "pause")
 
     def test_omission_only_coordination_issue_stays_routine(self) -> None:
         registry = build_canonical_issue_registry(
