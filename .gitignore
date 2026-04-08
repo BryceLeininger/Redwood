@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 generated_agents/outlook_local_cache.json
 generated_agents/outlook_agent_learning.json
 .graph_token_cache.bin
@@ -6,3 +7,30 @@ outlook_addin/certs/
 __pycache__/
 *.pyc
 market_pricing_agent/outputs/
+=======
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.coverage
+.mypy_cache/
+
+# Virtual environments
+.venv/
+venv/
+
+# Local environment
+.env
+.vscode/
+
+# Confidential diligence data
+data/input/*
+!data/input/.gitkeep
+data/output/*
+!data/output/.gitkeep
+
+# OS files
+Thumbs.db
+.DS_Store
+>>>>>>> 759b4988d6ba8a95105b30b039b81801ccdffe97
