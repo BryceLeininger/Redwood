@@ -21,11 +21,9 @@ dependencies = [
 ]
 
 [project.scripts]
-agent-diligence = "land_due_diligence_agent.cli:main"
-land-dd = "land_due_diligence_agent.cli:main"
-
-[tool.setuptools]
-package-dir = {"" = "src"}
+agent-diligence = "agent_diligence.cli:main"
+land-dd = "agent_diligence.cli:main"
 
 [tool.setuptools.packages.find]
-where = ["src"]
+where = [".", "src"]
+include = ["agent_diligence*", "land_due_diligence_agent*"]
