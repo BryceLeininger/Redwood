@@ -1,2 +1,2 @@
 @echo off
-python -m land_due_diligence_agent %*
+python -m agent_diligence %*

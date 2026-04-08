@@ -1,4 +1,4 @@
-# Land Due Diligence Agent
+# Agent_Diligence
 
 Local Python CLI for land acquisition and real estate due diligence packages received from a seller. The primary workflow is a desktop deal-folder pipeline that scans `00_Source_Drop`, extracts text, classifies documents, builds a traceable issue registry, and writes a first-pass markdown review without modifying the source package.
 
@@ -46,6 +46,10 @@ Relevant files for the local workflow:
 
 ```text
 .
+|-- agent_diligence/
+|   |-- __init__.py
+|   |-- __main__.py
+|   `-- cli.py
 |-- main.py
 |-- run_land_due_diligence_agent.bat
 |-- pyproject.toml
@@ -136,7 +140,7 @@ python main.py --deal-folder "C:\Path\To\Agent_Diligence\Deals\d1_375Diana"
 ### Option 4: Run the package directly
 
 ```powershell
-python -m land_due_diligence_agent --deal-folder "C:\Path\To\Agent_Diligence\Deals\d1_375Diana"
+python -m agent_diligence --deal-folder "C:\Path\To\Agent_Diligence\Deals\d1_375Diana"
 ```
 
 ### Option 5: Use the batch launcher on Windows

@@ -1,6 +1,6 @@
-"""Repository-level CLI launcher for the local due diligence workflow."""
+"""Repository-level CLI launcher for Agent_Diligence."""
 
-from land_due_diligence_agent.cli import main
+from agent_diligence.cli import main
 
 
 if __name__ == "__main__":

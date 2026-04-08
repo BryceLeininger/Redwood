@@ -3,9 +3,9 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "land-due-diligence-agent"
+name = "agent_diligence"
 version = "0.1.0"
-description = "Portable CLI prototype for land acquisition due diligence review."
+description = "Agent_Diligence local CLI for land acquisition due diligence review."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -21,6 +21,7 @@ dependencies = [
 ]
 
 [project.scripts]
+agent-diligence = "land_due_diligence_agent.cli:main"
 land-dd = "land_due_diligence_agent.cli:main"
 
 [tool.setuptools]

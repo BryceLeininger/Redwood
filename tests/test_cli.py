@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import unittest
 
-from land_due_diligence_agent.cli import build_parser
+from agent_diligence.cli import build_parser
 
 
 class CLITests(unittest.TestCase):
