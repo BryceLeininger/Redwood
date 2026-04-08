@@ -48,9 +48,29 @@ class LocalDealPipelineTests(unittest.TestCase):
 
             review_doc = Document(result.review_report_path)
             review_text = "\n".join(paragraph.text for paragraph in review_doc.paragraphs if paragraph.text)
+            paragraph_styles = {
+                paragraph.text: paragraph.style.name
+                for paragraph in review_doc.paragraphs
+                if paragraph.text
+            }
             self.assertIn("Executive Summary", review_text)
-            self.assertIn("Top Critical Issues", review_text)
+            self.assertIn("Deal Overview", review_text)
+            self.assertIn("Entitlement & Zoning", review_text)
+            self.assertIn("Site & Product", review_text)
+            self.assertIn("Title & Ownership", review_text)
+            self.assertIn("Environmental & Geotech", review_text)
+            self.assertIn("Utilities & Infrastructure", review_text)
+            self.assertIn("Fees / Cost Drivers", review_text)
+            self.assertIn("Key Risks & Open Issues", review_text)
+            self.assertIn("Missing Information", review_text)
             self.assertIn("Questions for Seller", review_text)
+            self.assertIn("Deal Snapshot", review_text)
+            self.assertEqual(paragraph_styles["Executive Summary"], "Heading 1")
+            self.assertEqual(paragraph_styles["Deal Overview"], "Heading 1")
+            self.assertEqual(paragraph_styles["Deal Snapshot"], "Heading 2")
+            self.assertNotIn("Top Critical Issues", review_text)
+            self.assertNotIn("Detailed Findings by Category", review_text)
+            self.assertNotIn("Contradictions / Tensions", review_text)
             self.assertIn("Purchase price referenced at $12,500,000.", review_text)
 
             extraction_files = [

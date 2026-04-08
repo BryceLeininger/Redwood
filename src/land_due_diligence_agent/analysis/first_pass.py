@@ -841,12 +841,18 @@ def _prune_count_conflict_noise(
 
     max_count = max(numbers)
     threshold = max(20 if fact_type == "unit_count" else 10, int(max_count * 0.25))
+    contextual_floor = max(10 if fact_type == "unit_count" else 5, threshold // 2)
     total_context = _UNIT_TOTAL_CONTEXT if fact_type == "unit_count" else _LOT_TOTAL_CONTEXT
     filtered = [
         fact
         for fact in facts
-        if (_coerce_int(fact.normalized_value) or 0) >= threshold
-        or _has_any_term(" ".join(source.excerpt.lower() for source in fact.sources), total_context)
+        if (
+            (_coerce_int(fact.normalized_value) or 0) >= threshold
+            or (
+                (_coerce_int(fact.normalized_value) or 0) >= contextual_floor
+                and _has_any_term(" ".join(source.excerpt.lower() for source in fact.sources), total_context)
+            )
+        )
     ]
     return filtered if len({fact.normalized_value for fact in filtered}) >= 2 else facts
 
@@ -926,6 +932,13 @@ def _conflict_sort_key(fact: FactRecord) -> tuple[int, float, str]:
 def _coerce_float(value: str) -> float | None:
     try:
         return float(value)
+    except ValueError:
+        return None
+
+
+def _coerce_int(value: str) -> int | None:
+    try:
+        return int(float(value))
     except ValueError:
         return None
 

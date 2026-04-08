@@ -33,12 +33,12 @@
       "real_issue_rate": 0.25
     },
     "category:Geotechnical Risks": {
-      "count": 2.15,
-      "decision_relevant_rate": 0.46511627906976744,
-      "false_positive_rate": 0.2771084337349397,
+      "count": 2.0,
+      "decision_relevant_rate": 0.25,
+      "false_positive_rate": 0.25,
       "impact_rate": 0.75,
-      "material_issue_rate": 0.7228915662650601,
-      "real_issue_rate": 0.7228915662650601
+      "material_issue_rate": 0.75,
+      "real_issue_rate": 0.75
     },
     "category:Offsite Obligations": {
       "count": 2.0,
@@ -65,12 +65,12 @@
       "real_issue_rate": 0.5
     },
     "decision_action:downgrade": {
-      "count": 4.15,
-      "decision_relevant_rate": 0.46511627906976744,
-      "false_positive_rate": 0.8373983739837398,
-      "impact_rate": 0.16260162601626016,
-      "material_issue_rate": 0.3252032520325203,
-      "real_issue_rate": 0.16260162601626016
+      "count": 4.0,
+      "decision_relevant_rate": 0.16666666666666666,
+      "false_positive_rate": 0.8333333333333334,
+      "impact_rate": 0.16666666666666666,
+      "material_issue_rate": 0.3333333333333333,
+      "real_issue_rate": 0.16666666666666666
     },
     "decision_action:unknown": {
       "count": 10.0,
@@ -79,14 +79,6 @@
       "impact_rate": 0.9166666666666666,
       "material_issue_rate": 0.9166666666666666,
       "real_issue_rate": 0.9166666666666666
-    },
-    "evidence_basis:omission_only": {
-      "count": 0.15,
-      "decision_relevant_rate": 0.46511627906976744,
-      "false_positive_rate": 0.5348837209302325,
-      "impact_rate": 0.46511627906976744,
-      "material_issue_rate": 0.46511627906976744,
-      "real_issue_rate": 0.46511627906976744
     },
     "evidence_basis:unknown": {
       "count": 14.0,
@@ -97,12 +89,12 @@
       "real_issue_rate": 0.6875
     },
     "global:all": {
-      "count": 14.15,
-      "decision_relevant_rate": 0.46511627906976744,
-      "false_positive_rate": 0.31888544891640874,
+      "count": 14.0,
+      "decision_relevant_rate": 0.0625,
+      "false_positive_rate": 0.3125,
       "impact_rate": 0.9166666666666666,
-      "material_issue_rate": 0.7430340557275542,
-      "real_issue_rate": 0.6811145510835914
+      "material_issue_rate": 0.75,
+      "real_issue_rate": 0.6875
     },
     "issue_id:entitlement-conditions": {
       "count": 1.0,
@@ -129,12 +121,12 @@
       "real_issue_rate": 0.6666666666666666
     },
     "issue_id:geotechnical-scope": {
-      "count": 2.15,
-      "decision_relevant_rate": 0.46511627906976744,
-      "false_positive_rate": 0.2771084337349397,
+      "count": 2.0,
+      "decision_relevant_rate": 0.25,
+      "false_positive_rate": 0.25,
       "impact_rate": 0.75,
-      "material_issue_rate": 0.7228915662650601,
-      "real_issue_rate": 0.7228915662650601
+      "material_issue_rate": 0.75,
+      "real_issue_rate": 0.75
     },
     "issue_id:offsite-frontage": {
       "count": 2.0,
@@ -176,21 +168,13 @@
       "material_issue_rate": 0.75,
       "real_issue_rate": 0.6875
     },
-    "issue_strength:weak": {
-      "count": 0.15,
-      "decision_relevant_rate": 0.46511627906976744,
-      "false_positive_rate": 0.5348837209302325,
-      "impact_rate": 0.46511627906976744,
-      "material_issue_rate": 0.46511627906976744,
-      "real_issue_rate": 0.46511627906976744
-    },
     "product:multifamily": {
-      "count": 4.15,
-      "decision_relevant_rate": 0.46511627906976744,
-      "false_positive_rate": 0.3495934959349593,
+      "count": 4.0,
+      "decision_relevant_rate": 0.16666666666666666,
+      "false_positive_rate": 0.3333333333333333,
       "impact_rate": 0.8,
-      "material_issue_rate": 0.8130081300813008,
-      "real_issue_rate": 0.6504065040650406
+      "material_issue_rate": 0.8333333333333334,
+      "real_issue_rate": 0.6666666666666666
     },
     "product:single-family": {
       "count": 8.0,
@@ -217,20 +201,20 @@
       "real_issue_rate": 0.6
     },
     "region:west": {
-      "count": 11.15,
-      "decision_relevant_rate": 0.46511627906976744,
-      "false_positive_rate": 0.31558935361216733,
+      "count": 11.0,
+      "decision_relevant_rate": 0.07692307692307693,
+      "false_positive_rate": 0.3076923076923077,
       "impact_rate": 0.9,
-      "material_issue_rate": 0.7604562737642585,
-      "real_issue_rate": 0.6844106463878327
+      "material_issue_rate": 0.7692307692307693,
+      "real_issue_rate": 0.6923076923076923
     },
     "stage:acquisition-dd": {
-      "count": 14.15,
-      "decision_relevant_rate": 0.46511627906976744,
-      "false_positive_rate": 0.31888544891640874,
+      "count": 14.0,
+      "decision_relevant_rate": 0.0625,
+      "false_positive_rate": 0.3125,
       "impact_rate": 0.9166666666666666,
-      "material_issue_rate": 0.7430340557275542,
-      "real_issue_rate": 0.6811145510835914
+      "material_issue_rate": 0.75,
+      "real_issue_rate": 0.6875
     }
   }
 }
