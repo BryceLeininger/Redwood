@@ -28,6 +28,11 @@ class CLITests(unittest.TestCase):
         args = parser.parse_args(["--deal-folder", "C:/Deals/d1_375Diana"])
         self.assertEqual(args.deal_folder, "C:/Deals/d1_375Diana")
 
+    def test_debug_flag_is_accepted(self) -> None:
+        parser = build_parser()
+        args = parser.parse_args(["--deal", "d1_375Diana", "--debug"])
+        self.assertTrue(args.debug)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -51,6 +51,11 @@ def build_parser() -> argparse.ArgumentParser:
         choices=("heuristic", "openai"),
         help="Legacy LLM provider override used only with --input-folder.",
     )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Write verbose extraction artifacts and timestamped debug snapshots for the local deal workflow.",
+    )
     parser.add_argument("--log-level", help="Override the configured log level, e.g. INFO or DEBUG.")
     return parser
 
@@ -64,6 +69,7 @@ def main(argv: list[str] | None = None) -> int:
     settings = Settings.from_env().with_overrides(
         llm_provider=args.llm_provider,
         log_level=args.log_level,
+        debug_mode=args.debug,
     )
 
     if args.deal or args.deal_folder:
@@ -82,7 +88,10 @@ def _run_local_mode(args: argparse.Namespace, settings: Settings) -> int:
         return exit_code
     except Exception as exc:
         logger = configure_logging(settings.log_level)
-        logger.exception("Local deal workflow failed: %s", exc)
+        try:
+            logger.exception("Local deal workflow failed: %s", exc)
+        finally:
+            close_logging(logger)
         return 1
 
 

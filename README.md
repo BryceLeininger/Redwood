@@ -1,16 +1,20 @@
 # Agent_Diligence
 
-Local Python CLI for land acquisition and real estate due diligence packages received from a seller. The primary workflow is a desktop deal-folder pipeline that scans `00_Source_Drop`, extracts text, classifies documents, builds a traceable issue registry, and writes a first-pass markdown review without modifying the source package.
+Local Python CLI for land acquisition and real estate due diligence packages received from a seller. The primary workflow is a desktop deal-folder pipeline that scans `00_Source_Drop`, extracts text, classifies documents, builds a traceable issue registry, and writes a single Word review without modifying the source package.
 
 ## Current Workflow
 
 - Recursively scans one selected deal folder, with primary focus on `00_Source_Drop`
 - Supports `PDF`, `DOCX`, `XLSX`, `XLS`, `TXT`, and `CSV`
 - Preserves the source package and never writes into `00_Source_Drop`
-- Writes run-scoped outputs into the existing deal structure:
-  - `02_Text_Extraction/<run_id>/`
-  - `03_Metadata/<run_id>/`
-  - `04_Output/<run_id>/`
+- Writes stable outputs into the existing deal structure:
+  - `03_Metadata/deal_manifest.json`
+  - `03_Metadata/deal_manifest.csv`
+  - `03_Metadata/issue_registry.json`
+  - `03_Metadata/run_summary.json`
+  - `04_Output/Due_Diligence_Review.docx`
+  - `04_Output/run_log.txt`
+- Writes timestamped debug artifacts only when `--debug` is enabled
 - Creates a deal-level manifest with file path, extension, size, modified time, category guess, OCR usage, extraction status, and notes/errors
 - Uses OCR only as fallback for weak or image-based PDF pages
 - Produces a structured issue registry with:
@@ -18,10 +22,14 @@ Local Python CLI for land acquisition and real estate due diligence packages rec
   - conflicts / contradictions
   - missing information
   - seller questions
-- Generates a first-pass markdown review that clearly separates:
-  - Facts
-  - Conflicts / contradictions
-  - Not found in provided documents
+- Generates a due diligence Word report organized for decision-making review:
+  - Executive Summary
+  - Top Critical Issues
+  - Detailed Findings by Category
+  - Contradictions / Tensions
+  - Not Found in Provided Documents
+  - Key Documents to Review Personally
+  - Questions for Seller
 
 ## Deal Folder Layout
 
@@ -153,34 +161,29 @@ Useful optional flags:
 
 - `--deal-name "375 Diana"`
 - `--deals-root "C:\Path\To\Agent_Diligence\Deals"`
+- `--debug`
 - `--log-level DEBUG`
 
 ## Output Layout
 
-Each run writes to a timestamped subfolder so prior runs are preserved:
+Normal mode writes stable files directly into the deal folder structure:
 
 ```text
 d1_375Diana/
   00_Source_Drop/
   01_Working/
   02_Text_Extraction/
-    20260408_153000/
-      purchase_agreement.txt.txt
-      purchase_agreement.txt.json
-      title_report.txt.txt
-      title_report.txt.json
   03_Metadata/
-    latest_run.json
-    20260408_153000/
-      deal_manifest.json
-      deal_manifest.csv
-      issue_registry.json
-      run_summary.json
+    deal_manifest.json
+    deal_manifest.csv
+    issue_registry.json
+    run_summary.json
   04_Output/
-    20260408_153000/
-      first_pass_due_diligence_review.md
-      run.log
+    Due_Diligence_Review.docx
+    run_log.txt
 ```
+
+When `--debug` is enabled, the agent also writes timestamped extraction artifacts and snapshot copies under `02_Text_Extraction/<run_id>/`, `03_Metadata/<run_id>/`, and `04_Output/<run_id>/`.
 
 ## What The First Working Version Produces
 
@@ -198,7 +201,7 @@ d1_375Diana/
 - Conflict detection across extracted facts
 - Missing-item tracking for absent DD lanes and core data points
 - Seller follow-up question generation
-- First-pass due diligence review in markdown
+- Due diligence review in DOCX
 
 ## Traceability Design
 
