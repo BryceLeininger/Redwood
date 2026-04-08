@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from land_due_diligence_agent.models import DocumentRecord
+from land_due_diligence_agent.models import DealSynthesis, DocumentRecord
 
 
 @dataclass(slots=True, frozen=True)
@@ -148,6 +148,7 @@ class DealRunResult:
     manifest_entries: list[ManifestEntry] = field(default_factory=list)
     processed_documents: list[ProcessedDocument] = field(default_factory=list)
     issue_registry: IssueRegistry = field(default_factory=IssueRegistry)
+    deal_synthesis: DealSynthesis | None = None
     category_counts: dict[str, int] = field(default_factory=dict)
     files_discovered: int = 0
     supported_files: int = 0

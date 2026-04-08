@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import defaultdict
 import re
 from dataclasses import dataclass
 from typing import Callable
@@ -254,6 +255,87 @@ _SIGNAL_PATTERNS: tuple[_SignalPattern, ...] = (
     ),
 )
 
+_ZONING_NOISE_VALUES = {
+    "setback",
+    "setbacks",
+    "development standard",
+    "development standards",
+    "base zoning",
+    "designation",
+    "provided",
+}
+_JURISDICTION_NOISE_TERMS = (
+    "setback",
+    "development standard",
+    "fee",
+    "lease",
+)
+_OWNER_NOISE_TERMS = (
+    "setback",
+    "development standard",
+    "tentative map",
+    "site plan",
+    "grading",
+    "streetscape",
+    "colors",
+    "materials",
+    "lease",
+    "leases",
+    "ship fees",
+)
+_OWNER_ENTITY_TERMS = (
+    "llc",
+    "inc",
+    "lp",
+    "l.p",
+    "trust",
+    "company",
+    "co",
+    "corp",
+    "corporation",
+    "holdings",
+    "partners",
+    "properties",
+    "ventures",
+)
+_UNIT_TOTAL_CONTEXT = (
+    "total units",
+    "proposed units",
+    "approved units",
+    "residential units",
+    "multifamily",
+    "apartment",
+    "development",
+)
+_UNIT_SUBCOMPONENT_TERMS = (
+    "building",
+    "phase",
+    "pod",
+    "floor",
+    "per acre",
+    "du/ac",
+    "garage",
+    "parking",
+    "sheet",
+    "elevation",
+    "typ",
+)
+_LOT_TOTAL_CONTEXT = (
+    "total lots",
+    "proposed lots",
+    "approved lots",
+    "lot count",
+    "tentative map",
+    "subdivision",
+)
+_LOT_SUBCOMPONENT_TERMS = (
+    "phase",
+    "pod",
+    "sheet",
+    "detail",
+    "typ",
+)
+
 
 _REQUIRED_CATEGORIES: tuple[tuple[str, str, str], ...] = (
     (
@@ -343,6 +425,14 @@ def _extract_facts(processed_documents: list[ProcessedDocument]) -> list[FactRec
                         normalized_value = pattern.normalizer(raw_value)
                         if not normalized_value:
                             continue
+                        excerpt = _build_excerpt(chunk_text, match.start(), match.end())
+                        if not _is_valid_scalar_match(
+                            fact_type=pattern.fact_type,
+                            raw_value=raw_value,
+                            normalized_value=normalized_value,
+                            excerpt=excerpt,
+                        ):
+                            continue
 
                         fact_key = (pattern.fact_type, normalized_value, relative_path, chunk.chunk_id)
                         if fact_key in seen:
@@ -366,7 +456,7 @@ def _extract_facts(processed_documents: list[ProcessedDocument]) -> list[FactRec
                                         relative_path=relative_path,
                                         page_number=chunk.page_number,
                                         chunk_id=chunk.chunk_id,
-                                        excerpt=_build_excerpt(chunk_text, match.start(), match.end()),
+                                        excerpt=excerpt,
                                     )
                                 ],
                             )
@@ -406,14 +496,14 @@ def _extract_facts(processed_documents: list[ProcessedDocument]) -> list[FactRec
                     fact_index += 1
                     break
 
-    return facts
+    return _assign_fact_confidence(facts, processed_documents)
 
 
 def _detect_conflicts(facts: list[FactRecord]) -> list[ConflictRecord]:
     grouped: dict[str, list[FactRecord]] = {}
     eligible_types = {pattern.fact_type for pattern in _SCALAR_PATTERNS if pattern.conflict_eligible}
     for fact in facts:
-        if fact.fact_type not in eligible_types:
+        if fact.fact_type not in eligible_types or fact.confidence == "low":
             continue
         grouped.setdefault(fact.fact_type, []).append(fact)
 
@@ -425,20 +515,19 @@ def _detect_conflicts(facts: list[FactRecord]) -> list[ConflictRecord]:
         if not group:
             continue
 
-        distinct_values: list[str] = []
-        seen_normalized: set[str] = set()
-        for fact in group:
-            if fact.normalized_value in seen_normalized:
-                continue
-            seen_normalized.add(fact.normalized_value)
-            distinct_values.append(fact.value)
+        representative_facts = _representative_conflict_facts(pattern.fact_type, group)
+        distinct_values = [fact.value for fact in representative_facts]
 
         if len(distinct_values) <= 1:
             continue
 
+        description = _build_conflict_description(pattern.fact_type, representative_facts)
+        if not description:
+            continue
+
         conflict_sources: list[SourceReference] = []
         seen_sources: set[tuple[str, int | None, str | None, str]] = set()
-        for fact in group:
+        for fact in representative_facts:
             for source in fact.sources:
                 source_key = (
                     source.relative_path,
@@ -457,10 +546,10 @@ def _detect_conflicts(facts: list[FactRecord]) -> list[ConflictRecord]:
                 conflict_id=f"conflict-{conflict_index:04d}",
                 fact_type=pattern.fact_type,
                 label=pattern.label,
-                description=f"{pattern.label} appears inconsistent across the extracted package: {', '.join(distinct_values)}.",
+                description=description,
                 values=distinct_values,
                 sources=conflict_sources,
-                uncertainty=pattern.uncertainty,
+                uncertainty=_build_conflict_uncertainty(pattern.fact_type, representative_facts),
             )
         )
         conflict_index += 1
@@ -602,18 +691,256 @@ def _build_seller_questions(
 
 def _conflict_question(conflict: ConflictRecord) -> str:
     questions = {
-        "apn": "Please reconcile the parcel numbers across the package and identify which APN list controls the deal.",
-        "gross_acreage": "Please reconcile the gross acreage figures across the package and confirm the controlling number.",
-        "net_acreage": "Please reconcile the net acreage figures across the package and confirm the controlling number.",
-        "site_acreage": "Please reconcile the acreage figures across the package and confirm the controlling gross and net acreage.",
-        "zoning": "Please confirm the current zoning designation and identify which planning document controls.",
-        "jurisdiction": "Please confirm the governing city or county jurisdiction and approval path for the project.",
-        "owner_name": "Please confirm the current vesting owner and the contract seller, and explain any difference between them.",
-        "purchase_price": "Please confirm the current purchase price and identify the latest governing contract amendment.",
-        "lot_count": "Please confirm the current lot count and identify the controlling plan set or approval.",
-        "unit_count": "Please confirm the current unit count and identify the controlling plan set or approval.",
+        "apn": "Please provide the controlling APN schedule, identify every parcel included in the deal, and confirm which title or survey set governs.",
+        "gross_acreage": "Please confirm the controlling gross acreage, identify the map or survey that governs, and explain any parcel exclusions or dedications.",
+        "net_acreage": "Please confirm the controlling net acreage, identify the map or survey that governs, and explain any parcel exclusions or dedications.",
+        "site_acreage": "Please confirm the controlling gross and net acreage, identify the governing map or survey, and explain any excluded acreage.",
+        "zoning": "Please confirm the current zoning designation, any proposed zoning or land-use designation, and the document that controls underwriting.",
+        "jurisdiction": "Please confirm the governing city or county jurisdiction and the approval path that applies to the current plan.",
+        "owner_name": "Please confirm the vesting owner, the contract seller, and which entity has authority to close this transaction.",
+        "purchase_price": "Please provide the latest purchase agreement or amendment set and confirm the current purchase price being underwritten.",
+        "lot_count": "Please confirm the controlling lot count, identify the governing map or plan set, and explain any phase or revision differences.",
+        "unit_count": "Please confirm the controlling unit count, identify the governing plan set, and explain any plan-version or subcomponent differences.",
     }
     return questions.get(conflict.fact_type, "Please reconcile the conflicting information cited in the package and identify the controlling source document.")
+
+
+def _is_valid_scalar_match(
+    *,
+    fact_type: str,
+    raw_value: str,
+    normalized_value: str,
+    excerpt: str,
+) -> bool:
+    excerpt_lower = excerpt.lower()
+
+    if fact_type == "zoning":
+        if normalized_value in _ZONING_NOISE_VALUES:
+            return False
+        if any(term in normalized_value for term in _ZONING_NOISE_VALUES):
+            return False
+        return bool(re.search(r"[a-z]", raw_value, re.IGNORECASE))
+
+    if fact_type == "jurisdiction":
+        return (
+            not any(term in normalized_value for term in _JURISDICTION_NOISE_TERMS)
+            and 1 <= len(raw_value.split()) <= 4
+            and not any(character.isdigit() for character in raw_value)
+        )
+
+    if fact_type == "owner_name":
+        return _looks_like_entity_name(raw_value, normalized_value)
+
+    if fact_type == "purchase_price":
+        amount = _coerce_float(normalized_value)
+        return amount is not None and amount >= 100000
+
+    if fact_type in {"gross_acreage", "net_acreage", "site_acreage"}:
+        acreage = _coerce_float(normalized_value)
+        if acreage is None or acreage <= 0:
+            return False
+        if fact_type == "site_acreage" and acreage < 0.25:
+            return any(term in excerpt_lower for term in ("site acreage", "property acreage", "parcel acreage", "project acreage"))
+        return True
+
+    if fact_type == "lot_count":
+        count = _coerce_int(normalized_value)
+        if count is None or count <= 0:
+            return False
+        if count < 10 and not _has_any_term(excerpt_lower, _LOT_TOTAL_CONTEXT):
+            return False
+        return True
+
+    if fact_type == "unit_count":
+        count = _coerce_int(normalized_value)
+        if count is None or count <= 0:
+            return False
+        if "per acre" in excerpt_lower or "du/ac" in excerpt_lower:
+            return False
+        if count < 10 and not _has_any_term(excerpt_lower, _UNIT_TOTAL_CONTEXT):
+            return False
+        if count < 20 and _has_any_term(excerpt_lower, _UNIT_SUBCOMPONENT_TERMS) and not _has_any_term(excerpt_lower, _UNIT_TOTAL_CONTEXT):
+            return False
+        return True
+
+    return True
+
+
+def _looks_like_entity_name(raw_value: str, normalized_value: str) -> bool:
+    tokens = [token for token in re.split(r"[ ,()&/-]+", raw_value) if token]
+    if len(tokens) < 2:
+        return False
+    if any(term in normalized_value for term in _OWNER_NOISE_TERMS):
+        return False
+    if any(term in normalized_value for term in _OWNER_ENTITY_TERMS):
+        return True
+    capitalized_tokens = sum(token[:1].isupper() for token in tokens if token[:1].isalpha())
+    return len(tokens) >= 3 and capitalized_tokens >= max(2, len(tokens) - 1)
+
+
+def _assign_fact_confidence(
+    facts: list[FactRecord],
+    processed_documents: list[ProcessedDocument],
+) -> list[FactRecord]:
+    document_map = {
+        processed.document.relative_path.as_posix(): processed.document
+        for processed in processed_documents
+    }
+    support_by_value: dict[tuple[str, str], set[str]] = defaultdict(set)
+
+    for fact in facts:
+        for source in fact.sources:
+            support_by_value[(fact.fact_type, fact.normalized_value)].add(source.relative_path)
+
+    for fact in facts:
+        support_count = len(support_by_value[(fact.fact_type, fact.normalized_value)])
+        weak_support = any(
+            (document_map.get(source.relative_path) is not None)
+            and (
+                document_map[source.relative_path].ocr_pages
+                or document_map[source.relative_path].warnings
+            )
+            for source in fact.sources
+        )
+        if weak_support and support_count <= 1:
+            fact.confidence = "low"
+        elif support_count >= 2 and not weak_support:
+            fact.confidence = "high"
+        else:
+            fact.confidence = "medium"
+
+    return facts
+
+
+def _representative_conflict_facts(
+    fact_type: str,
+    facts: list[FactRecord],
+) -> list[FactRecord]:
+    filtered = [fact for fact in facts if fact.confidence != "low"]
+    if fact_type in {"unit_count", "lot_count"}:
+        filtered = _prune_count_conflict_noise(fact_type, filtered)
+
+    deduped: dict[str, FactRecord] = {}
+    for fact in sorted(filtered, key=_conflict_sort_key):
+        deduped.setdefault(fact.normalized_value, fact)
+    return list(deduped.values())
+
+
+def _prune_count_conflict_noise(
+    fact_type: str,
+    facts: list[FactRecord],
+) -> list[FactRecord]:
+    non_subcomponent = [fact for fact in facts if not _is_subcomponent_count(fact_type, fact)]
+    if non_subcomponent:
+        facts = non_subcomponent
+
+    numbers = [_coerce_int(fact.normalized_value) for fact in facts]
+    numbers = [number for number in numbers if number is not None]
+    if len(set(numbers)) < 3 or not numbers:
+        return facts
+
+    max_count = max(numbers)
+    threshold = max(20 if fact_type == "unit_count" else 10, int(max_count * 0.25))
+    total_context = _UNIT_TOTAL_CONTEXT if fact_type == "unit_count" else _LOT_TOTAL_CONTEXT
+    filtered = [
+        fact
+        for fact in facts
+        if (_coerce_int(fact.normalized_value) or 0) >= threshold
+        or _has_any_term(" ".join(source.excerpt.lower() for source in fact.sources), total_context)
+    ]
+    return filtered if len({fact.normalized_value for fact in filtered}) >= 2 else facts
+
+
+def _is_subcomponent_count(fact_type: str, fact: FactRecord) -> bool:
+    count = _coerce_int(fact.normalized_value)
+    if count is None:
+        return False
+    excerpt = " ".join(source.excerpt.lower() for source in fact.sources)
+    if fact_type == "unit_count":
+        return count < 20 and _has_any_term(excerpt, _UNIT_SUBCOMPONENT_TERMS) and not _has_any_term(excerpt, _UNIT_TOTAL_CONTEXT)
+    return count < 10 and _has_any_term(excerpt, _LOT_SUBCOMPONENT_TERMS) and not _has_any_term(excerpt, _LOT_TOTAL_CONTEXT)
+
+
+def _build_conflict_description(
+    fact_type: str,
+    facts: list[FactRecord],
+) -> str:
+    numbers = [_coerce_int(fact.normalized_value) for fact in facts]
+    numeric_values = [number for number in numbers if number is not None]
+
+    if fact_type == "unit_count" and numeric_values:
+        return (
+            f"Unit count references range from {min(numeric_values)} to {max(numeric_values)} across the package; "
+            "lower figures likely reflect subplans, building-level counts, or earlier plan sets rather than the full project."
+        )
+    if fact_type == "lot_count" and numeric_values:
+        return (
+            f"Lot count references range from {min(numeric_values)} to {max(numeric_values)} across the package; "
+            "the difference likely reflects phase counts, draft map revisions, or plan-set changes rather than one controlling total."
+        )
+    if fact_type in {"gross_acreage", "net_acreage", "site_acreage"} and numeric_values:
+        return (
+            f"{_fact_label_for_type(fact_type)} references range from {min(numeric_values)} to {max(numeric_values)} acres; "
+            "the difference likely reflects gross versus net acreage, parcel carve-outs, or plan-set rounding."
+        )
+    if fact_type == "purchase_price":
+        return "Purchase price references differ across the package; this likely reflects different contract versions, amendments, or legacy deal terms."
+    if fact_type == "zoning":
+        return "Zoning references differ across the package; the mix likely reflects current zoning, planned land-use terminology, or interim planning shorthand rather than one controlling designation."
+    if fact_type == "jurisdiction":
+        return "Jurisdiction references differ across the package; this likely reflects boundary, annexation, or approval-path confusion that still needs to be reconciled."
+    if fact_type == "owner_name":
+        return "Ownership references differ across the package; this likely reflects a mismatch between vesting owner, contract seller, or affiliated entities involved in the transaction."
+    if fact_type == "apn":
+        return "APN references differ across the package; this likely reflects multiple parcels, partial parcel references, or an incomplete title schedule."
+    return "The extracted package contains conflicting references that still need to be reconciled to one controlling source."
+
+
+def _build_conflict_uncertainty(
+    fact_type: str,
+    facts: list[FactRecord],
+) -> str:
+    del facts
+    why_it_matters = {
+        "apn": "Title, acreage, and closing assumptions should only rely on the confirmed parcel schedule.",
+        "gross_acreage": "Land basis, density, and engineering assumptions depend on the controlling acreage measure.",
+        "net_acreage": "Yield and entitlement assumptions depend on the controlling net acreage.",
+        "site_acreage": "Yield, density, and basis assumptions depend on the controlling gross and net acreage.",
+        "zoning": "Entitlement path, density, and product assumptions depend on the controlling zoning designation.",
+        "jurisdiction": "Schedule, entitlement, and fee assumptions depend on the correct governing jurisdiction.",
+        "owner_name": "Closing authority and title assumptions depend on identifying the correct seller and vesting owner.",
+        "purchase_price": "Land basis and contract economics should rely only on the current governing amendment set.",
+        "lot_count": "Yield and underwriting should use only the controlling lot program.",
+        "unit_count": "Yield and land basis should use only the controlling unit program.",
+    }
+    return why_it_matters.get(fact_type, "The conflicting references still need one controlling source before the deal can be underwritten cleanly.")
+
+
+def _conflict_sort_key(fact: FactRecord) -> tuple[int, float, str]:
+    numeric_value = _coerce_float(fact.normalized_value)
+    if numeric_value is not None:
+        return (0, numeric_value, fact.value.lower())
+    return (1, 0.0, fact.value.lower())
+
+
+def _coerce_float(value: str) -> float | None:
+    try:
+        return float(value)
+    except ValueError:
+        return None
+
+
+def _fact_label_for_type(fact_type: str) -> str:
+    labels = {
+        "gross_acreage": "Gross acreage",
+        "net_acreage": "Net acreage",
+        "site_acreage": "Site acreage",
+    }
+    return labels.get(fact_type, fact_type.replace("_", " ").title())
+
+
+def _has_any_term(text: str, terms: tuple[str, ...]) -> bool:
+    return any(term in text for term in terms)
 
 
 def _clean_display_value(value: str) -> str:

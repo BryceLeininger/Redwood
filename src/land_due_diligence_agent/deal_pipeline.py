@@ -7,10 +7,12 @@ from datetime import datetime
 from pathlib import Path
 
 from land_due_diligence_agent.analysis.first_pass import build_issue_registry
+from land_due_diligence_agent.analysis.service import run_analysis
 from land_due_diligence_agent.classification import classify_document
 from land_due_diligence_agent.config import Settings
 from land_due_diligence_agent.deal_models import DealPaths, DealRunResult, ManifestEntry, ProcessedDocument
 from land_due_diligence_agent.ingestion.discovery import discover_all_files, is_supported_document
+from land_due_diligence_agent.llm.heuristic_provider import HeuristicProvider
 from land_due_diligence_agent.output.deal_writer import (
     write_document_artifacts,
     write_failure_artifact,
@@ -145,6 +147,19 @@ def run_local_deal_pipeline(
             )
         )
         result.issue_registry = build_issue_registry(processed_documents, manifest_entries)
+        if processed_documents:
+            result.deal_synthesis = run_analysis(
+                deal_name=resolved_deal_name,
+                documents=[processed.document for processed in processed_documents],
+                llm_provider=HeuristicProvider(),
+                logger=logger,
+                extraction_errors=[
+                    f"{entry.relative_path}: {'; '.join(entry.errors)}"
+                    for entry in manifest_entries
+                    if entry.errors
+                ],
+                mode="full",
+            )
 
         _write_run_artifacts(result)
 
