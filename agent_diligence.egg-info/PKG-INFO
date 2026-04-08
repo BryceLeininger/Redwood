@@ -1,0 +1,234 @@
+Metadata-Version: 2.4
+Name: agent_diligence
+Version: 0.1.0
+Summary: Agent_Diligence local CLI for land acquisition due diligence review.
+Requires-Python: >=3.11
+Description-Content-Type: text/markdown
+Requires-Dist: cryptography>=3.1
+Requires-Dist: pdf2image>=1.17.0
+Requires-Dist: openai>=1.30.0
+Requires-Dist: openpyxl>=3.1.0
+Requires-Dist: pytesseract>=0.3.10
+Requires-Dist: pypdf>=4.2.0
+Requires-Dist: python-docx>=1.1.0
+Requires-Dist: python-dotenv>=1.0.0
+Requires-Dist: xlrd>=2.0.1
+
+# Agent_Diligence
+
+Local Python CLI for land acquisition and real estate due diligence packages received from a seller. The primary workflow is a desktop deal-folder pipeline that scans `00_Source_Drop`, extracts text, classifies documents, builds a traceable issue registry, and writes a first-pass markdown review without modifying the source package.
+
+## Current Workflow
+
+- Recursively scans one selected deal folder, with primary focus on `00_Source_Drop`
+- Supports `PDF`, `DOCX`, `XLSX`, `XLS`, `TXT`, and `CSV`
+- Preserves the source package and never writes into `00_Source_Drop`
+- Writes run-scoped outputs into the existing deal structure:
+  - `02_Text_Extraction/<run_id>/`
+  - `03_Metadata/<run_id>/`
+  - `04_Output/<run_id>/`
+- Creates a deal-level manifest with file path, extension, size, modified time, category guess, OCR usage, extraction status, and notes/errors
+- Uses OCR only as fallback for weak or image-based PDF pages
+- Produces a structured issue registry with:
+  - facts
+  - conflicts / contradictions
+  - missing information
+  - seller questions
+- Generates a first-pass markdown review that clearly separates:
+  - Facts
+  - Conflicts / contradictions
+  - Not found in provided documents
+
+## Deal Folder Layout
+
+Expected structure for each deal:
+
+```text
+Agent_Diligence/
+  Deals/
+    d1_375Diana/
+      00_Source_Drop/
+      01_Working/
+      02_Text_Extraction/
+      03_Metadata/
+      04_Output/
+```
+
+The CLI defaults to `~/Desktop/Agent_Diligence/Deals`, but you can also point it at an explicit deal folder or an alternate deals root.
+
+## Project Structure
+
+Relevant files for the local workflow:
+
+```text
+.
+|-- agent_diligence/
+|   |-- __init__.py
+|   |-- __main__.py
+|   `-- cli.py
+|-- main.py
+|-- run_land_due_diligence_agent.bat
+|-- pyproject.toml
+|-- requirements.txt
+|-- src/
+|   `-- land_due_diligence_agent/
+|       |-- cli.py
+|       |-- config.py
+|       |-- deal_pipeline.py
+|       |-- deal_models.py
+|       |-- classification.py
+|       |-- analysis/
+|       |   `-- first_pass.py
+|       |-- ingestion/
+|       |   `-- discovery.py
+|       |-- output/
+|       |   `-- deal_writer.py
+|       `-- parsing/
+|           |-- pdf_parser.py
+|           |-- docx_parser.py
+|           |-- spreadsheet_parser.py
+|           `-- text_parser.py
+`-- tests/
+    |-- test_cli.py
+    |-- test_config.py
+    |-- test_discovery.py
+    `-- test_local_pipeline.py
+```
+
+## Installation
+
+### 1. Create and activate a virtual environment
+
+Windows PowerShell:
+
+```powershell
+cd Redwood
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+```
+
+### 2. Install Python dependencies
+
+```powershell
+python -m pip install -r requirements.txt
+```
+
+This installs the package in editable mode and pulls the parser dependencies declared in `pyproject.toml`, including `pypdf`, `python-docx`, `openpyxl`, `xlrd`, `pytesseract`, and `pdf2image`.
+
+### 3. Install local OCR prerequisites for scanned PDFs
+
+OCR fallback requires both:
+
+- `Tesseract OCR`
+- `Poppler`
+
+Windows:
+
+1. Install Tesseract OCR and make sure `tesseract.exe` is available on `PATH`.
+2. Install Poppler and make sure `pdftoppm.exe` is available on `PATH`.
+3. If needed, set these environment variables in a local `.env` file:
+
+```env
+TESSERACT_CMD=C:\Program Files\Tesseract-OCR\tesseract.exe
+POPPLER_PATH=C:\path\to\poppler\Library\bin
+```
+
+## Running The Agent
+
+### Option 1: Run by deal name from the default deals root
+
+```powershell
+python main.py --deal d1_375Diana
+```
+
+### Option 2: Run by deal name from an explicit deals root
+
+```powershell
+python main.py --deals-root "C:\Path\To\Agent_Diligence\Deals" --deal d1_375Diana
+```
+
+### Option 3: Run against an explicit deal folder
+
+```powershell
+python main.py --deal-folder "C:\Path\To\Agent_Diligence\Deals\d1_375Diana"
+```
+
+### Option 4: Run the package directly
+
+```powershell
+python -m agent_diligence --deal-folder "C:\Path\To\Agent_Diligence\Deals\d1_375Diana"
+```
+
+### Option 5: Use the batch launcher on Windows
+
+```powershell
+run_land_due_diligence_agent.bat --deal d1_375Diana
+```
+
+Useful optional flags:
+
+- `--deal-name "375 Diana"`
+- `--deals-root "C:\Path\To\Agent_Diligence\Deals"`
+- `--log-level DEBUG`
+
+## Output Layout
+
+Each run writes to a timestamped subfolder so prior runs are preserved:
+
+```text
+d1_375Diana/
+  00_Source_Drop/
+  01_Working/
+  02_Text_Extraction/
+    20260408_153000/
+      purchase_agreement.txt.txt
+      purchase_agreement.txt.json
+      title_report.txt.txt
+      title_report.txt.json
+  03_Metadata/
+    latest_run.json
+    20260408_153000/
+      deal_manifest.json
+      deal_manifest.csv
+      issue_registry.json
+      run_summary.json
+  04_Output/
+    20260408_153000/
+      first_pass_due_diligence_review.md
+      run.log
+```
+
+## What The First Working Version Produces
+
+### Phase 1
+
+- Recursive file discovery
+- Deal manifest JSON and CSV
+- Per-file text extraction artifacts
+- Document type and DD category classification
+- Structured JSON metadata for each extracted document
+
+### Phase 2
+
+- Deterministic issue registry JSON
+- Conflict detection across extracted facts
+- Missing-item tracking for absent DD lanes and core data points
+- Seller follow-up question generation
+- First-pass due diligence review in markdown
+
+## Traceability Design
+
+The code is structured so every extracted fact or conflict can carry source references containing:
+
+- source-relative file path
+- page number when available
+- chunk identifier
+- excerpt text
+
+That keeps the current workflow auditable and leaves a clean path for tighter citations later.
+
+## Notes
+
+- The local deal workflow is deterministic and does not require a cloud service.
+- The older experimental `--input-folder` workflow is still available for backward compatibility.
+- Unsupported files are still captured in the manifest and marked as `unsupported`; they are not modified.

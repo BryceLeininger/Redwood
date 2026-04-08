@@ -1,0 +1,3 @@
+[console_scripts]
+agent-diligence = agent_diligence.cli:main
+land-dd = agent_diligence.cli:main
