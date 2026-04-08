@@ -1,0 +1,29 @@
+{
+  "created_at_utc": "2026-02-05T22:29:34.815722+00:00",
+  "artifact_paths": {
+    "model": "generated_agents\\housingmarketresearcher_20260205_222934\\model.joblib",
+    "knowledge_index": "generated_agents\\housingmarketresearcher_20260205_222934\\knowledge.joblib"
+  },
+  "training_dataset": "C:\\Users\\Bryce.Leininger\\Desktop\\Redwood\\agent_factory\\examples\\housing_market_researcher\\training.csv",
+  "knowledge_files": [
+    "C:\\Users\\Bryce.Leininger\\Desktop\\Redwood\\agent_factory\\examples\\housing_market_researcher\\knowledge\\market_research_framework.md",
+    "C:\\Users\\Bryce.Leininger\\Desktop\\Redwood\\agent_factory\\examples\\housing_market_researcher\\knowledge\\reporting_template.md"
+  ],
+  "blueprint": {
+    "name": "HousingMarketResearcher",
+    "description": "Researches housing markets and classifies market momentum conditions.",
+    "topic": "Housing Market Research",
+    "task_type": "classification",
+    "input_column": "input",
+    "target_column": "target"
+  },
+  "training": {
+    "total_rows": 20,
+    "train_rows": 16,
+    "evaluation_rows": 4,
+    "used_holdout_split": true,
+    "metric_name": "accuracy",
+    "metric_value": 0.5,
+    "task_type": "classification"
+  }
+}

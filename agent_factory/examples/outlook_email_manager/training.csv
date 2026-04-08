@@ -1,0 +1,21 @@
+input,target
+Vendor sent invoice reminder and asks for payment confirmation,draft_reply
+Boss asked for weekly status update by end of day,draft_reply
+Unknown marketing newsletter about crypto tips,unsubscribe
+Client requested a meeting next Tuesday at 10am,schedule_meeting
+Internal FYI email about completed ticket,archive
+Bank fraud alert says respond immediately and verify charges,flag_follow_up
+Team member asked to reschedule tomorrow's project sync,schedule_meeting
+Automated receipt from software purchase,archive
+Prospect emailed for product demo availability,schedule_meeting
+HR asked to submit open enrollment selections,flag_follow_up
+Cold sales outreach for SEO services,archive
+Thread from attorney asking for signed contract copy,draft_reply
+Subscription update says pricing changes next month,flag_follow_up
+Calendar invite conflict notification,flag_follow_up
+Customer escalation requesting immediate callback,flag_follow_up
+Newsletter from industry magazine with monthly digest,archive
+Partner asks if Friday 2pm works for pipeline review,schedule_meeting
+Email asks to review attached NDA and provide comments,draft_reply
+Mass promotional message offering discount codes,unsubscribe
+Follow-up from lender asking for missing documents,draft_reply
