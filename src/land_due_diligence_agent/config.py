@@ -31,6 +31,7 @@ class Settings:
     text_extraction_subdir: str = "02_Text_Extraction"
     metadata_subdir: str = "03_Metadata"
     report_output_subdir: str = "04_Output"
+    debug_mode: bool = False
     log_level: str = "INFO"
 
     @classmethod
@@ -67,6 +68,7 @@ class Settings:
             text_extraction_subdir=_env_str("TEXT_EXTRACTION_SUBDIR", "02_Text_Extraction"),
             metadata_subdir=_env_str("METADATA_SUBDIR", "03_Metadata"),
             report_output_subdir=_env_str("REPORT_OUTPUT_SUBDIR", "04_Output"),
+            debug_mode=_env_bool("AGENT_DILIGENCE_DEBUG", False),
             log_level=os.getenv("LOG_LEVEL", "INFO").strip().upper(),
         )
 
@@ -75,12 +77,14 @@ class Settings:
         *,
         llm_provider: str | None = None,
         log_level: str | None = None,
+        debug_mode: bool | None = None,
     ) -> "Settings":
         """Return a copy of settings with CLI overrides applied."""
 
         return replace(
             self,
             llm_provider=(llm_provider or self.llm_provider).strip().lower(),
+            debug_mode=self.debug_mode if debug_mode is None else debug_mode,
             log_level=(log_level or self.log_level).strip().upper(),
         )
 

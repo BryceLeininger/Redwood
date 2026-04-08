@@ -144,6 +144,7 @@ class DealRunResult:
     run_id: str
     deal_name: str
     deal_paths: DealPaths
+    debug_mode: bool = False
     manifest_entries: list[ManifestEntry] = field(default_factory=list)
     processed_documents: list[ProcessedDocument] = field(default_factory=list)
     issue_registry: IssueRegistry = field(default_factory=IssueRegistry)
@@ -155,6 +156,7 @@ class DealRunResult:
     unsupported_files: int = 0
     ocr_files: int = 0
     review_report_path: str = ""
+    run_log_path: str = ""
     manifest_json_path: str = ""
     manifest_csv_path: str = ""
     issue_registry_path: str = ""
