@@ -18,6 +18,16 @@ class CLITests(unittest.TestCase):
         args = parser.parse_args(["--input-folder", "data/input/demo", "--mode", "full"])
         self.assertEqual(args.mode, "full")
 
+    def test_deal_argument_is_accepted(self) -> None:
+        parser = build_parser()
+        args = parser.parse_args(["--deal", "d1_375Diana"])
+        self.assertEqual(args.deal, "d1_375Diana")
+
+    def test_deal_folder_argument_is_accepted(self) -> None:
+        parser = build_parser()
+        args = parser.parse_args(["--deal-folder", "C:/Deals/d1_375Diana"])
+        self.assertEqual(args.deal_folder, "C:/Deals/d1_375Diana")
+
 
 if __name__ == "__main__":
     unittest.main()

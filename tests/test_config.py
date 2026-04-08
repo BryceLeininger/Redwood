@@ -61,6 +61,32 @@ class ConfigTests(unittest.TestCase):
             os.environ.clear()
             os.environ.update(original_env)
 
+    def test_default_deals_root_and_subdirs_can_be_overridden(self) -> None:
+        original_env = os.environ.copy()
+        try:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                env_path = Path(temp_dir) / ".env"
+                env_path.write_text(
+                    "DEFAULT_DEALS_ROOT=C:/Deals\n"
+                    "DEAL_SOURCE_SUBDIR=00_Source_Drop\n"
+                    "DEAL_WORKING_SUBDIR=01_Working\n"
+                    "TEXT_EXTRACTION_SUBDIR=02_Text_Extraction\n"
+                    "METADATA_SUBDIR=03_Metadata\n"
+                    "REPORT_OUTPUT_SUBDIR=04_Output\n",
+                    encoding="utf-8",
+                )
+                os.environ.clear()
+                settings = Settings.from_env_path(env_path)
+                self.assertEqual(settings.default_deals_root, "C:/Deals")
+                self.assertEqual(settings.deal_source_subdir, "00_Source_Drop")
+                self.assertEqual(settings.deal_working_subdir, "01_Working")
+                self.assertEqual(settings.text_extraction_subdir, "02_Text_Extraction")
+                self.assertEqual(settings.metadata_subdir, "03_Metadata")
+                self.assertEqual(settings.report_output_subdir, "04_Output")
+        finally:
+            os.environ.clear()
+            os.environ.update(original_env)
+
 
 if __name__ == "__main__":
     unittest.main()

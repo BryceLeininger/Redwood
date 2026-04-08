@@ -10,8 +10,8 @@ def configure_logging(level: str, log_file: Path | None = None) -> logging.Logge
     """Configure console and optional file logging for the CLI."""
 
     logger = logging.getLogger("land_due_diligence_agent")
+    close_logging(logger)
     logger.setLevel(getattr(logging, level.upper(), logging.INFO))
-    logger.handlers.clear()
     logger.propagate = False
 
     formatter = logging.Formatter("%(asctime)s | %(levelname)s | %(message)s")
@@ -26,3 +26,11 @@ def configure_logging(level: str, log_file: Path | None = None) -> logging.Logge
         logger.addHandler(file_handler)
 
     return logger
+
+
+def close_logging(logger: logging.Logger) -> None:
+    """Detach and close all handlers attached to a logger."""
+
+    for handler in list(logger.handlers):
+        logger.removeHandler(handler)
+        handler.close()

@@ -4,8 +4,12 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, replace
+from pathlib import Path
 
 from dotenv import load_dotenv
+
+
+_DEFAULT_DEALS_ROOT = str(Path.home() / "Desktop" / "Agent_Diligence" / "Deals")
 
 
 @dataclass(slots=True)
@@ -21,6 +25,12 @@ class Settings:
     web_research_model: str = "gpt-4.1"
     web_research_max_queries: int = 4
     default_output_dir: str = "data/output"
+    default_deals_root: str = _DEFAULT_DEALS_ROOT
+    deal_source_subdir: str = "00_Source_Drop"
+    deal_working_subdir: str = "01_Working"
+    text_extraction_subdir: str = "02_Text_Extraction"
+    metadata_subdir: str = "03_Metadata"
+    report_output_subdir: str = "04_Output"
     log_level: str = "INFO"
 
     @classmethod
@@ -51,6 +61,12 @@ class Settings:
             web_research_model=os.getenv("WEB_RESEARCH_MODEL", "gpt-4.1").strip(),
             web_research_max_queries=_env_int("WEB_RESEARCH_MAX_QUERIES", 4),
             default_output_dir=os.getenv("DEFAULT_OUTPUT_DIR", "data/output").strip(),
+            default_deals_root=_env_str("DEFAULT_DEALS_ROOT", _DEFAULT_DEALS_ROOT),
+            deal_source_subdir=_env_str("DEAL_SOURCE_SUBDIR", "00_Source_Drop"),
+            deal_working_subdir=_env_str("DEAL_WORKING_SUBDIR", "01_Working"),
+            text_extraction_subdir=_env_str("TEXT_EXTRACTION_SUBDIR", "02_Text_Extraction"),
+            metadata_subdir=_env_str("METADATA_SUBDIR", "03_Metadata"),
+            report_output_subdir=_env_str("REPORT_OUTPUT_SUBDIR", "04_Output"),
             log_level=os.getenv("LOG_LEVEL", "INFO").strip().upper(),
         )
 
@@ -97,3 +113,11 @@ def _env_int(name: str, default: int) -> int:
     except ValueError:
         return default
     return parsed if parsed > 0 else default
+
+
+def _env_str(name: str, default: str) -> str:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    value = value.strip()
+    return value or default
