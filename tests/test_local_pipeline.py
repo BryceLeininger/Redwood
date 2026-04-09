@@ -53,7 +53,8 @@ class LocalDealPipelineTests(unittest.TestCase):
                 for paragraph in review_doc.paragraphs
                 if paragraph.text
             }
-            self.assertIn("Executive Summary", review_text)
+            self.assertIn("BOTTOM LINE", review_text)
+            self.assertIn("Key Documents That Control", review_text)
             self.assertIn("Deal Overview", review_text)
             self.assertIn("Deal Killers / Gating Items", review_text)
             self.assertIn("Entitlement & Zoning", review_text)
@@ -62,22 +63,29 @@ class LocalDealPipelineTests(unittest.TestCase):
             self.assertIn("Environmental & Geotech", review_text)
             self.assertIn("Utilities & Infrastructure", review_text)
             self.assertIn("Fees / Cost Drivers", review_text)
-            self.assertIn("Key Risks & Open Issues", review_text)
-            self.assertIn("Recommended Next Steps", review_text)
+            self.assertIn("Real Risks / Open Issues", review_text)
             self.assertIn("Missing Information", review_text)
             self.assertIn("Questions for Seller", review_text)
-            self.assertIn("IC Read", review_text)
-            self.assertIn("Deal Snapshot", review_text)
-            self.assertEqual(paragraph_styles["Executive Summary"], "Heading 1")
+            self.assertIn("Biggest Current Concerns", review_text)
+            self.assertIn("Package Read", review_text)
+            self.assertEqual(paragraph_styles["BOTTOM LINE"], "Heading 1")
+            self.assertEqual(paragraph_styles["Key Documents That Control"], "Heading 1")
             self.assertEqual(paragraph_styles["Deal Overview"], "Heading 1")
             self.assertEqual(paragraph_styles["Deal Killers / Gating Items"], "Heading 1")
-            self.assertEqual(paragraph_styles["Recommended Next Steps"], "Heading 1")
-            self.assertEqual(paragraph_styles["IC Read"], "Heading 2")
-            self.assertEqual(paragraph_styles["Deal Snapshot"], "Heading 2")
+            self.assertEqual(paragraph_styles["Real Risks / Open Issues"], "Heading 1")
+            self.assertEqual(paragraph_styles["Biggest Current Concerns"], "Heading 2")
+            self.assertEqual(paragraph_styles["Package Read"], "Heading 2")
+            self.assertNotIn("Executive Summary", review_text)
+            self.assertNotIn("Recommended Next Steps", review_text)
+            self.assertNotIn("IC Read", review_text)
+            self.assertNotIn("Deal Snapshot", review_text)
             self.assertNotIn("Top Critical Issues", review_text)
             self.assertNotIn("Detailed Findings by Category", review_text)
             self.assertNotIn("Contradictions / Tensions", review_text)
-            self.assertIn("Severity / gating:", review_text)
+            self.assertTrue(
+                "Severity:" in review_text
+                or "No material issue rose above routine diligence noise in the current package." in review_text
+            )
             self.assertIn("Purchase price referenced at $12,500,000.", review_text)
 
             extraction_files = [

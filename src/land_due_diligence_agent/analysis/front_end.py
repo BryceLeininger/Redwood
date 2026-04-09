@@ -794,7 +794,50 @@ def _issue_affects(issue: CanonicalIssue) -> list[str]:
 
 
 def _issue_likely_explanation(issue: CanonicalIssue) -> str:
+    signal_text = " ".join(
+        part
+        for part in [
+            issue.title,
+            issue.site_specific_trigger,
+            issue.why_it_matters,
+            issue.likely_implication,
+            " ".join(issue.best_evidence[:2]),
+            " ".join(issue.core_facts[:2]),
+        ]
+        if part
+    ).lower()
+
     if issue.status == "conflicted":
+        if any(term in signal_text for term in ("unit", "lot", "count", "density", "yield")):
+            return (
+                "The package likely mixes different plan vintages, conceptual yield ranges, or lot-count versus unit-count references, "
+                "and it does not yet identify the controlling approved plan set."
+            )
+        if any(term in signal_text for term in ("acre", "gross", "net", "site area", "site acreage")):
+            return (
+                "The documents likely mix gross, net, and site-area references or rely on different map or survey vintages, "
+                "and the controlling acreage basis has not been pinned down."
+            )
+        if any(term in signal_text for term in ("owner", "vesting", "deed", "grantee", "seller entity")):
+            return (
+                "The documents likely span different vesting dates, transfer steps, or seller entities, and the current closing vesting position "
+                "has not been clearly tied to one controlling title source."
+            )
+        if any(term in signal_text for term in ("apn", "parcel", "legal description")):
+            return (
+                "The package likely mixes legacy parcel references, partial-site references, or a recent split/merge, and the controlling parcel basis "
+                "has not been identified."
+            )
+        if any(term in signal_text for term in ("zoning", "approval", "resolution", "condition", "permit", "map", "annexation")):
+            return (
+                "The documents likely reflect different approval vintages or status trackers, and the controlling entitlement resolution, condition tracker, "
+                "or approved plan has not been identified."
+            )
+        if any(term in signal_text for term in ("utility", "will serve", "provider", "water", "sewer", "capacity")):
+            return (
+                "The package likely combines preliminary utility assumptions with later coordination notes, and the current provider-confirmed position "
+                "has not been established."
+            )
         return "Different readable documents appear to be using different assumptions or plan versions, and no controlling source has been established."
     if issue.status in {"not found", "unclear whether present", "present but weak"}:
         return "The package does not contain a current controlling document that cleanly closes this issue."

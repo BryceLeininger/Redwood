@@ -897,13 +897,32 @@ def build_seller_questions_from_registry(registry: CanonicalIssueRegistry) -> li
     """Build negotiation and verification questions from canonical issues."""
 
     questions: list[str] = []
-    for issue in _ordered_by_acquisition_signal(registry.issues)[:6]:
-        source_hint = _source_hint(issue.citations[:2], issue.source_documents[:2])
-        request_line = issue.what_would_resolve_it or issue.missing_confirmation or "provide the current controlling document"
-        questions.append(
-            f"{issue.title}: please provide the current controlling support and state exactly what clears this item for underwriting.{source_hint}"
-        )
-        questions.append(f"{issue.title}: {request_line.rstrip('.')}.{source_hint}")
+    for issue in _ordered_by_acquisition_signal(registry.issues):
+        if not _issue_deserves_seller_question(issue):
+            continue
+        questions.append(_seller_question_for_issue(issue))
+        if len(questions) >= 5:
+            break
+
+    omission_priority = {
+        "missing and important": 0,
+        "stale and potentially unreliable": 1,
+        "missing but normally expected": 2,
+    }
+    omissions = sorted(
+        registry.omission_assessments,
+        key=lambda assessment: (
+            omission_priority.get(assessment.front_end_status or assessment.status, 9),
+            assessment.category,
+            assessment.item,
+        ),
+    )
+    for assessment in omissions:
+        if not _omission_deserves_seller_question(assessment):
+            continue
+        questions.append(_seller_question_for_omission(assessment))
+        if len(questions) >= 8:
+            break
 
     return unique_preserve_order(questions)[:8]
 
@@ -2308,6 +2327,128 @@ def _format_citation_text(citations: list[Citation]) -> str:
         else:
             parts.append(citation.document_name)
     return "; ".join(parts)
+
+
+def _issue_deserves_seller_question(issue: CanonicalIssue) -> bool:
+    if issue.front_end_flag == "routine item":
+        return False
+    if issue.acquisition_severity not in {"CRITICAL", "HIGH", "MODERATE"}:
+        return False
+    if issue.front_end_flag in {"document gap", "stale-information concern"} and not (issue.gating_item or issue.blocking_flag):
+        return False
+    if issue.evidence_basis in {"omission_only", "routine_missing_support"} and issue.front_end_flag != "conflict / contradiction concern":
+        return False
+    return True
+
+
+def _omission_deserves_seller_question(assessment: OmissionAssessment) -> bool:
+    return (assessment.front_end_status or assessment.status) in {
+        "missing and important",
+        "stale and potentially unreliable",
+        "missing but normally expected",
+    }
+
+
+def _seller_question_for_issue(issue: CanonicalIssue) -> str:
+    subject = _issue_question_subject(issue)
+    document_request = _issue_document_request(issue)
+    return normalize_line(f"Please confirm {subject} and provide {document_request}.")
+
+
+def _seller_question_for_omission(assessment: OmissionAssessment) -> str:
+    document_request = _omission_document_request(assessment)
+    if (assessment.front_end_status or assessment.status) == "stale and potentially unreliable":
+        return normalize_line(f"Please provide the current {document_request} that controls this lane.")
+    return normalize_line(f"Please provide {document_request}.")
+
+
+def _issue_question_subject(issue: CanonicalIssue) -> str:
+    signal_text = _issue_signal_text(issue)
+    if _signal_contains(signal_text, ("unit", "lot", "count", "yield", "density")):
+        return "the currently approved unit and lot count"
+    if _signal_contains(signal_text, ("acre", "gross", "net", "site area", "site acreage")):
+        return "the controlling acreage basis"
+    if issue.category == "Title / Access Concerns" or _signal_contains(signal_text, ("title", "easement", "access", "vesting", "deed", "apn", "parcel")):
+        return "the current vesting, access, and title-exception position"
+    if issue.category == "Entitlement Status" or _signal_contains(signal_text, ("approval", "resolution", "condition", "zoning", "permit", "map")):
+        return "the current approval status, open conditions, and controlling plan"
+    if issue.category == "Environmental Risks":
+        return "whether any environmental follow-up, mitigation, or agency action remains open"
+    if issue.category == "Geotechnical Risks":
+        return "the geotechnical recommendations that still control grading, retaining, or foundation scope"
+    if issue.category == "Flood / Drainage Issues":
+        return "the drainage or flood-control scope that still governs the current plan"
+    if issue.category == "Utilities / Infrastructure Issues":
+        return "current utility availability and any remaining provider conditions"
+    if issue.category == "Offsite Obligations":
+        return "the buyer-facing offsite or frontage scope, if any"
+    if issue.category == "Fee / Exaction Burden":
+        return "the current fee schedule that should control underwriting"
+    if issue.category == "Budget / Cost Reliability":
+        return "the current auditable site-cost basis"
+    if issue.category == "Schedule Risks":
+        return "the milestone schedule and the assumptions that control it"
+    return f"the current position on {issue.title.lower()}"
+
+
+def _issue_document_request(issue: CanonicalIssue) -> str:
+    signal_text = _issue_signal_text(issue)
+    if _signal_contains(signal_text, ("unit", "lot", "count", "yield", "density")):
+        return "the controlling approved plan set or resolution"
+    if _signal_contains(signal_text, ("acre", "gross", "net", "site area", "site acreage")):
+        return "the controlling survey, legal description, or plan sheet used for acreage"
+    mapping = {
+        "Title / Access Concerns": "the current title report or commitment, survey, and any exception response that controls closing",
+        "Entitlement Status": "the controlling resolution, conditions tracker, or approved plan set",
+        "Environmental Risks": "the current environmental report, agency correspondence, or closure documentation",
+        "Geotechnical Risks": "the current geotechnical report or addendum and the plan/budget carry-through",
+        "Flood / Drainage Issues": "the current drainage study, civil response, or public-works direction",
+        "Utilities / Infrastructure Issues": "current will-serve letters or provider confirmation",
+        "Offsite Obligations": "the current offsite scope schedule or responsibility matrix",
+        "Fee / Exaction Burden": "the current city-confirmed fee schedule or fee matrix",
+        "Budget / Cost Reliability": "current bid backup, estimate support, or the latest site-development budget",
+        "Schedule Risks": "the current milestone schedule and the assumption backup behind it",
+    }
+    return mapping.get(issue.category, "the controlling document that answers the item")
+
+
+def _omission_document_request(assessment: OmissionAssessment) -> str:
+    item = assessment.item.strip().rstrip(".")
+    normalized_item = item[:1].lower() + item[1:] if item else "current supporting documentation"
+    if assessment.category == "Entitlement Status":
+        return "the current approval set, resolution, or conditions tracker"
+    if assessment.category == "Title / Access Concerns":
+        return "the current title report or commitment, survey, and vesting support"
+    if assessment.category == "Environmental Risks":
+        return "the current environmental report or follow-up documentation"
+    if assessment.category == "Geotechnical Risks":
+        return "the current geotechnical report or addendum"
+    if assessment.category == "Utilities / Infrastructure Issues":
+        return "current will-serve letters or provider confirmation"
+    if assessment.category == "Fee / Exaction Burden":
+        return "the current city-confirmed fee matrix"
+    if assessment.category == "Budget / Cost Reliability":
+        return "the current site-development budget or bid backup"
+    return normalized_item or "current supporting documentation"
+
+
+def _issue_signal_text(issue: CanonicalIssue) -> str:
+    return " ".join(
+        part
+        for part in [
+            issue.title,
+            issue.site_specific_trigger,
+            issue.why_it_matters,
+            issue.likely_implication,
+            " ".join(issue.best_evidence[:2]),
+            " ".join(issue.core_facts[:2]),
+        ]
+        if part
+    ).lower()
+
+
+def _signal_contains(signal_text: str, terms: tuple[str, ...]) -> bool:
+    return any(re.search(r"\b" + re.escape(term) + r"\b", signal_text) for term in terms)
 
 
 def normalize_line(text: str) -> str:

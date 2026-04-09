@@ -6,12 +6,13 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+import re
 
 from docx import Document
 from docx.shared import Pt
 
 from land_due_diligence_agent.deal_models import ConflictRecord, DealRunResult, FactRecord, MissingItem, SourceReference
-from land_due_diligence_agent.models import CanonicalIssue, Citation, DealSynthesis, OmissionAssessment
+from land_due_diligence_agent.models import CanonicalIssue, Citation, DealSynthesis, DocumentAnalysis, OmissionAssessment
 from land_due_diligence_agent.utils.files import ensure_directory
 from land_due_diligence_agent.utils.text import clip_text, unique_preserve_order
 
@@ -74,6 +75,17 @@ _ACQUISITION_SEVERITY_PRIORITY = {
     "MODERATE": 2,
     "LOW": 3,
 }
+_MISSING_INPUT_PRIORITY = {
+    "missing and important": 0,
+    "stale and potentially unreliable": 1,
+    "missing but normally expected": 2,
+}
+_CONTROL_DOC_BUCKET_ORDER = {
+    "must read personally": 0,
+    "should skim": 1,
+    "safe to rely on agent": 2,
+}
+_REAL_RISK_FLAGS = {"red flag", "yellow flag", "conflict / contradiction concern"}
 
 
 @dataclass(slots=True)
@@ -81,6 +93,18 @@ class _SectionBullet:
     text: str
     references: list[str] = field(default_factory=list)
     note: str = ""
+
+
+@dataclass(slots=True)
+class _MissingInputBullet:
+    label: str
+    summary: str
+    request: str
+    category: str = ""
+    status: str = ""
+    priority: int = 9
+    references: list[str] = field(default_factory=list)
+    document_hint: str = ""
 
 
 def write_due_diligence_report_docx(path: Path, result: DealRunResult) -> Path:
@@ -105,40 +129,43 @@ def write_due_diligence_report_docx(path: Path, result: DealRunResult) -> Path:
 
 def _configure_document(document: Document) -> None:
     normal = document.styles["Normal"]
-    normal.font.name = "Calibri"
+    normal.font.name = "Aptos"
     normal.font.size = Pt(10.5)
-    normal.paragraph_format.space_after = Pt(4)
+    normal.paragraph_format.space_after = Pt(3)
+    normal.paragraph_format.line_spacing = 1.08
 
     heading_1 = document.styles["Heading 1"]
-    heading_1.font.name = "Calibri"
+    heading_1.font.name = "Aptos"
     heading_1.font.size = Pt(14)
-    heading_1.paragraph_format.space_before = Pt(14)
-    heading_1.paragraph_format.space_after = Pt(4)
+    heading_1.paragraph_format.space_before = Pt(16)
+    heading_1.paragraph_format.space_after = Pt(6)
+    heading_1.paragraph_format.keep_with_next = True
 
     heading_2 = document.styles["Heading 2"]
-    heading_2.font.name = "Calibri"
+    heading_2.font.name = "Aptos"
     heading_2.font.size = Pt(11.5)
     heading_2.paragraph_format.space_before = Pt(10)
-    heading_2.paragraph_format.space_after = Pt(2)
+    heading_2.paragraph_format.space_after = Pt(3)
+    heading_2.paragraph_format.keep_with_next = True
 
     list_bullet = document.styles["List Bullet"]
-    list_bullet.font.name = "Calibri"
+    list_bullet.font.name = "Aptos"
     list_bullet.font.size = Pt(10.5)
     list_bullet.paragraph_format.space_after = Pt(2)
 
     list_number = document.styles["List Number"]
-    list_number.font.name = "Calibri"
+    list_number.font.name = "Aptos"
     list_number.font.size = Pt(10.5)
     list_number.paragraph_format.space_after = Pt(2)
 
 
 def _write_minimal_report(document: Document, result: DealRunResult) -> None:
-    _add_section(document, "Executive Summary")
+    _add_section(document, "BOTTOM LINE")
     _add_bullet_items(
         document,
         [
             _SectionBullet(
-                text="No readable document set was available for decision-grade analysis, so the deal facts and risk profile remain unresolved.",
+                text="No readable document set was available for decision-grade analysis, so the deal facts, risk profile, and package quality remain unresolved.",
             )
         ],
     )
@@ -168,25 +195,26 @@ def _write_structured_report(document: Document, result: DealRunResult, synthesi
     fact_index = _build_fact_index(result.issue_registry.facts)
     material_issues = _material_issues(synthesis)
     material_conflicts = _material_conflicts(result.issue_registry.conflicts)
-    critical_missing = _critical_missing_assessments(synthesis)
+    missing_inputs = _material_missing_inputs(result, synthesis)
 
-    _add_executive_summary(
+    _add_bottom_line_section(
         document=document,
         result=result,
         synthesis=synthesis,
         fact_index=fact_index,
         material_issues=material_issues,
-        critical_missing=critical_missing,
+        missing_inputs=missing_inputs,
     )
+    _add_key_documents_that_control_section(document, synthesis)
     _add_deal_overview(document, result, synthesis, fact_index)
-    _add_gating_items_section(document, synthesis, material_issues)
+    _add_gating_items_section(document, material_issues)
     _add_category_section(
         document=document,
         title="Entitlement & Zoning",
-        synthesis=synthesis,
-        result=result,
         fact_index=fact_index,
         material_conflicts=material_conflicts,
+        material_issues=material_issues,
+        missing_inputs=missing_inputs,
         fact_types=("jurisdiction", "zoning"),
         issue_categories={"Entitlement Status"},
         omission_categories={"Entitlement Status"},
@@ -196,10 +224,10 @@ def _write_structured_report(document: Document, result: DealRunResult, synthesi
     _add_category_section(
         document=document,
         title="Site & Product",
-        synthesis=synthesis,
-        result=result,
         fact_index=fact_index,
         material_conflicts=material_conflicts,
+        material_issues=material_issues,
+        missing_inputs=missing_inputs,
         fact_types=("gross_acreage", "net_acreage", "site_acreage", "lot_count", "unit_count"),
         issue_categories=set(),
         omission_categories=set(),
@@ -209,10 +237,10 @@ def _write_structured_report(document: Document, result: DealRunResult, synthesi
     _add_category_section(
         document=document,
         title="Title & Ownership",
-        synthesis=synthesis,
-        result=result,
         fact_index=fact_index,
         material_conflicts=material_conflicts,
+        material_issues=material_issues,
+        missing_inputs=missing_inputs,
         fact_types=("apn", "owner_name"),
         issue_categories={"Title / Access Concerns"},
         omission_categories={"Title / Access Concerns"},
@@ -222,10 +250,10 @@ def _write_structured_report(document: Document, result: DealRunResult, synthesi
     _add_category_section(
         document=document,
         title="Environmental & Geotech",
-        synthesis=synthesis,
-        result=result,
         fact_index=fact_index,
         material_conflicts=material_conflicts,
+        material_issues=material_issues,
+        missing_inputs=missing_inputs,
         fact_types=(),
         issue_categories={"Environmental Risks", "Geotechnical Risks", "Flood / Drainage Issues"},
         omission_categories={"Environmental Risks", "Geotechnical Risks", "Flood / Drainage Issues"},
@@ -235,10 +263,10 @@ def _write_structured_report(document: Document, result: DealRunResult, synthesi
     _add_category_section(
         document=document,
         title="Utilities & Infrastructure",
-        synthesis=synthesis,
-        result=result,
         fact_index=fact_index,
         material_conflicts=material_conflicts,
+        material_issues=material_issues,
+        missing_inputs=missing_inputs,
         fact_types=(),
         issue_categories={"Utilities / Infrastructure Issues", "Offsite Obligations"},
         omission_categories={"Utilities / Infrastructure Issues"},
@@ -248,10 +276,10 @@ def _write_structured_report(document: Document, result: DealRunResult, synthesi
     _add_category_section(
         document=document,
         title="Fees / Cost Drivers",
-        synthesis=synthesis,
-        result=result,
         fact_index=fact_index,
         material_conflicts=material_conflicts,
+        material_issues=material_issues,
+        missing_inputs=missing_inputs,
         fact_types=("purchase_price",),
         issue_categories={"Fee / Exaction Burden", "Budget / Cost Reliability"},
         omission_categories={"Fee / Exaction Burden", "Budget / Cost Reliability"},
@@ -259,9 +287,69 @@ def _write_structured_report(document: Document, result: DealRunResult, synthesi
         conflict_types={"purchase_price"},
     )
     _add_key_risks_section(document, material_issues)
-    _add_recommended_next_steps_section(document, synthesis, material_issues, critical_missing)
-    _add_missing_information_section(document, result, synthesis, critical_missing)
-    _add_questions_for_seller_section(document, material_issues, critical_missing)
+    _add_missing_information_section(document, result, synthesis, missing_inputs)
+    _add_questions_for_seller_section(document, material_issues, missing_inputs)
+
+
+def _add_bottom_line_section(
+    *,
+    document: Document,
+    result: DealRunResult,
+    synthesis: DealSynthesis,
+    fact_index: dict[str, list[FactRecord]],
+    material_issues: list[CanonicalIssue],
+    missing_inputs: list[_MissingInputBullet],
+) -> None:
+    _add_section(document, "BOTTOM LINE")
+
+    _add_subsection(document, "Deal")
+    _add_bullet_items(document, [_SectionBullet(text=_bottom_line_deal_text(result, synthesis, fact_index))])
+
+    _add_subsection(document, "Biggest Current Concerns")
+    concern_bullets = [
+        _SectionBullet(
+            text=_bottom_line_issue_text(issue),
+            references=_issue_reference_labels(issue),
+        )
+        for issue in material_issues[:3]
+    ]
+    _add_bullet_items(
+        document,
+        concern_bullets or [_SectionBullet(text="No material issue currently rises above routine diligence noise based on the provided documents.")],
+    )
+
+    _add_subsection(document, "Most Important Missing Items / Confirmations")
+    missing_bullets = [
+        _SectionBullet(
+            text=_bottom_line_missing_text(item),
+            note=f"Best document: {item.document_hint}." if item.document_hint else "",
+            references=item.references,
+        )
+        for item in missing_inputs[:3]
+    ]
+    _add_bullet_items(
+        document,
+        missing_bullets or [_SectionBullet(text="No additional critical missing confirmation was isolated beyond the current issue set.")],
+    )
+
+    _add_subsection(document, "Package Read")
+    _add_bullet_items(
+        document,
+        [
+            _SectionBullet(
+                text=_bottom_line_package_read(synthesis, material_issues, missing_inputs),
+            )
+        ],
+    )
+
+
+def _add_key_documents_that_control_section(document: Document, synthesis: DealSynthesis) -> None:
+    _add_section(document, "Key Documents That Control")
+    control_documents = _key_documents_that_control(synthesis.document_analyses)
+    _add_bullet_items(
+        document,
+        control_documents or [_SectionBullet(text="The package does not contain an obvious current controlling document set in the lanes that normally anchor deal judgment.")],
+    )
 
 
 def _add_executive_summary(
@@ -335,20 +423,18 @@ def _add_executive_summary(
 
 def _add_gating_items_section(
     document: Document,
-    synthesis: DealSynthesis,
     material_issues: list[CanonicalIssue],
 ) -> None:
     _add_section(document, "Deal Killers / Gating Items")
-    roadmap_items = synthesis.further_diligence_roadmap.deal_killers_or_gating_items[:6]
-    if roadmap_items:
-        _add_bullet_items(document, [_SectionBullet(text=item) for item in roadmap_items])
-        return
-
-    gating_issues = [issue for issue in material_issues if issue.gating_item][:5]
+    gating_issues = [
+        issue
+        for issue in material_issues
+        if issue.gating_item or (issue.blocking_flag and issue.acquisition_severity in {"CRITICAL", "HIGH"})
+    ][:4]
     if not gating_issues:
         _add_bullet_items(
             document,
-            [_SectionBullet(text="No current issue reads as a clear deal killer, but the deal still depends on resolving the highest-severity open items.")],
+            [_SectionBullet(text="No single deal killer is confirmed from the provided documents, but trust in the deal still depends on clearing the lead high-severity items.")],
         )
         return
 
@@ -356,7 +442,8 @@ def _add_gating_items_section(
         document,
         [
             _SectionBullet(
-                text=f"{issue.title} [{issue.acquisition_severity}]: {_issue_deal_impact(issue)}",
+                text=f"{issue.title} [{issue.acquisition_severity}]: {_issue_request_text(issue)}",
+                note=f"Affects {', '.join(issue.affects) or 'deal execution'}. {_issue_deal_impact(issue)}",
                 references=_issue_reference_labels(issue),
             )
             for issue in gating_issues
@@ -387,10 +474,10 @@ def _add_category_section(
     *,
     document: Document,
     title: str,
-    synthesis: DealSynthesis,
-    result: DealRunResult,
     fact_index: dict[str, list[FactRecord]],
     material_conflicts: list[ConflictRecord],
+    material_issues: list[CanonicalIssue],
+    missing_inputs: list[_MissingInputBullet],
     fact_types: tuple[str, ...],
     issue_categories: set[str],
     omission_categories: set[str],
@@ -399,10 +486,10 @@ def _add_category_section(
 ) -> None:
     _add_section(document, title)
     bullets = _build_category_bullets(
-        synthesis=synthesis,
-        result=result,
         fact_index=fact_index,
         material_conflicts=material_conflicts,
+        material_issues=material_issues,
+        missing_inputs=missing_inputs,
         fact_types=fact_types,
         issue_categories=issue_categories,
         omission_categories=omission_categories,
@@ -416,7 +503,7 @@ def _add_category_section(
 
 
 def _add_key_risks_section(document: Document, material_issues: list[CanonicalIssue]) -> None:
-    _add_section(document, "Key Risks & Open Issues")
+    _add_section(document, "Real Risks / Open Issues")
     if not material_issues:
         _add_bullet_items(
             document,
@@ -429,12 +516,12 @@ def _add_key_risks_section(document: Document, material_issues: list[CanonicalIs
         _add_bullet_items(
             document,
             [
-                _SectionBullet(text=f"Severity / gating: {_issue_severity_line(issue)}"),
-                _SectionBullet(text=f"What it is: {_issue_what_line(issue)}"),
+                _SectionBullet(text=f"Severity: {_issue_severity_line(issue)}"),
+                _SectionBullet(text=f"Issue: {_issue_what_line(issue)}", references=_issue_reference_labels(issue)),
+                _SectionBullet(text=f"What it affects: {', '.join(issue.affects) or 'deal execution'}."),
                 _SectionBullet(text=f"Likely explanation: {_issue_likely_explanation(issue)}"),
-                _SectionBullet(text=f"Deal impact: {_issue_deal_impact(issue)}", references=_issue_reference_labels(issue)),
-                _SectionBullet(text=f"Likely reality vs noise: {_issue_reality_vs_noise(issue)}"),
-                _SectionBullet(text=f"Needed to clear: {_issue_request_text(issue)}"),
+                _SectionBullet(text=f"Why it matters: {_issue_deal_impact(issue)}"),
+                _SectionBullet(text=f"What would resolve it: {_issue_request_text(issue)}"),
             ],
         )
 
@@ -469,10 +556,17 @@ def _add_missing_information_section(
     document: Document,
     result: DealRunResult,
     synthesis: DealSynthesis,
-    critical_missing: list[OmissionAssessment],
+    missing_inputs: list[_MissingInputBullet],
 ) -> None:
     _add_section(document, "Missing Information")
-    bullets = _missing_summary_bullets(result, critical_missing)
+    bullets = [
+        _SectionBullet(
+            text=f"{item.label}: {clip_text(item.summary.rstrip('.') + '.', 180)}",
+            note=(f"Request: {item.request.rstrip('.')}." if item.request else "") + (f" Best document: {item.document_hint}." if item.document_hint else ""),
+            references=item.references,
+        )
+        for item in missing_inputs
+    ]
 
     if result.failed_files:
         bullets.append(
@@ -497,10 +591,10 @@ def _add_missing_information_section(
 def _add_questions_for_seller_section(
     document: Document,
     material_issues: list[CanonicalIssue],
-    critical_missing: list[OmissionAssessment],
+    missing_inputs: list[_MissingInputBullet],
 ) -> None:
     _add_section(document, "Questions for Seller")
-    questions = _build_seller_request_items(material_issues, critical_missing)
+    questions = _build_seller_request_items(material_issues, missing_inputs)
     if not questions:
         _add_bullet_items(
             document,
@@ -511,9 +605,7 @@ def _add_questions_for_seller_section(
     for item in questions:
         document.add_paragraph(item.text, style="List Number")
         if item.note:
-            _add_note_line(document, f"Why: {item.note}")
-        if item.references:
-            _add_reference_line(document, item.references)
+            _add_note_line(document, item.note)
 
 
 def _build_snapshot_bullet(
@@ -599,10 +691,10 @@ def _missing_summary_bullets(
 
 def _build_category_bullets(
     *,
-    synthesis: DealSynthesis,
-    result: DealRunResult,
     fact_index: dict[str, list[FactRecord]],
     material_conflicts: list[ConflictRecord],
+    material_issues: list[CanonicalIssue],
+    missing_inputs: list[_MissingInputBullet],
     fact_types: tuple[str, ...],
     issue_categories: set[str],
     omission_categories: set[str],
@@ -617,17 +709,18 @@ def _build_category_bullets(
             continue
         bullets.append(
             _SectionBullet(
-                text=_fact_section_text(fact, supporting_facts),
+                text=f"Current read: {_fact_section_text(fact, supporting_facts)}",
                 references=_reference_labels_from_facts(supporting_facts),
             )
         )
 
-    issues = [issue for issue in _material_issues(synthesis) if issue.category in issue_categories]
-    for issue in issues[:3]:
+    issues = [issue for issue in material_issues if issue.category in issue_categories]
+    for issue in issues[:2]:
         bullets.append(
             _SectionBullet(
-                text=f"{issue.title}: {_issue_section_detail(issue)}",
+                text=f"Open risk: {issue.title}. {_issue_section_detail(issue)}",
                 references=_issue_reference_labels(issue),
+                note=f"To clear: {_issue_request_text(issue)}",
             )
         )
 
@@ -636,36 +729,32 @@ def _build_category_bullets(
             continue
         bullets.append(
             _SectionBullet(
-                text=conflict.description,
+                text=f"Control point to resolve: {conflict.description}",
                 references=_source_reference_labels(conflict.sources),
                 note=conflict.uncertainty,
             )
         )
 
     omissions = [
-        assessment
-        for assessment in _critical_missing_assessments(synthesis)
-        if assessment.category in omission_categories
+        item
+        for item in missing_inputs
+        if item.category in omission_categories or item.category in first_pass_missing_categories
     ]
-    for assessment in omissions[:2]:
+    for item in omissions[:2]:
         bullets.append(
             _SectionBullet(
-                text=_omission_text(assessment),
-                references=_omission_reference_labels(assessment),
+                text=f"Still needed: {item.label}. {clip_text(item.summary.rstrip('.') + '.', 160)}",
+                references=item.references,
+                note=(f"Request: {item.request.rstrip('.')}." if item.request else "") + (f" Best document: {item.document_hint}." if item.document_hint else ""),
             )
         )
 
-    for item in result.issue_registry.missing_items:
-        if item.category not in first_pass_missing_categories:
-            continue
-        bullets.append(_SectionBullet(text=_missing_item_text(item)))
-
-    return _dedupe_bullets(bullets)[:6]
+    return _dedupe_bullets(bullets)[:5]
 
 
 def _build_seller_request_items(
     material_issues: list[CanonicalIssue],
-    critical_missing: list[OmissionAssessment],
+    missing_inputs: list[_MissingInputBullet],
 ) -> list[_SectionBullet]:
     items: list[_SectionBullet] = []
 
@@ -679,21 +768,19 @@ def _build_seller_request_items(
         ),
     )
 
-    for issue in ordered_issues[:5]:
+    for issue in ordered_issues[:4]:
         items.append(
             _SectionBullet(
-                text=_issue_request_text(issue),
-                note=_issue_deal_impact(issue),
-                references=_issue_reference_labels(issue),
+                text=_issue_seller_question(issue),
+                note=(f"Document that should answer this: {_issue_document_hint(issue)}." if _issue_document_hint(issue) else ""),
             )
         )
 
-    for assessment in critical_missing[:3]:
+    for item in missing_inputs[:4]:
         items.append(
             _SectionBullet(
-                text=_omission_request_text(assessment),
-                note=_omission_text(assessment),
-                references=_omission_reference_labels(assessment),
+                text=_missing_input_seller_question(item),
+                note=(f"Document that should answer this: {item.document_hint}." if item.document_hint else ""),
             )
         )
 
@@ -744,7 +831,9 @@ def _support_count(facts: list[FactRecord], normalized_value: str) -> int:
 
 
 def _material_issues(synthesis: DealSynthesis) -> list[CanonicalIssue]:
-    issues = [issue for issue in synthesis.canonical_issue_registry.issues if _issue_is_material(issue)]
+    issues = _dedupe_issues(
+        [issue for issue in synthesis.canonical_issue_registry.issues if _issue_is_material(issue)]
+    )
     issues.sort(
         key=lambda issue: (
             _ACQUISITION_SEVERITY_PRIORITY.get(issue.acquisition_severity, 4),
@@ -756,7 +845,7 @@ def _material_issues(synthesis: DealSynthesis) -> list[CanonicalIssue]:
             issue.title,
         )
     )
-    return issues
+    return issues[:5]
 
 
 def _issue_is_material(issue: CanonicalIssue) -> bool:
@@ -764,17 +853,311 @@ def _issue_is_material(issue: CanonicalIssue) -> bool:
         return False
     if issue.front_end_flag == "routine item":
         return False
+    if issue.front_end_flag in {"document gap", "stale-information concern"} and issue.information_status != "conflicting across documents":
+        return False
+    if issue.evidence_basis in {"omission_only", "routine_missing_support"} and issue.information_status != "conflicting across documents":
+        return False
+    if issue.specificity_level == "generic" and not issue.site_specific_trigger and issue.information_status != "conflicting across documents" and not issue.blocking_flag:
+        return False
+    if issue.false_positive_risk == "high" and not (issue.gating_item or issue.blocking_flag or issue.acquisition_severity in {"CRITICAL", "HIGH"}):
+        return False
+    if not _issue_has_clean_support(issue) and issue.information_status != "conflicting across documents" and not issue.blocking_flag:
+        return False
     if issue.blocking_flag or issue.critical_path_flag:
         return True
-    if issue.top_line_eligible:
+    if issue.acquisition_severity in {"CRITICAL", "HIGH"}:
         return True
+    if issue.front_end_flag in {"red flag", "conflict / contradiction concern"}:
+        return True
+    if issue.front_end_flag == "yellow flag" and _issue_priority_signal(issue) >= 4:
+        return True
+    return issue.top_line_eligible and _issue_priority_signal(issue) >= 4
+
+
+def _issue_priority_signal(issue: CanonicalIssue) -> int:
     return max(
         issue.priority_score.cost_exposure,
         issue.priority_score.schedule_exposure,
         issue.priority_score.entitlement_fragility,
         issue.priority_score.closing_risk,
         issue.priority_score.yield_exposure,
-    ) >= 4
+    )
+
+
+def _issue_has_clean_support(issue: CanonicalIssue) -> bool:
+    candidates = [
+        issue.site_specific_trigger,
+        *issue.best_evidence[:2],
+        *issue.core_facts[:2],
+        issue.why_it_matters,
+        issue.likely_implication,
+    ]
+    return any(candidate and not _text_reads_like_extraction_noise(candidate) for candidate in candidates)
+
+
+def _text_reads_like_extraction_noise(text: str) -> bool:
+    normalized = " ".join(text.split())
+    if not normalized:
+        return True
+    tokens = re.findall(r"[A-Za-z0-9$%/-]+", normalized)
+    if len(tokens) < 4:
+        return True
+    alpha_tokens = [token for token in tokens if re.search(r"[A-Za-z]", token)]
+    if not alpha_tokens:
+        return True
+
+    cleaned_alpha = [re.sub(r"[^A-Za-z]", "", token) for token in alpha_tokens]
+    short_ratio = sum(len(token) <= 2 for token in cleaned_alpha if token) / max(len(alpha_tokens), 1)
+    upper_ratio = sum(token.isupper() and len(token) <= 4 for token in alpha_tokens) / max(len(alpha_tokens), 1)
+    digit_ratio = sum(character.isdigit() for character in normalized) / len(normalized)
+    symbol_ratio = sum(not character.isalnum() and not character.isspace() for character in normalized) / len(normalized)
+    frequencies = defaultdict(int)
+    for token in (token.lower() for token in alpha_tokens):
+        frequencies[token] += 1
+    repeated_ratio = max(frequencies.values(), default=0) / max(len(alpha_tokens), 1)
+
+    return (
+        (upper_ratio >= 0.55 and short_ratio >= 0.45)
+        or digit_ratio >= 0.35
+        or symbol_ratio >= 0.18
+        or repeated_ratio >= 0.35
+    )
+
+
+def _dedupe_issues(issues: list[CanonicalIssue]) -> list[CanonicalIssue]:
+    seen: set[tuple[str, str]] = set()
+    deduped: list[CanonicalIssue] = []
+    for issue in issues:
+        key = (issue.category.lower(), issue.title.strip().lower())
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(issue)
+    return deduped
+
+
+def _material_missing_inputs(result: DealRunResult, synthesis: DealSynthesis) -> list[_MissingInputBullet]:
+    items: list[_MissingInputBullet] = []
+    for assessment in _critical_missing_assessments(synthesis):
+        status = assessment.front_end_status or assessment.status
+        if status == "conflicting across documents":
+            continue
+        items.append(_missing_input_from_omission(assessment))
+
+    for item in result.issue_registry.missing_items:
+        if not _missing_item_is_material(item):
+            continue
+        items.append(_missing_input_from_missing_item(item))
+
+    deduped = _dedupe_missing_inputs(items)
+    deduped.sort(key=lambda item: (item.priority, item.category.lower(), item.label.lower()))
+    return deduped[:6]
+
+
+def _missing_input_from_omission(assessment: OmissionAssessment) -> _MissingInputBullet:
+    status = assessment.front_end_status or assessment.status
+    request = _omission_request_text(assessment)
+    return _MissingInputBullet(
+        label=assessment.item,
+        summary=_omission_text(assessment),
+        request=request,
+        category=assessment.category,
+        status=status,
+        priority=_MISSING_INPUT_PRIORITY.get(status, 9),
+        references=_omission_reference_labels(assessment),
+        document_hint=_missing_input_document_hint(
+            label=assessment.item,
+            category=assessment.category,
+            request=request,
+        ),
+    )
+
+
+def _missing_input_from_missing_item(item: MissingItem) -> _MissingInputBullet:
+    request = item.suggested_request.rstrip(".") + "." if item.suggested_request else "Provide the current controlling support."
+    priority = {
+        "Purchase / Sale / Contract": 0,
+        "Title": 0,
+        "Vesting / Legal": 0,
+        "Entitlement / Planning / Conditions": 1,
+        "Utilities": 1,
+        "Environmental": 1,
+        "Geotech / Soils": 1,
+        "Map / Plat / Improvement Plans": 2,
+        "Financial / underwriting support": 2,
+    }.get(item.category, 4)
+    return _MissingInputBullet(
+        label=item.label,
+        summary=item.reason.rstrip(".") + ".",
+        request=request,
+        category=item.category,
+        status="missing item",
+        priority=priority,
+        document_hint=_missing_input_document_hint(
+            label=item.label,
+            category=item.category,
+            request=request,
+        ),
+    )
+
+
+def _missing_item_is_material(item: MissingItem) -> bool:
+    signal_text = f"{item.label} {item.category} {item.reason} {item.suggested_request}".lower()
+    if _text_reads_like_extraction_noise(signal_text):
+        return False
+    material_categories = {
+        "Purchase / Sale / Contract",
+        "Title",
+        "Vesting / Legal",
+        "Entitlement / Planning / Conditions",
+        "Environmental",
+        "Geotech / Soils",
+        "Utilities",
+        "Map / Plat / Improvement Plans",
+        "Financial / underwriting support",
+    }
+    if item.category in material_categories:
+        return True
+    return any(
+        term in signal_text
+        for term in (
+            "purchase",
+            "sale",
+            "psa",
+            "loi",
+            "title",
+            "survey",
+            "vesting",
+            "approval",
+            "resolution",
+            "utility",
+            "will serve",
+            "environmental",
+            "geotech",
+            "budget",
+            "fee",
+            "plan set",
+        )
+    )
+
+
+def _dedupe_missing_inputs(items: list[_MissingInputBullet]) -> list[_MissingInputBullet]:
+    seen: set[str] = set()
+    deduped: list[_MissingInputBullet] = []
+    for item in items:
+        key = item.label.strip().lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(item)
+    return deduped
+
+
+def _bottom_line_deal_text(
+    result: DealRunResult,
+    synthesis: DealSynthesis,
+    fact_index: dict[str, list[FactRecord]],
+) -> str:
+    location = _location_text(fact_index)
+    scale = _scale_text(fact_index)
+    product = _product_text(result, fact_index)
+    sentence = f"The package describes {result.deal_name} as {product}"
+    if location != "jurisdiction not clearly established":
+        sentence += f" in {location}"
+    if scale != "scale not clearly established" and scale not in product:
+        sentence += f", with {scale}"
+    sentence = sentence.rstrip(".") + "."
+    return clip_text(f"{sentence} Current entitlement read: {clip_text(synthesis.entitlement_status, 140)}.", 280)
+
+
+def _bottom_line_issue_text(issue: CanonicalIssue) -> str:
+    detail = issue.practical_impact or issue.why_it_matters or issue.likely_implication or issue.title
+    return clip_text(f"{issue.title}: {detail}", 190)
+
+
+def _bottom_line_missing_text(item: _MissingInputBullet) -> str:
+    basis = item.request or item.summary or item.label
+    return clip_text(f"{item.label}: {basis}", 190)
+
+
+def _bottom_line_package_read(
+    synthesis: DealSynthesis,
+    material_issues: list[CanonicalIssue],
+    missing_inputs: list[_MissingInputBullet],
+) -> str:
+    registry = synthesis.canonical_issue_registry
+    read = _package_read_label(synthesis, material_issues, missing_inputs)
+    quality = registry.package_quality or "mixed"
+    confidence = registry.confidence_in_initial_read or "medium"
+    return (
+        f"Based only on the provided documents, the package currently reads as {read}. "
+        f"Package quality is {quality}, and confidence in the initial read is {confidence}."
+    )
+
+
+def _package_read_label(
+    synthesis: DealSynthesis,
+    material_issues: list[CanonicalIssue],
+    missing_inputs: list[_MissingInputBullet],
+) -> str:
+    quality = synthesis.canonical_issue_registry.package_quality
+    high_severity_count = sum(issue.acquisition_severity in {"CRITICAL", "HIGH"} for issue in material_issues)
+    critical_count = sum(issue.acquisition_severity == "CRITICAL" for issue in material_issues)
+    if quality in {"selectively presented", "thin", "stale", "unclear"}:
+        return "high-risk"
+    if critical_count or high_severity_count >= 2:
+        return "high-risk"
+    if len(missing_inputs) >= 4:
+        return "high-risk"
+    if quality in {"strong", "adequate"} and not material_issues and len(missing_inputs) <= 2:
+        return "relatively clean"
+    return "mixed"
+
+
+def _key_documents_that_control(document_analyses: list[DocumentAnalysis]) -> list[_SectionBullet]:
+    ordered = sorted(
+        document_analyses,
+        key=lambda analysis: (
+            _CONTROL_DOC_BUCKET_ORDER.get(analysis.reading_bucket, 1),
+            0 if analysis.document_role == "primary" else 1,
+            -analysis.reading_priority,
+            analysis.document.title.lower(),
+        ),
+    )
+    bullets: list[_SectionBullet] = []
+    seen_lanes: set[str] = set()
+    for analysis in ordered:
+        control_reason = _control_document_reason(analysis)
+        if control_reason is None:
+            continue
+        lane, reason = control_reason
+        if lane in seen_lanes:
+            continue
+        seen_lanes.add(lane)
+        bullets.append(_SectionBullet(text=f"{analysis.document.title}: {reason}"))
+        if len(bullets) >= 6:
+            break
+    return bullets
+
+
+def _control_document_reason(analysis: DocumentAnalysis) -> tuple[str, str] | None:
+    text = f"{analysis.document.title} {analysis.document.relative_path.as_posix()}".lower()
+    focus_areas = set(analysis.focus_areas)
+    if any(term in text for term in ("title", "commitment", "prelim", "vesting", "deed", "exception")):
+        return "title", "Controls vesting, exceptions, APN, and access/title clarity."
+    if any(term in text for term in ("resolution", "approval", "conditions", "zoning", "entitlement", "development agreement")) or "Entitlement Status" in focus_areas:
+        return "entitlement", "Controls approval status, open conditions, and what is actually entitled."
+    if any(term in text for term in ("phase i", "phase ii", "environmental", "wetland", "biological", "habitat")) or "Environmental Risks" in focus_areas:
+        return "environmental", "Controls environmental constraints and any required follow-up."
+    if any(term in text for term in ("geotech", "geotechnical", "soils")) or "Geotechnical Risks" in focus_areas:
+        return "geotech", "Controls soils recommendations that can move grading, retaining, and foundation cost."
+    if any(term in text for term in ("will serve", "will-serve", "utility", "water", "sewer")) or "Utilities / Infrastructure Issues" in focus_areas:
+        return "utilities", "Controls service availability and offsite utility obligations."
+    if any(term in text for term in ("plan", "site", "grading", "improvement", "tract", "parcel map", "survey")):
+        return "site", "Controls site layout, acreage, yield, and frontage assumptions."
+    if any(term in text for term in ("fee", "budget", "estimate", "bid")) or focus_areas.intersection({"Fee / Exaction Burden", "Budget / Cost Reliability"}):
+        return "cost", "Controls fee and cost assumptions used in underwriting."
+    return None
 
 
 def _critical_missing_assessments(synthesis: DealSynthesis) -> list[OmissionAssessment]:
@@ -915,10 +1298,9 @@ def _issue_section_detail(issue: CanonicalIssue) -> str:
 
 
 def _issue_what_line(issue: CanonicalIssue) -> str:
-    if issue.best_evidence:
-        return clip_text(issue.best_evidence[0], 200)
-    if issue.core_facts:
-        return clip_text(issue.core_facts[0], 200)
+    for candidate in [issue.site_specific_trigger, *issue.best_evidence[:2], *issue.core_facts[:2]]:
+        if candidate and not _text_reads_like_extraction_noise(candidate):
+            return clip_text(candidate, 200)
     return issue.title
 
 
@@ -971,6 +1353,106 @@ def _omission_text(assessment: OmissionAssessment) -> str:
 
 def _missing_item_text(item: MissingItem) -> str:
     return f"{item.label}: {item.reason.rstrip('.')} Needed next: {item.suggested_request.rstrip('.')}."
+
+
+def _issue_seller_question(issue: CanonicalIssue) -> str:
+    return f"Please confirm {_issue_question_subject(issue)} and provide {_issue_document_hint(issue)}."
+
+
+def _missing_input_seller_question(item: _MissingInputBullet) -> str:
+    if item.status == "stale and potentially unreliable":
+        return f"Please provide the current {item.document_hint or item.label.lower()} that controls this lane."
+    return f"Please provide {item.document_hint or item.label.lower()}."
+
+
+def _issue_question_subject(issue: CanonicalIssue) -> str:
+    signal_text = _issue_signal_text(issue)
+    if _signal_contains(signal_text, ("unit", "lot", "count", "yield", "density")):
+        return "the currently approved unit and lot count"
+    if _signal_contains(signal_text, ("acre", "gross", "net", "site area", "site acreage")):
+        return "the controlling acreage basis"
+    if issue.category == "Title / Access Concerns" or _signal_contains(signal_text, ("title", "access", "easement", "vesting", "deed", "apn", "parcel")):
+        return "the current vesting, access, and title-exception position"
+    if issue.category == "Entitlement Status" or _signal_contains(signal_text, ("approval", "resolution", "condition", "zoning", "permit", "map")):
+        return "the current approval status, open conditions, and controlling plan"
+    if issue.category == "Environmental Risks":
+        return "whether any environmental follow-up, mitigation, or agency action remains open"
+    if issue.category == "Geotechnical Risks":
+        return "the geotechnical recommendations that still control grading, retaining, or foundation scope"
+    if issue.category == "Flood / Drainage Issues":
+        return "the drainage or flood-control scope that governs the current plan"
+    if issue.category == "Utilities / Infrastructure Issues":
+        return "current utility availability and any remaining provider conditions"
+    if issue.category == "Offsite Obligations":
+        return "the buyer-facing offsite or frontage scope, if any"
+    if issue.category == "Fee / Exaction Burden":
+        return "the current fee schedule that should control underwriting"
+    if issue.category == "Budget / Cost Reliability":
+        return "the current auditable site-cost basis"
+    if issue.category == "Schedule Risks":
+        return "the milestone schedule and the assumptions that control it"
+    return f"the current position on {issue.title.lower()}"
+
+
+def _issue_document_hint(issue: CanonicalIssue) -> str:
+    signal_text = _issue_signal_text(issue)
+    if _signal_contains(signal_text, ("unit", "lot", "count", "yield", "density")):
+        return "the controlling approved plan set or resolution"
+    if _signal_contains(signal_text, ("acre", "gross", "net", "site area", "site acreage")):
+        return "the controlling survey, legal description, or plan sheet used for acreage"
+    mapping = {
+        "Title / Access Concerns": "the current title report or commitment, survey, and any exception response that controls closing",
+        "Entitlement Status": "the controlling resolution, conditions tracker, or approved plan set",
+        "Environmental Risks": "the current environmental report, agency correspondence, or closure documentation",
+        "Geotechnical Risks": "the current geotechnical report or addendum and the plan/budget carry-through",
+        "Flood / Drainage Issues": "the current drainage study, civil response, or public-works direction",
+        "Utilities / Infrastructure Issues": "current will-serve letters or provider confirmation",
+        "Offsite Obligations": "the current offsite scope schedule or responsibility matrix",
+        "Fee / Exaction Burden": "the current city-confirmed fee schedule or fee matrix",
+        "Budget / Cost Reliability": "current bid backup, estimate support, or the latest site-development budget",
+        "Schedule Risks": "the current milestone schedule and the assumption backup behind it",
+    }
+    return mapping.get(issue.category, "the controlling document that answers the item")
+
+
+def _missing_input_document_hint(*, label: str, category: str, request: str) -> str:
+    signal_text = f"{label} {category} {request}".lower()
+    if category == "Purchase / Sale / Contract" or _signal_contains(signal_text, ("purchase", "sale", "psa", "loi", "amendment")):
+        return "the current LOI, PSA, and amendments"
+    if category in {"Title", "Vesting / Legal", "Title / Access Concerns"} or _signal_contains(signal_text, ("title", "survey", "vesting", "easement", "deed")):
+        return "the current title report or commitment, survey, and vesting support"
+    if category in {"Entitlement / Planning / Conditions", "Entitlement Status"} or _signal_contains(signal_text, ("approval", "resolution", "condition", "zoning", "plan set")):
+        return "the controlling approval set, resolution, or conditions tracker"
+    if category in {"Utilities", "Utilities / Infrastructure Issues"} or _signal_contains(signal_text, ("utility", "will serve", "water", "sewer")):
+        return "current will-serve letters or provider confirmation"
+    if category in {"Environmental", "Environmental Risks"} or _signal_contains(signal_text, ("environmental", "phase i", "phase ii", "wetland")):
+        return "the current environmental report or closure documentation"
+    if category in {"Geotech / Soils", "Geotechnical Risks"} or _signal_contains(signal_text, ("geotech", "geotechnical", "soils")):
+        return "the current geotechnical report or addendum"
+    if category in {"Financial / underwriting support", "Budget / Cost Reliability", "Fee / Exaction Burden"} or _signal_contains(signal_text, ("budget", "bid", "pricing", "fee")):
+        return "the current budget, bid backup, or fee matrix"
+    if category == "Map / Plat / Improvement Plans" or _signal_contains(signal_text, ("plan", "map", "plat", "improvement")):
+        return "the controlling plan set or map"
+    return label.lower()
+
+
+def _issue_signal_text(issue: CanonicalIssue) -> str:
+    return " ".join(
+        part
+        for part in [
+            issue.title,
+            issue.site_specific_trigger,
+            issue.why_it_matters,
+            issue.likely_implication,
+            " ".join(issue.best_evidence[:2]),
+            " ".join(issue.core_facts[:2]),
+        ]
+        if part
+    ).lower()
+
+
+def _signal_contains(signal_text: str, terms: tuple[str, ...]) -> bool:
+    return any(re.search(r"\b" + re.escape(term) + r"\b", signal_text) for term in terms)
 
 
 def _issue_request_text(issue: CanonicalIssue) -> str:
@@ -1078,11 +1560,13 @@ def _add_bullet_items(document: Document, items: list[_SectionBullet]) -> None:
 def _add_note_line(document: Document, text: str) -> None:
     paragraph = document.add_paragraph(text)
     paragraph.paragraph_format.left_indent = Pt(18)
+    paragraph.paragraph_format.space_after = Pt(1)
 
 
 def _add_reference_line(document: Document, references: list[str]) -> None:
     paragraph = document.add_paragraph(f"Ref: {'; '.join(unique_preserve_order(references)[:3])}")
     paragraph.paragraph_format.left_indent = Pt(18)
+    paragraph.paragraph_format.space_after = Pt(1)
 
 
 def _dedupe_bullets(items: list[_SectionBullet]) -> list[_SectionBullet]:
