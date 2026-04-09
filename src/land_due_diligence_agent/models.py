@@ -628,6 +628,13 @@ class CanonicalIssue:
     acquisition_severity_reason: str = ""
     affects: list[str] = field(default_factory=list)
     practical_impact: str = ""
+    deal_impact_type: str = ""
+    deal_impact_magnitude: str = ""
+    deal_impact_mechanism: str = ""
+    cost_exposure_band: str = ""
+    timing_exposure_band: str = ""
+    fixability_classification: str = ""
+    downside_if_wrong: str = ""
     likely_explanation: str = ""
     reality_vs_noise: str = ""
     gating_item: bool = False

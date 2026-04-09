@@ -11,6 +11,19 @@ import re
 from docx import Document
 from docx.shared import Pt
 
+from land_due_diligence_agent.analysis.front_end import (
+    cost_exposure_band_for_issue,
+    deal_impact_magnitude_for_issue,
+    deal_impact_mechanism_for_issue,
+    deal_impact_summary_issues,
+    deal_impact_type_for_issue,
+    fixability_classification_for_issue,
+    if_wrong_line_for_issue,
+    timing_exposure_band_for_issue,
+    underwrite_confidence_level,
+    underwrite_confidence_limiters,
+    underwrite_confidence_reason,
+)
 from land_due_diligence_agent.deal_models import ConflictRecord, DealRunResult, FactRecord, MissingItem, SourceReference
 from land_due_diligence_agent.models import CanonicalIssue, Citation, DealSynthesis, DocumentAnalysis, OmissionAssessment
 from land_due_diligence_agent.utils.files import ensure_directory
@@ -205,6 +218,8 @@ def _write_structured_report(document: Document, result: DealRunResult, synthesi
         material_issues=material_issues,
         missing_inputs=missing_inputs,
     )
+    _add_deal_impact_summary_section(document, material_issues)
+    _add_underwrite_confidence_section(document, synthesis, material_issues)
     _add_key_documents_that_control_section(document, synthesis)
     _add_deal_overview(document, result, synthesis, fact_index)
     _add_gating_items_section(document, material_issues)
@@ -349,6 +364,108 @@ def _add_key_documents_that_control_section(document: Document, synthesis: DealS
     _add_bullet_items(
         document,
         control_documents or [_SectionBullet(text="The package does not contain an obvious current controlling document set in the lanes that normally anchor deal judgment.")],
+    )
+
+
+def _add_deal_impact_summary_section(document: Document, material_issues: list[CanonicalIssue]) -> None:
+    _add_section(document, "DEAL IMPACT SUMMARY")
+    summary_issues = deal_impact_summary_issues(material_issues, limit=3)
+    bullets = [
+        _SectionBullet(
+            text=(
+                f"{issue.title} [{issue.acquisition_severity}]: impact type {deal_impact_type_for_issue(issue)}; "
+                f"magnitude {deal_impact_magnitude_for_issue(issue)}. "
+                f"{clip_text(deal_impact_mechanism_for_issue(issue), 180)}"
+            ),
+            note=(
+                f"Cost exposure: {cost_exposure_band_for_issue(issue)}. "
+                f"Timing exposure: {timing_exposure_band_for_issue(issue)}. "
+                f"Fixability: {fixability_classification_for_issue(issue)}."
+            ),
+            references=_issue_reference_labels(issue),
+        )
+        for issue in summary_issues
+    ]
+    _add_bullet_items(
+        document,
+        bullets
+        or [
+            _SectionBullet(
+                text="No CRITICAL or HIGH issue currently rises high enough to reshape the deal beyond routine diligence judgment."
+            )
+        ],
+    )
+
+
+def _add_underwrite_confidence_section(
+    document: Document,
+    synthesis: DealSynthesis,
+    material_issues: list[CanonicalIssue],
+) -> None:
+    _add_section(document, "UNDERWRITE CONFIDENCE")
+
+    _add_subsection(document, "Current Read")
+    confidence_level = underwrite_confidence_level(
+        registry=synthesis.canonical_issue_registry,
+        omission_assessments=synthesis.omission_assessments,
+        contradictions=synthesis.contradictions,
+        document_analyses=synthesis.document_analyses,
+        issues=material_issues,
+    )
+    confidence_reason = underwrite_confidence_reason(
+        registry=synthesis.canonical_issue_registry,
+        omission_assessments=synthesis.omission_assessments,
+        contradictions=synthesis.contradictions,
+        document_analyses=synthesis.document_analyses,
+        issues=material_issues,
+    )
+    _add_bullet_items(
+        document,
+        [
+            _SectionBullet(
+                text=f"Current underwrite confidence is {confidence_level}. {clip_text(confidence_reason, 220)}"
+            )
+        ],
+    )
+
+    _add_subsection(document, "Main Limiters")
+    limiter_bullets = [
+        _SectionBullet(text=clip_text(line, 200))
+        for line in underwrite_confidence_limiters(
+            registry=synthesis.canonical_issue_registry,
+            omission_assessments=synthesis.omission_assessments,
+            contradictions=synthesis.contradictions,
+            document_analyses=synthesis.document_analyses,
+            issues=material_issues,
+            limit=3,
+        )
+    ]
+    _add_bullet_items(
+        document,
+        limiter_bullets
+        or [
+            _SectionBullet(
+                text="No single unresolved assumption stands out beyond the current issue list and package-read summary."
+            )
+        ],
+    )
+
+    _add_subsection(document, "If Wrong, What Happens?")
+    downside_bullets = [
+        _SectionBullet(
+            text=f"{issue.title}: {clip_text(if_wrong_line_for_issue(issue), 200)}",
+            references=_issue_reference_labels(issue),
+        )
+        for issue in deal_impact_summary_issues(material_issues, limit=3)
+    ]
+    _add_bullet_items(
+        document,
+        downside_bullets
+        or [
+            _SectionBullet(
+                text="If the remaining assumptions break, the deal can still move on price, timing, or closability faster than the current package implies."
+            )
+        ],
     )
 
 
@@ -518,9 +635,22 @@ def _add_key_risks_section(document: Document, material_issues: list[CanonicalIs
             [
                 _SectionBullet(text=f"Severity: {_issue_severity_line(issue)}"),
                 _SectionBullet(text=f"Issue: {_issue_what_line(issue)}", references=_issue_reference_labels(issue)),
-                _SectionBullet(text=f"What it affects: {', '.join(issue.affects) or 'deal execution'}."),
                 _SectionBullet(text=f"Likely explanation: {_issue_likely_explanation(issue)}"),
-                _SectionBullet(text=f"Why it matters: {_issue_deal_impact(issue)}"),
+                _SectionBullet(
+                    text=(
+                        f"Deal impact: type {deal_impact_type_for_issue(issue)}; "
+                        f"magnitude {deal_impact_magnitude_for_issue(issue)}; "
+                        f"mechanism {clip_text(deal_impact_mechanism_for_issue(issue), 170)}"
+                    )
+                ),
+                _SectionBullet(
+                    text=(
+                        f"Exposure / fixability: cost {cost_exposure_band_for_issue(issue)}; "
+                        f"timing {timing_exposure_band_for_issue(issue)}; "
+                        f"fixability {fixability_classification_for_issue(issue)}."
+                    )
+                ),
+                _SectionBullet(text=f"If wrong: {clip_text(if_wrong_line_for_issue(issue), 200)}"),
                 _SectionBullet(text=f"What would resolve it: {_issue_request_text(issue)}"),
             ],
         )
@@ -1286,15 +1416,19 @@ def _issue_known_line(issue: CanonicalIssue) -> str:
 
 
 def _issue_summary_line(issue: CanonicalIssue) -> str:
-    affects = ", ".join(issue.affects[:2]) or "deal execution"
-    summary = issue.practical_impact or issue.likely_implication or issue.why_it_matters or issue.title
-    return clip_text(f"{issue.acquisition_severity}; affects {affects}. {summary}", 200)
+    summary = deal_impact_mechanism_for_issue(issue) or issue.practical_impact or issue.likely_implication or issue.why_it_matters or issue.title
+    return clip_text(
+        f"{issue.acquisition_severity}; {deal_impact_magnitude_for_issue(issue)} {deal_impact_type_for_issue(issue)} impact. {summary}",
+        200,
+    )
 
 
 def _issue_section_detail(issue: CanonicalIssue) -> str:
-    affects = ", ".join(issue.affects[:2]) or "deal execution"
-    detail = issue.practical_impact or issue.why_it_matters or issue.likely_implication or issue.what_would_resolve_it
-    return clip_text(f"{issue.acquisition_severity}; affects {affects}. {detail}", 200)
+    detail = deal_impact_mechanism_for_issue(issue) or issue.practical_impact or issue.why_it_matters or issue.likely_implication or issue.what_would_resolve_it
+    return clip_text(
+        f"{issue.acquisition_severity}; {deal_impact_magnitude_for_issue(issue)} {deal_impact_type_for_issue(issue)} impact. {detail}",
+        200,
+    )
 
 
 def _issue_what_line(issue: CanonicalIssue) -> str:
@@ -1327,6 +1461,9 @@ def _issue_likely_explanation(issue: CanonicalIssue) -> str:
 
 
 def _issue_deal_impact(issue: CanonicalIssue) -> str:
+    mechanism = deal_impact_mechanism_for_issue(issue)
+    if mechanism:
+        return clip_text(mechanism, 220)
     if issue.practical_impact:
         return clip_text(issue.practical_impact, 220)
     impact_lines = unique_preserve_order(

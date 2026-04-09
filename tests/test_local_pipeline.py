@@ -58,6 +58,8 @@ class LocalDealPipelineTests(unittest.TestCase):
                 if paragraph.text
             }
             self.assertIn("BOTTOM LINE", review_text)
+            self.assertIn("DEAL IMPACT SUMMARY", review_text)
+            self.assertIn("UNDERWRITE CONFIDENCE", review_text)
             self.assertIn("Key Documents That Control", review_text)
             self.assertIn("Deal Overview", review_text)
             self.assertIn("Deal Killers / Gating Items", review_text)
@@ -73,6 +75,8 @@ class LocalDealPipelineTests(unittest.TestCase):
             self.assertIn("Biggest Current Concerns", review_text)
             self.assertIn("Package Read", review_text)
             self.assertEqual(paragraph_styles["BOTTOM LINE"], "Heading 1")
+            self.assertEqual(paragraph_styles["DEAL IMPACT SUMMARY"], "Heading 1")
+            self.assertEqual(paragraph_styles["UNDERWRITE CONFIDENCE"], "Heading 1")
             self.assertEqual(paragraph_styles["Key Documents That Control"], "Heading 1")
             self.assertEqual(paragraph_styles["Deal Overview"], "Heading 1")
             self.assertEqual(paragraph_styles["Deal Killers / Gating Items"], "Heading 1")

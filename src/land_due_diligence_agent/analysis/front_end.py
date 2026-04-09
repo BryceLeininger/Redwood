@@ -165,6 +165,374 @@ def apply_front_end_assessment(
     return reading_order, roadmap
 
 
+def deal_impact_summary_issues(issues: list[CanonicalIssue], *, limit: int = 3) -> list[CanonicalIssue]:
+    """Return the issues that most directly drive deal-shaping impact summaries."""
+
+    ordered = sorted(
+        issues,
+        key=lambda issue: (
+            _ACQUISITION_SEVERITY_ORDER.get(issue.acquisition_severity, 4),
+            0 if issue.gating_item else 1,
+            0 if issue.blocking_flag else 1,
+            0 if issue.critical_path_flag else 1,
+            -_issue_max_impact(issue),
+            -issue.priority_score.total,
+            issue.title,
+        ),
+    )
+    priority = [issue for issue in ordered if issue.acquisition_severity in {"CRITICAL", "HIGH"}]
+    return (priority or ordered)[:limit]
+
+
+def deal_impact_type_for_issue(issue: CanonicalIssue) -> str:
+    """Return the primary underwriting/deal impact lane for an issue."""
+
+    if issue.deal_impact_type:
+        return issue.deal_impact_type
+
+    if issue.category == "Title / Access Concerns" and (issue.blocking_flag or issue.priority_score.closing_risk >= 3):
+        return "legal/title risk"
+    if issue.category == "Entitlement Status" and (issue.blocking_flag or issue.priority_score.entitlement_fragility >= 3):
+        return "entitlement risk"
+
+    price_score = max(issue.priority_score.cost_exposure, issue.priority_score.yield_exposure)
+    if issue.decision_action in {"reprice", "restructure"}:
+        price_score += 2
+    if "price" in issue.affects:
+        price_score += 1
+
+    schedule_score = issue.priority_score.schedule_exposure
+    if issue.blocking_flag or issue.critical_path_flag:
+        schedule_score += 2
+    if "timeline" in issue.affects:
+        schedule_score += 1
+
+    entitlement_score = issue.priority_score.entitlement_fragility
+    if issue.category == "Entitlement Status":
+        entitlement_score += 3
+    if "entitlement risk" in issue.affects:
+        entitlement_score += 1
+
+    construction_cost_score = issue.priority_score.cost_exposure
+    if issue.category in {
+        "Environmental Risks",
+        "Geotechnical Risks",
+        "Flood / Drainage Issues",
+        "Utilities / Infrastructure Issues",
+        "Offsite Obligations",
+        "Fee / Exaction Burden",
+        "Budget / Cost Reliability",
+    }:
+        construction_cost_score += 2
+    if "construction cost" in issue.affects:
+        construction_cost_score += 1
+
+    legal_title_score = issue.priority_score.closing_risk
+    if issue.category == "Title / Access Concerns":
+        legal_title_score += 3
+    if "legal/title risk" in issue.affects:
+        legal_title_score += 1
+
+    scores = {
+        "legal/title risk": legal_title_score,
+        "entitlement risk": entitlement_score,
+        "timeline": schedule_score,
+        "construction cost": construction_cost_score,
+        "price": price_score,
+    }
+    best_label, best_score = max(
+        scores.items(),
+        key=lambda item: (-item[1], _impact_type_order(item[0])),
+    )
+    if best_score <= 0:
+        return issue.affects[0] if issue.affects else "deal execution"
+    return best_label
+
+
+def deal_impact_magnitude_for_issue(issue: CanonicalIssue) -> str:
+    """Return a qualitative magnitude label for deal impact."""
+
+    if issue.deal_impact_magnitude:
+        return issue.deal_impact_magnitude
+
+    max_impact = _issue_max_impact(issue)
+    if issue.decision_action == "treat as fatal":
+        return "deal-shaping"
+    if issue.acquisition_severity == "CRITICAL":
+        return "deal-shaping"
+    if issue.blocking_flag and max_impact >= 4:
+        return "deal-shaping"
+    if issue.acquisition_severity == "HIGH" or max_impact >= 4:
+        return "material"
+    if issue.acquisition_severity == "MODERATE" or max_impact >= 3:
+        return "meaningful"
+    return "limited"
+
+
+def deal_impact_mechanism_for_issue(issue: CanonicalIssue) -> str:
+    """Return the main mechanism by which the issue can move the deal."""
+
+    if issue.deal_impact_mechanism:
+        return issue.deal_impact_mechanism
+
+    impact_type = deal_impact_type_for_issue(issue)
+    if impact_type == "legal/title risk":
+        candidates = [
+            issue.likely_closing_effect,
+            issue.likely_structure_effect,
+            issue.practical_impact,
+            issue.why_it_matters,
+            issue.likely_implication,
+        ]
+    elif impact_type == "entitlement risk":
+        candidates = [
+            issue.likely_implication,
+            issue.likely_yield_or_product_effect,
+            issue.practical_impact,
+            issue.why_it_matters,
+        ]
+    elif impact_type == "timeline":
+        candidates = [
+            issue.likely_schedule_effect,
+            issue.practical_impact,
+            issue.likely_implication,
+            issue.why_it_matters,
+        ]
+    elif impact_type == "construction cost":
+        candidates = [
+            issue.likely_cost_effect,
+            issue.likely_underwriting_effect,
+            issue.practical_impact,
+            issue.why_it_matters,
+        ]
+    elif impact_type == "price":
+        candidates = [
+            issue.likely_underwriting_effect,
+            issue.likely_cost_effect,
+            issue.likely_yield_or_product_effect,
+            issue.practical_impact,
+            issue.why_it_matters,
+        ]
+    else:
+        candidates = [
+            issue.practical_impact,
+            issue.likely_implication,
+            issue.why_it_matters,
+            issue.title,
+        ]
+
+    for candidate in unique_preserve_order(candidates):
+        if candidate:
+            return candidate
+    return issue.title
+
+
+def cost_exposure_band_for_issue(issue: CanonicalIssue) -> str:
+    """Return a qualitative cost exposure band."""
+
+    if issue.cost_exposure_band:
+        return issue.cost_exposure_band
+
+    score = max(issue.priority_score.cost_exposure, issue.priority_score.yield_exposure)
+    impact_type = deal_impact_type_for_issue(issue)
+    if issue.decision_action in {"treat as fatal", "reprice"} and impact_type in {"price", "construction cost"}:
+        score = max(score, 5)
+    if score >= 5:
+        return "potentially deal-changing"
+    if score >= 4:
+        return "material re-underwrite"
+    if score >= 3:
+        return "noticeable budget pressure"
+    if impact_type in {"price", "construction cost"} or issue.likely_cost_effect or issue.likely_underwriting_effect:
+        return "limited but real"
+    return "little direct cost signal"
+
+
+def timing_exposure_band_for_issue(issue: CanonicalIssue) -> str:
+    """Return a qualitative timing exposure band."""
+
+    if issue.timing_exposure_band:
+        return issue.timing_exposure_band
+
+    if issue.schedule_impact_classification in {"immediate blocker", "pre-close blocker"}:
+        return "can stop the next gate"
+    if (
+        issue.schedule_impact_classification in {"pre-underwriting blocker", "pre-final-map blocker"}
+        or issue.priority_score.schedule_exposure >= 4
+        or issue.critical_path_flag
+    ):
+        return "material delay risk"
+    if (
+        issue.schedule_impact_classification == "pre-vertical-start blocker"
+        or issue.priority_score.schedule_exposure >= 3
+        or "timeline" in issue.affects
+        or issue.likely_schedule_effect
+    ):
+        return "execution timing drag"
+    return "limited direct timing signal"
+
+
+def fixability_classification_for_issue(issue: CanonicalIssue) -> str:
+    """Translate fixability into a deal-facing execution classification."""
+
+    if issue.fixability_classification:
+        return issue.fixability_classification
+
+    if issue.decision_action == "treat as fatal":
+        return "hard to cure before closing"
+    if issue.category == "Title / Access Concerns" and issue.blocking_flag:
+        return "needs title cure, insurance, or redesign"
+    if issue.category == "Entitlement Status" and issue.blocking_flag:
+        return "needs agency closure or plan change"
+    if issue.fixability == "low":
+        return "hard to fix pre-close"
+    if issue.fixability == "medium":
+        if issue.front_end_flag in {"document gap", "stale-information concern"} and not issue.blocking_flag:
+            return "fixable if current support exists and is produced"
+        return "fixable, but only with time, scope closure, or economics reset"
+    if issue.fixability == "high":
+        if issue.front_end_flag in {"document gap", "stale-information concern"}:
+            return "mostly documentable"
+        return "likely fixable through normal diligence clean-up"
+    return "unknown"
+
+
+def if_wrong_line_for_issue(issue: CanonicalIssue) -> str:
+    """Return the downside if the current working assumption proves wrong."""
+
+    if issue.downside_if_wrong:
+        return issue.downside_if_wrong
+
+    if issue.status == "conflicted":
+        return "If the wrong source controls, the team can underwrite to the wrong plan, cost basis, or closing assumption."
+
+    impact_type = deal_impact_type_for_issue(issue)
+    if impact_type == "legal/title risk":
+        return "If the current assumption is wrong, closing control, insured access, or legal buildability can fail rather than just slip."
+    if impact_type == "entitlement risk":
+        return "If the current assumption is wrong, approved product, density, or permit path can move and force a re-underwrite."
+    if impact_type == "timeline":
+        return "If the current assumption is wrong, carry and execution timing can slip before the next decision gate."
+    if impact_type == "construction cost":
+        return "If the current assumption is wrong, site scope can expand beyond the current budget and contingency."
+    if impact_type == "price":
+        return "If the current assumption is wrong, the deal may need repricing, seller credit, or a different structure."
+    return "If the current assumption is wrong, the deal can move materially on price, timing, or execution."
+
+
+def underwrite_confidence_level(
+    *,
+    registry: CanonicalIssueRegistry,
+    omission_assessments: list[OmissionAssessment],
+    contradictions: list[ContradictionFinding],
+    document_analyses: list[DocumentAnalysis],
+    issues: list[CanonicalIssue] | None = None,
+) -> str:
+    """Return a qualitative confidence label for the current underwriting stance."""
+
+    issue_pool = issues or registry.issues
+    critical_count = sum(issue.acquisition_severity == "CRITICAL" for issue in issue_pool)
+    high_count = sum(issue.acquisition_severity == "HIGH" for issue in issue_pool)
+    blind_spot_count = sum(
+        assessment.front_end_status in {"missing and important", "conflicting across documents", "stale and potentially unreliable"}
+        for assessment in omission_assessments
+    )
+    low_confidence_primary = sum(
+        analysis.document_role == "primary" and analysis.confidence == "low"
+        for analysis in document_analyses
+    )
+
+    if (
+        registry.package_quality in {"selectively presented", "thin", "stale", "unclear"}
+        or critical_count
+        or contradictions
+        or blind_spot_count >= 2
+        or low_confidence_primary
+    ):
+        return "low"
+    if (
+        registry.package_quality in {"mixed", "adequate"}
+        and (high_count >= 2 or blind_spot_count or any(issue.gating_item for issue in issue_pool))
+    ):
+        return "guarded"
+    if high_count or blind_spot_count:
+        return "moderate"
+    return "high"
+
+
+def underwrite_confidence_reason(
+    *,
+    registry: CanonicalIssueRegistry,
+    omission_assessments: list[OmissionAssessment],
+    contradictions: list[ContradictionFinding],
+    document_analyses: list[DocumentAnalysis],
+    issues: list[CanonicalIssue] | None = None,
+) -> str:
+    """Explain the current underwriting confidence level in one short paragraph."""
+
+    issue_pool = issues or registry.issues
+    critical_count = sum(issue.acquisition_severity == "CRITICAL" for issue in issue_pool)
+    high_count = sum(issue.acquisition_severity == "HIGH" for issue in issue_pool)
+    blind_spot_count = sum(
+        assessment.front_end_status in {"missing and important", "conflicting across documents", "stale and potentially unreliable"}
+        for assessment in omission_assessments
+    )
+    low_confidence_primary = sum(
+        analysis.document_role == "primary" and analysis.confidence == "low"
+        for analysis in document_analyses
+    )
+
+    parts = [
+        f"Package quality is {registry.package_quality or 'mixed'} with {registry.confidence_in_initial_read} initial-read confidence.",
+    ]
+    if critical_count:
+        parts.append(f"{critical_count} critical issue(s) still sit on the underwriting path.")
+    elif high_count:
+        parts.append(f"{high_count} high-severity issue(s) still need direct support before the basis is stable.")
+    if contradictions:
+        parts.append(f"{len(contradictions)} contradiction(s) still leave a controlling assumption unsettled.")
+    elif blind_spot_count:
+        parts.append(f"{blind_spot_count} major blind spot(s) still limit what can be underwritten with confidence.")
+    if low_confidence_primary:
+        parts.append("At least one primary control document still needs manual confirmation because extraction quality was weak.")
+    elif registry.confidence_unlocks:
+        parts.append(f"Confidence improves once {registry.confidence_unlocks[0].rstrip('.')}.")
+    return " ".join(parts[:3])
+
+
+def underwrite_confidence_limiters(
+    *,
+    registry: CanonicalIssueRegistry,
+    omission_assessments: list[OmissionAssessment],
+    contradictions: list[ContradictionFinding],
+    document_analyses: list[DocumentAnalysis],
+    issues: list[CanonicalIssue] | None = None,
+    limit: int = 3,
+) -> list[str]:
+    """Return the short list of assumptions still carrying the underwrite."""
+
+    issue_pool = issues or registry.issues
+    lines: list[str] = []
+    for issue in deal_impact_summary_issues(issue_pool, limit=limit):
+        request = issue.missing_confirmation or issue.what_would_resolve_it or (issue.open_questions[0] if issue.open_questions else "")
+        if request:
+            lines.append(f"{issue.title}: underwriting still leans on {request.rstrip('.').lower()}.")
+        else:
+            lines.append(
+                f"{issue.title}: underwriting still leans on the current {deal_impact_type_for_issue(issue)} assumption staying true."
+            )
+    for finding in contradictions[:limit]:
+        lines.append(f"Contradiction to reconcile: {finding.description}")
+    for assessment in omission_assessments:
+        if assessment.front_end_status in {"missing and important", "conflicting across documents"}:
+            lines.append(f"Missing hard backing: {assessment.item}.")
+        if len(lines) >= limit + 2:
+            break
+    if not lines and any(analysis.document_role == "primary" and analysis.confidence == "low" for analysis in document_analyses):
+        lines.append("A primary control document still requires manual confirmation because extraction quality was weak.")
+    return unique_preserve_order(lines)[:limit]
+
+
 def build_front_end_reading_order(document_analyses: list[DocumentAnalysis]) -> list[ReadingRecommendation]:
     """Build a front-end oriented reading sequence with explicit review buckets."""
 
@@ -388,6 +756,13 @@ def _annotate_issues(
         issue.practical_impact = _issue_practical_impact(issue)
         issue.reality_vs_noise = _issue_reality_vs_noise(issue)
         issue.acquisition_severity, issue.acquisition_severity_reason = _issue_acquisition_severity(issue)
+        issue.deal_impact_type = deal_impact_type_for_issue(issue)
+        issue.deal_impact_magnitude = deal_impact_magnitude_for_issue(issue)
+        issue.deal_impact_mechanism = deal_impact_mechanism_for_issue(issue)
+        issue.cost_exposure_band = cost_exposure_band_for_issue(issue)
+        issue.timing_exposure_band = timing_exposure_band_for_issue(issue)
+        issue.fixability_classification = fixability_classification_for_issue(issue)
+        issue.downside_if_wrong = if_wrong_line_for_issue(issue)
         issue.gating_item = _issue_is_gating_item(issue)
         issue.research_agenda = (
             [_research_agenda_item(issue)]
@@ -416,6 +791,9 @@ def _annotate_issues(
                 f"why now={issue.why_now}",
                 f"acquisition severity={issue.acquisition_severity}",
                 f"affects={', '.join(issue.affects) or 'none'}",
+                f"deal impact={issue.deal_impact_type or 'deal execution'} / {issue.deal_impact_magnitude or 'limited'}",
+                f"exposure bands: cost={issue.cost_exposure_band or 'n/a'}, timing={issue.timing_exposure_band or 'n/a'}",
+                f"fixability classification={issue.fixability_classification or 'n/a'}",
                 f"specificity={issue.specificity_level}",
                 f"abnormality basis={issue.abnormality_basis}",
                 f"genericity penalty={issue.genericity_penalty}",
@@ -791,6 +1169,27 @@ def _issue_affects(issue: CanonicalIssue) -> list[str]:
     if issue.category == "Title / Access Concerns" or issue.priority_score.closing_risk >= 4 or "Closing" in issue.gating_flags:
         affects.append("legal/title risk")
     return unique_preserve_order(affects)
+
+
+def _impact_type_order(label: str) -> int:
+    return {
+        "legal/title risk": 0,
+        "entitlement risk": 1,
+        "timeline": 2,
+        "construction cost": 3,
+        "price": 4,
+        "deal execution": 5,
+    }.get(label, 99)
+
+
+def _issue_max_impact(issue: CanonicalIssue) -> int:
+    return max(
+        issue.priority_score.cost_exposure,
+        issue.priority_score.schedule_exposure,
+        issue.priority_score.entitlement_fragility,
+        issue.priority_score.closing_risk,
+        issue.priority_score.yield_exposure,
+    )
 
 
 def _issue_likely_explanation(issue: CanonicalIssue) -> str:

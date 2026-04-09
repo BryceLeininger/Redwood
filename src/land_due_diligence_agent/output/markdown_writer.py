@@ -7,6 +7,19 @@ from collections import Counter
 import json
 from pathlib import Path
 
+from land_due_diligence_agent.analysis.front_end import (
+    cost_exposure_band_for_issue,
+    deal_impact_magnitude_for_issue,
+    deal_impact_mechanism_for_issue,
+    deal_impact_summary_issues,
+    deal_impact_type_for_issue,
+    fixability_classification_for_issue,
+    if_wrong_line_for_issue,
+    timing_exposure_band_for_issue,
+    underwrite_confidence_level,
+    underwrite_confidence_limiters,
+    underwrite_confidence_reason,
+)
 from land_due_diligence_agent.analysis.issue_registry import build_reviewer_feedback_template
 from land_due_diligence_agent.models import CanonicalIssue, DealSynthesis, RunSummary
 from land_due_diligence_agent.utils.text import normalize_text
@@ -249,6 +262,59 @@ def _build_executive_summary_markdown(
             f"- Overall read: {_compress_statement(synthesis.executive_summary or synthesis.entitlement_status, max_words=26, max_sentences=2, single_idea=False)}",
         ]
     )
+    lines.extend(["", "## Deal Impact Summary", ""])
+    impact_issues = deal_impact_summary_issues(top_issues or registry.issues, limit=3)
+    if impact_issues:
+        for issue in impact_issues:
+            lines.append(
+                "- "
+                + _compress_statement(
+                    (
+                        f"{issue.title}: impact type {deal_impact_type_for_issue(issue)}; "
+                        f"magnitude {deal_impact_magnitude_for_issue(issue)}; "
+                        f"cost {cost_exposure_band_for_issue(issue)}; "
+                        f"timing {timing_exposure_band_for_issue(issue)}"
+                    ),
+                    max_words=26,
+                    single_idea=False,
+                )
+            )
+    else:
+        lines.append("- No CRITICAL or HIGH issue currently rises high enough to reshape the deal beyond routine diligence judgment.")
+    lines.extend(["", "## Underwrite Confidence", ""])
+    confidence_level = underwrite_confidence_level(
+        registry=registry,
+        omission_assessments=synthesis.omission_assessments,
+        contradictions=synthesis.contradictions,
+        document_analyses=synthesis.document_analyses,
+        issues=top_issues or registry.issues,
+    )
+    confidence_reason = underwrite_confidence_reason(
+        registry=registry,
+        omission_assessments=synthesis.omission_assessments,
+        contradictions=synthesis.contradictions,
+        document_analyses=synthesis.document_analyses,
+        issues=top_issues or registry.issues,
+    )
+    lines.append(f"- Current level: {confidence_level}.")
+    lines.append(f"- Why: {_compress_statement(confidence_reason, max_words=26, single_idea=False)}")
+    for line in underwrite_confidence_limiters(
+        registry=registry,
+        omission_assessments=synthesis.omission_assessments,
+        contradictions=synthesis.contradictions,
+        document_analyses=synthesis.document_analyses,
+        issues=top_issues or registry.issues,
+        limit=2,
+    ):
+        lines.append(f"- Assumption carrying the underwrite: {_compress_statement(line, max_words=24, single_idea=False)}")
+    lines.extend(["", "### If Wrong, What Happens?", ""])
+    if impact_issues:
+        for issue in impact_issues:
+            lines.append(
+                f"- {issue.title}: {_compress_statement(f'The downside is a worse {deal_impact_type_for_issue(issue)} outcome than the current basis implies.', max_words=18, single_idea=False)}"
+            )
+    else:
+        lines.append("- If the remaining assumptions break, the deal can still move on price, timing, or closability faster than the current package implies.")
     lines.extend(["", "## Biggest Flags", ""])
     if top_issues:
         for issue in top_issues:
@@ -550,6 +616,17 @@ def _build_issue_analysis_markdown(synthesis: DealSynthesis) -> str:
         lines.append(f"- Structure: {_compress_statement(issue.likely_structure_effect, max_words=16) if issue.likely_structure_effect else 'None isolated.'}")
         lines.append(f"- Underwriting: {_compress_statement(issue.likely_underwriting_effect, max_words=16) if issue.likely_underwriting_effect else 'None isolated.'}")
         lines.append("")
+        lines.append("### Deal Impact")
+        lines.append(f"- Impact Type: {deal_impact_type_for_issue(issue)}")
+        lines.append(f"- Magnitude: {deal_impact_magnitude_for_issue(issue)}")
+        lines.append(f"- Mechanism: {_compress_statement(deal_impact_mechanism_for_issue(issue), max_words=18, single_idea=False)}")
+        lines.append(f"- Cost Exposure: {cost_exposure_band_for_issue(issue)}")
+        lines.append(f"- Timing Exposure: {timing_exposure_band_for_issue(issue)}")
+        lines.append(f"- Fixability: {fixability_classification_for_issue(issue)}")
+        lines.append("")
+        lines.append("### If Wrong, What Happens?")
+        lines.append(f"- {_compress_statement(if_wrong_line_for_issue(issue), max_words=18, single_idea=False)}")
+        lines.append("")
         if issue.precedent_summary.sample_size:
             lines.append("### Precedent Read")
             lines.append(f"- Historical Frequency: {issue.precedent_summary.historical_frequency}")
@@ -671,6 +748,21 @@ def _build_investment_committee_brief_markdown(synthesis: DealSynthesis) -> str:
     overall_read = _build_ic_overall_read(synthesis)
     readiness_status, readiness_reason = _evaluate_decision_readiness(synthesis)
     registry = synthesis.canonical_issue_registry
+    impact_issues = deal_impact_summary_issues(_selected_issues(synthesis, "09_investment_committee_brief.md", default_count=3), limit=3)
+    confidence_level = underwrite_confidence_level(
+        registry=registry,
+        omission_assessments=synthesis.omission_assessments,
+        contradictions=synthesis.contradictions,
+        document_analyses=synthesis.document_analyses,
+        issues=impact_issues or registry.issues,
+    )
+    confidence_reason = underwrite_confidence_reason(
+        registry=registry,
+        omission_assessments=synthesis.omission_assessments,
+        contradictions=synthesis.contradictions,
+        document_analyses=synthesis.document_analyses,
+        issues=impact_issues or registry.issues,
+    )
 
     lines = [
         "# Investment Committee Brief",
@@ -683,6 +775,63 @@ def _build_investment_committee_brief_markdown(synthesis: DealSynthesis) -> str:
         "",
         overall_read,
     ]
+    lines.extend(
+        [
+            "",
+            "## Deal Impact Summary",
+            "",
+        ]
+    )
+    if impact_issues:
+        for issue in impact_issues:
+            lines.append(
+                "- "
+                + _compress_statement(
+                    (
+                        f"{issue.title}: impact type {deal_impact_type_for_issue(issue)}; "
+                        f"magnitude {deal_impact_magnitude_for_issue(issue)}; "
+                        f"mechanism {deal_impact_mechanism_for_issue(issue)}"
+                    ),
+                    max_words=24,
+                    single_idea=False,
+                )
+            )
+    else:
+        lines.append("- No CRITICAL or HIGH issue currently rises high enough to reshape the deal beyond routine diligence judgment.")
+    lines.extend(
+        [
+            "",
+            "## Underwrite Confidence",
+            "",
+            f"- Current level: {confidence_level}.",
+            f"- Why: {_compress_statement(confidence_reason, max_words=24, single_idea=False)}",
+        ]
+    )
+    lines.extend(
+        f"- Assumption carrying the underwrite: {_compress_statement(line, max_words=22, single_idea=False)}"
+        for line in underwrite_confidence_limiters(
+            registry=registry,
+            omission_assessments=synthesis.omission_assessments,
+            contradictions=synthesis.contradictions,
+            document_analyses=synthesis.document_analyses,
+            issues=impact_issues or registry.issues,
+            limit=2,
+        )
+    )
+    lines.extend(
+        [
+            "",
+            "### If Wrong, What Happens?",
+            "",
+        ]
+    )
+    if impact_issues:
+        for issue in impact_issues:
+            lines.append(
+                f"- {issue.title}: {_compress_statement(if_wrong_line_for_issue(issue), max_words=20, single_idea=False)}"
+            )
+    else:
+        lines.append("- If the remaining assumptions break, the deal can still move on price, timing, or closability faster than the current package implies.")
     lines.extend(
         [
             "",
@@ -813,6 +962,13 @@ def _build_issue_registry_debug_markdown(
         lines.append(f"- Consequence Closing: {issue.likely_closing_effect or 'n/a'}")
         lines.append(f"- Consequence Structure: {issue.likely_structure_effect or 'n/a'}")
         lines.append(f"- Consequence Underwriting: {issue.likely_underwriting_effect or 'n/a'}")
+        lines.append(f"- Deal Impact Type: {deal_impact_type_for_issue(issue)}")
+        lines.append(f"- Deal Impact Magnitude: {deal_impact_magnitude_for_issue(issue)}")
+        lines.append(f"- Deal Impact Mechanism: {deal_impact_mechanism_for_issue(issue)}")
+        lines.append(f"- Cost Exposure Band: {cost_exposure_band_for_issue(issue)}")
+        lines.append(f"- Timing Exposure Band: {timing_exposure_band_for_issue(issue)}")
+        lines.append(f"- Fixability Classification: {fixability_classification_for_issue(issue)}")
+        lines.append(f"- If Wrong: {if_wrong_line_for_issue(issue)}")
         lines.append(f"- Source: {_format_citations(issue.citations[:3]) or ', '.join(issue.source_documents[:3]) or 'None'}")
         lines.append(f"- Merged Fragments: {', '.join(issue.merged_fragment_ids) or 'None'}")
         if issue.upstream_dependencies:
@@ -1576,6 +1732,13 @@ def _render_canonical_issue_risk_block(issue: CanonicalIssue, *, index: int) -> 
         lines.append(f"- Read: {_compress_statement(issue.unusualness_rationale, max_words=14)}")
     if issue.why_now and issue.why_now != "unclear":
         lines.append(f"- Timing: {_compress_statement(issue.why_now, max_words=8)}")
+    lines.append(
+        f"- Deal Impact: {deal_impact_type_for_issue(issue)}; {deal_impact_magnitude_for_issue(issue)}; {_compress_statement(deal_impact_mechanism_for_issue(issue), max_words=18, single_idea=False)}"
+    )
+    lines.append(
+        f"- Exposure: cost {cost_exposure_band_for_issue(issue)}; timing {timing_exposure_band_for_issue(issue)}; fixability {fixability_classification_for_issue(issue)}"
+    )
+    lines.append(f"- If Wrong: {_compress_statement(if_wrong_line_for_issue(issue), max_words=18, single_idea=False)}")
     next_step = _issue_next_step(issue)
     if next_step:
         lines.append(f"- Next: {next_step}")
