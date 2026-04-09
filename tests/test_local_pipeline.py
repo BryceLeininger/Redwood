@@ -47,6 +47,8 @@ class LocalDealPipelineTests(unittest.TestCase):
             self.assertTrue(registry_payload["facts"])
             self.assertTrue(registry_payload["conflicts"])
             self.assertTrue(registry_payload["seller_questions"])
+            self.assertIn("validation_stats", registry_payload)
+            self.assertIn("validation_log", registry_payload)
 
             review_doc = Document(result.review_report_path)
             review_text = "\n".join(paragraph.text for paragraph in review_doc.paragraphs if paragraph.text)

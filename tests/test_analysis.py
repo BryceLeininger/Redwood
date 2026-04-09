@@ -27,6 +27,7 @@ from land_due_diligence_agent.models import (
     ContradictionFinding,
     DocumentAnalysis,
     DocumentRecord,
+    ExtractedChunk,
     OmissionAssessment,
     RiskFinding,
     WebResearchResult,
@@ -168,6 +169,39 @@ class AnalysisTests(unittest.TestCase):
         self.assertTrue(synthesis.challenge_findings)
         self.assertTrue(any("frontage" in finding.description.lower() or "access" in finding.description.lower() for finding in synthesis.contradictions))
         self.assertTrue(all(finding.citations for finding in synthesis.contradictions))
+
+    def test_structured_facts_filter_low_confidence_ocr_sources(self) -> None:
+        path = Path("scanned_environmental_report.txt")
+        document = DocumentRecord(
+            source_path=path,
+            relative_path=path,
+            extension=".txt",
+            title="Scanned Environmental Report",
+            raw_text="Recognized environmental condition remains open and remediation scope is unresolved.",
+            normalized_text="Recognized environmental condition remains open and remediation scope is unresolved.",
+            metadata={"page_count": 1},
+            ocr_pages=[1],
+            chunks=[
+                ExtractedChunk(
+                    document_name=path.name,
+                    chunk_id="chunk-0001",
+                    text="Recognized environmental condition remains open and remediation scope is unresolved.",
+                    page_number=1,
+                    ocr_used=True,
+                )
+            ],
+        )
+
+        synthesis = run_analysis(
+            deal_name="OCR Fact Filter",
+            documents=[document],
+            llm_provider=HeuristicProvider(),
+            logger=logging.getLogger("test-ocr-fact-filter"),
+        )
+
+        self.assertEqual(synthesis.structured_facts, [])
+        self.assertGreaterEqual(synthesis.fact_validation_stats.filtered_count, 1)
+        self.assertGreaterEqual(synthesis.fact_validation_stats.low_confidence_excluded_count, 1)
 
     def test_document_staleness_uses_short_dates_from_title(self) -> None:
         analysis = DocumentAnalysis(

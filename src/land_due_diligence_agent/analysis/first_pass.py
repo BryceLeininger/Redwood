@@ -7,6 +7,7 @@ import re
 from dataclasses import dataclass
 from typing import Callable
 
+from land_due_diligence_agent.analysis.fact_validation import clean_first_pass_facts
 from land_due_diligence_agent.deal_models import (
     ConflictRecord,
     FactRecord,
@@ -382,7 +383,8 @@ def build_issue_registry(
 ) -> IssueRegistry:
     """Build a deterministic issue registry from extracted documents."""
 
-    facts = _extract_facts(processed_documents)
+    raw_facts = _extract_facts(processed_documents)
+    facts, validation_stats, validation_log = clean_first_pass_facts(raw_facts, processed_documents)
     conflicts = _detect_conflicts(facts)
     missing_items = _build_missing_items(processed_documents, manifest_entries, facts)
     seller_questions = _build_seller_questions(conflicts, missing_items)
@@ -392,6 +394,8 @@ def build_issue_registry(
         conflicts=conflicts,
         missing_items=missing_items,
         seller_questions=seller_questions,
+        validation_stats=validation_stats,
+        validation_log=validation_log,
     )
 
 

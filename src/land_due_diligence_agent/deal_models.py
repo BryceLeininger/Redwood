@@ -5,7 +5,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from land_due_diligence_agent.models import DealSynthesis, DocumentRecord
+from land_due_diligence_agent.models import (
+    DealSynthesis,
+    DocumentRecord,
+    FactValidationLogEntry,
+    FactValidationStats,
+)
 
 
 @dataclass(slots=True, frozen=True)
@@ -135,6 +140,8 @@ class IssueRegistry:
     conflicts: list[ConflictRecord] = field(default_factory=list)
     missing_items: list[MissingItem] = field(default_factory=list)
     seller_questions: list[SellerQuestion] = field(default_factory=list)
+    validation_stats: FactValidationStats = field(default_factory=FactValidationStats)
+    validation_log: list[FactValidationLogEntry] = field(default_factory=list)
 
 
 @dataclass(slots=True)

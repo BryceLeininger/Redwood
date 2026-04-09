@@ -10,6 +10,7 @@ from land_due_diligence_agent.analysis.autonomous_agent import (
     load_autonomous_learning_records,
     persist_autonomous_learning_records,
 )
+from land_due_diligence_agent.analysis.fact_validation import clean_structured_facts
 from land_due_diligence_agent.analysis.feedback_loop import (
     apply_feedback_learning_layer,
     load_issue_knowledge_base,
@@ -101,7 +102,11 @@ def run_analysis(
                 )
         document_analyses.append(analysis)
 
-    structured_facts = build_structured_facts(document_analyses)
+    raw_structured_facts = build_structured_facts(document_analyses)
+    structured_facts, fact_validation_stats, fact_validation_log = clean_structured_facts(
+        raw_structured_facts,
+        document_analyses,
+    )
     key_risks = aggregate_risks(document_analyses)
     if analysis_mode == "fast":
         primary_risks = [risk for risk in key_risks if risk.priority_tier == "primary"] or key_risks[:3]
@@ -256,6 +261,8 @@ def run_analysis(
         category_rollup=category_rollup,
         document_analyses=document_analyses,
         structured_facts=structured_facts,
+        fact_validation_stats=fact_validation_stats,
+        fact_validation_log=fact_validation_log,
         omission_assessments=omission_assessments,
         issue_analyses=issue_analyses,
         canonical_issue_registry=registry,

@@ -118,6 +118,34 @@ class StructuredFact:
 
 
 @dataclass(slots=True)
+class FactValidationStats:
+    """Inspectable counts for fact cleaning before downstream analysis."""
+
+    total_candidates: int = 0
+    kept_count: int = 0
+    filtered_count: int = 0
+    deduplicated_count: int = 0
+    downgraded_count: int = 0
+    low_confidence_excluded_count: int = 0
+    weak_context_count: int = 0
+
+
+@dataclass(slots=True)
+class FactValidationLogEntry:
+    """Debug trace for a fact that was kept, downgraded, deduplicated, or filtered."""
+
+    lane: str
+    action: str
+    fact_type: str
+    value: str
+    normalized_value: str = ""
+    reason: str = ""
+    source_document: str = ""
+    confidence_before: str = ""
+    confidence_after: str = ""
+
+
+@dataclass(slots=True)
 class IssueFragment:
     """Intermediate fragment before canonical issue consolidation."""
 
@@ -799,6 +827,8 @@ class DealSynthesis:
     category_rollup: dict[str, str]
     document_analyses: list[DocumentAnalysis]
     structured_facts: list[StructuredFact] = field(default_factory=list)
+    fact_validation_stats: FactValidationStats = field(default_factory=FactValidationStats)
+    fact_validation_log: list[FactValidationLogEntry] = field(default_factory=list)
     omission_assessments: list[OmissionAssessment] = field(default_factory=list)
     issue_analyses: list[IssueAnalysis] = field(default_factory=list)
     canonical_issue_registry: CanonicalIssueRegistry = field(default_factory=CanonicalIssueRegistry)

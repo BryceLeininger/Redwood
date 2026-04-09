@@ -303,6 +303,8 @@ def _write_run_artifacts(
         "conflicts": result.issue_registry.conflicts,
         "missing_items": result.issue_registry.missing_items,
         "seller_questions": result.issue_registry.seller_questions,
+        "validation_stats": result.issue_registry.validation_stats,
+        "validation_log": result.issue_registry.validation_log,
     }
     if result.deal_synthesis is not None:
         issue_feedback_payload = build_deal_feedback_record(
@@ -345,6 +347,7 @@ def _write_run_artifacts(
         "unsupported_files": result.unsupported_files,
         "ocr_files": result.ocr_files,
         "category_counts": result.category_counts,
+        "issue_registry_validation": result.issue_registry.validation_stats,
         "run_log_path": result.run_log_path,
         "manifest_json_path": result.manifest_json_path,
         "manifest_csv_path": result.manifest_csv_path,

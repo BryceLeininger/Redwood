@@ -6,6 +6,7 @@ import re
 from collections import defaultdict
 from functools import lru_cache
 
+from land_due_diligence_agent.analysis.fact_validation import is_analysis_sentence_usable
 from land_due_diligence_agent.analysis.risk_rules import (
     CATEGORY_RULES,
     DOCUMENT_GAP_HINTS,
@@ -653,6 +654,7 @@ def _build_aggregate_risk(
         source_documents.append(analysis.document.title)
         if analysis.confidence == "low":
             low_confidence_sources += 1
+            continue
         for index, snippet in enumerate(risk.evidence[:1]):
             clipped = clip_text(snippet, 220)
             citation = risk.citations[index] if index < len(risk.citations) else Citation(
@@ -1390,6 +1392,8 @@ def _collect_evidence(
 
         cleaned = _clean_sentence(sentence)
         if not _is_substantive_sentence(cleaned):
+            continue
+        if not is_analysis_sentence_usable(cleaned):
             continue
         if not _passes_category_context_guard(category, cleaned):
             continue
