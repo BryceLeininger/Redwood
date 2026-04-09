@@ -6,6 +6,12 @@ from collections import Counter
 from datetime import datetime
 from pathlib import Path
 
+from land_due_diligence_agent.analysis.feedback_loop import (
+    build_deal_feedback_record,
+    default_issue_patterns_path,
+    ingest_feedback_record_into_knowledge_base,
+    load_deal_feedback_record,
+)
 from land_due_diligence_agent.analysis.first_pass import build_issue_registry
 from land_due_diligence_agent.analysis.service import run_analysis
 from land_due_diligence_agent.classification import classify_document
@@ -23,6 +29,7 @@ from land_due_diligence_agent.output.docx_writer import write_due_diligence_repo
 from land_due_diligence_agent.parsing.service import parse_document
 from land_due_diligence_agent.utils.files import ensure_directory
 from land_due_diligence_agent.utils.logging import close_logging, configure_logging
+from land_due_diligence_agent.utils.files import slugify
 
 
 def run_local_deal_pipeline(
@@ -30,6 +37,7 @@ def run_local_deal_pipeline(
     *,
     settings: Settings,
     deal_name: str | None = None,
+    issue_patterns_path: Path | None = None,
 ) -> tuple[DealRunResult, int]:
     """Run the local document workflow against one deal folder."""
 
@@ -44,6 +52,9 @@ def run_local_deal_pipeline(
     run_log_path = deal_paths.output_dir / "run_log.txt"
     logger = configure_logging(settings.log_level, run_log_path)
     resolved_deal_name = deal_name or resolved_deal_folder.name
+    resolved_issue_patterns_path = default_issue_patterns_path(issue_patterns_path)
+    feedback_path = deal_paths.metadata_dir / "issue_feedback.json"
+    existing_feedback = load_deal_feedback_record(feedback_path)
 
     result = DealRunResult(
         run_id=run_id,
@@ -51,6 +62,7 @@ def run_local_deal_pipeline(
         deal_paths=deal_paths,
         debug_mode=settings.debug_mode,
         run_log_path=str(run_log_path),
+        issue_patterns_path=str(resolved_issue_patterns_path),
     )
 
     logger.info("Starting local due diligence run for '%s'.", resolved_deal_name)
@@ -58,6 +70,19 @@ def run_local_deal_pipeline(
     logger.info("Source drop: %s", deal_paths.source_drop_dir)
     logger.info("Metadata output: %s", deal_paths.metadata_dir)
     logger.info("Primary report output: %s", deal_paths.output_dir)
+    if feedback_path.exists():
+        feedback_stats = ingest_feedback_record_into_knowledge_base(
+            feedback_path=feedback_path,
+            knowledge_base_path=resolved_issue_patterns_path,
+        )
+        if feedback_stats["issue_feedback_entries"] or feedback_stats["missed_issue_entries"]:
+            logger.info(
+                "Applied deterministic feedback from %s into %s (%d issue rows, %d missed rows).",
+                feedback_path,
+                resolved_issue_patterns_path,
+                feedback_stats["issue_feedback_entries"],
+                feedback_stats["missed_issue_entries"],
+            )
     if settings.debug_mode:
         logger.info("Debug extraction output: %s", deal_paths.text_run_dir)
         logger.info("Debug metadata snapshot: %s", deal_paths.metadata_run_dir)
@@ -159,9 +184,14 @@ def run_local_deal_pipeline(
                     if entry.errors
                 ],
                 mode="full",
+                issue_patterns_path=resolved_issue_patterns_path,
             )
 
-        _write_run_artifacts(result)
+        _write_run_artifacts(
+            result,
+            issue_patterns_path=resolved_issue_patterns_path,
+            existing_feedback=existing_feedback,
+        )
 
         logger.info(
             "Run complete: %d discovered, %d extracted, %d failed, %d unsupported.",
@@ -237,16 +267,24 @@ def _build_manifest_entry(file_path: Path, source_root: Path) -> ManifestEntry:
     )
 
 
-def _write_run_artifacts(result: DealRunResult) -> None:
+def _write_run_artifacts(
+    result: DealRunResult,
+    *,
+    issue_patterns_path: Path,
+    existing_feedback=None,
+) -> None:
     manifest_json_path = result.deal_paths.metadata_dir / "deal_manifest.json"
     manifest_csv_path = result.deal_paths.metadata_dir / "deal_manifest.csv"
     issue_registry_path = result.deal_paths.metadata_dir / "issue_registry.json"
+    issue_feedback_path = result.deal_paths.metadata_dir / "issue_feedback.json"
     run_summary_path = result.deal_paths.metadata_dir / "run_summary.json"
     review_report_path = result.deal_paths.output_dir / "Due_Diligence_Review.docx"
 
     result.manifest_json_path = str(manifest_json_path)
     result.manifest_csv_path = str(manifest_csv_path)
     result.issue_registry_path = str(issue_registry_path)
+    result.issue_feedback_path = str(issue_feedback_path)
+    result.issue_patterns_path = str(issue_patterns_path)
     result.run_summary_path = str(run_summary_path)
     result.latest_run_path = ""
     result.review_report_path = str(review_report_path)
@@ -266,10 +304,30 @@ def _write_run_artifacts(result: DealRunResult) -> None:
         "missing_items": result.issue_registry.missing_items,
         "seller_questions": result.issue_registry.seller_questions,
     }
+    if result.deal_synthesis is not None:
+        issue_feedback_payload = build_deal_feedback_record(
+            synthesis=result.deal_synthesis,
+            run_id=result.run_id,
+            knowledge_base_path=issue_patterns_path,
+            existing_feedback=existing_feedback,
+        )
+    else:
+        issue_feedback_payload = {
+            "schema_version": "1.0",
+            "deal_id": slugify(result.deal_name or "deal"),
+            "deal_name": result.deal_name,
+            "run_id": result.run_id,
+            "generated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+            "knowledge_base_path": str(issue_patterns_path),
+            "allowed_feedback_statuses": ["correct", "incorrect", "irrelevant", "missed"],
+            "issue_feedback": [],
+            "missed_issues": existing_feedback.missed_issues if existing_feedback is not None else [],
+        }
 
     write_json(manifest_json_path, manifest_payload)
     write_manifest_csv(manifest_csv_path, result.manifest_entries)
     write_json(issue_registry_path, issue_registry_payload)
+    write_json(issue_feedback_path, issue_feedback_payload)
 
     summary_payload = {
         "run_id": result.run_id,
@@ -291,6 +349,8 @@ def _write_run_artifacts(result: DealRunResult) -> None:
         "manifest_json_path": result.manifest_json_path,
         "manifest_csv_path": result.manifest_csv_path,
         "issue_registry_path": result.issue_registry_path,
+        "issue_feedback_path": result.issue_feedback_path,
+        "issue_patterns_path": result.issue_patterns_path,
         "debug_text_artifact_dir": str(result.deal_paths.text_run_dir) if result.debug_mode else None,
         "debug_metadata_snapshot_dir": str(result.deal_paths.metadata_run_dir) if result.debug_mode else None,
         "debug_output_snapshot_dir": str(result.deal_paths.output_run_dir) if result.debug_mode else None,
@@ -301,6 +361,7 @@ def _write_run_artifacts(result: DealRunResult) -> None:
         write_json(result.deal_paths.metadata_run_dir / "deal_manifest.json", manifest_payload)
         write_manifest_csv(result.deal_paths.metadata_run_dir / "deal_manifest.csv", result.manifest_entries)
         write_json(result.deal_paths.metadata_run_dir / "issue_registry.json", issue_registry_payload)
+        write_json(result.deal_paths.metadata_run_dir / "issue_feedback.json", issue_feedback_payload)
         write_json(result.deal_paths.metadata_run_dir / "run_summary.json", summary_payload)
 
     write_due_diligence_report_docx(review_report_path, result)

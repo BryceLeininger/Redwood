@@ -1,0 +1,239 @@
+{
+  "schema_version": "1.0",
+  "updated_at": "",
+  "patterns": [
+    {
+      "canonical_title": "Title access clearance unresolved",
+      "categories": [
+        "Title / Access Concerns"
+      ],
+      "cause_counts": {},
+      "common_causes": [
+        "unresolved title exception or access rights not reconciled to the current plan"
+      ],
+      "common_impacts": [
+        "closability and legal/title clarity"
+      ],
+      "document_type_counts": {},
+      "feedback_stats": {},
+      "high_impact": true,
+      "impact_counts": {},
+      "issue_type": "title-access-clearance",
+      "last_updated": "",
+      "pattern_id": "title-access-clearance",
+      "preferred_document_types": [
+        "title",
+        "survey"
+      ],
+      "priority_boost": 0,
+      "severity_overrides": {}
+    },
+    {
+      "canonical_title": "Entitlement condition closeout unresolved",
+      "categories": [
+        "Entitlement Status"
+      ],
+      "cause_counts": {},
+      "common_causes": [
+        "approval status outrunning condition closeout or controlling resolution support"
+      ],
+      "common_impacts": [
+        "timeline and entitlement certainty"
+      ],
+      "document_type_counts": {},
+      "feedback_stats": {},
+      "high_impact": true,
+      "impact_counts": {},
+      "issue_type": "entitlement-conditions",
+      "last_updated": "",
+      "pattern_id": "entitlement-conditions",
+      "preferred_document_types": [
+        "entitlement",
+        "plan"
+      ],
+      "priority_boost": 0,
+      "severity_overrides": {}
+    },
+    {
+      "canonical_title": "Utility capacity confirmation unresolved",
+      "categories": [
+        "Utilities / Infrastructure Issues"
+      ],
+      "cause_counts": {},
+      "common_causes": [
+        "will-serve support or provider confirmation not closing the current utility assumption"
+      ],
+      "common_impacts": [
+        "timeline and offsite utility cost"
+      ],
+      "document_type_counts": {},
+      "feedback_stats": {},
+      "high_impact": true,
+      "impact_counts": {},
+      "issue_type": "utility-capacity",
+      "last_updated": "",
+      "pattern_id": "utility-capacity",
+      "preferred_document_types": [
+        "utilities",
+        "plan"
+      ],
+      "priority_boost": 0,
+      "severity_overrides": {}
+    },
+    {
+      "canonical_title": "Environmental follow-up unresolved",
+      "categories": [
+        "Environmental Risks"
+      ],
+      "cause_counts": {},
+      "common_causes": [
+        "phase i, mitigation, or agency follow-up remaining open"
+      ],
+      "common_impacts": [
+        "cost, structure, and timeline"
+      ],
+      "document_type_counts": {},
+      "feedback_stats": {},
+      "high_impact": true,
+      "impact_counts": {},
+      "issue_type": "environmental-followup",
+      "last_updated": "",
+      "pattern_id": "environmental-followup",
+      "preferred_document_types": [
+        "environmental"
+      ],
+      "priority_boost": 0,
+      "severity_overrides": {}
+    },
+    {
+      "canonical_title": "Geotechnical scope unresolved",
+      "categories": [
+        "Geotechnical Risks"
+      ],
+      "cause_counts": {},
+      "common_causes": [
+        "soils recommendations not fully carried into grading, retaining, or foundation scope"
+      ],
+      "common_impacts": [
+        "cost and yield"
+      ],
+      "document_type_counts": {},
+      "feedback_stats": {},
+      "high_impact": true,
+      "impact_counts": {},
+      "issue_type": "geotechnical-scope",
+      "last_updated": "",
+      "pattern_id": "geotechnical-scope",
+      "preferred_document_types": [
+        "geotechnical",
+        "plan"
+      ],
+      "priority_boost": 0,
+      "severity_overrides": {}
+    },
+    {
+      "canonical_title": "Stormwater drainage scope unresolved",
+      "categories": [
+        "Flood / Drainage Issues"
+      ],
+      "cause_counts": {},
+      "common_causes": [
+        "drainage design or public-works confirmation remaining open"
+      ],
+      "common_impacts": [
+        "cost and timeline"
+      ],
+      "document_type_counts": {},
+      "feedback_stats": {},
+      "high_impact": true,
+      "impact_counts": {},
+      "issue_type": "stormwater-drainage",
+      "last_updated": "",
+      "pattern_id": "stormwater-drainage",
+      "preferred_document_types": [
+        "drainage",
+        "plan"
+      ],
+      "priority_boost": 0,
+      "severity_overrides": {}
+    },
+    {
+      "canonical_title": "Offsite frontage scope unresolved",
+      "categories": [
+        "Offsite Obligations"
+      ],
+      "cause_counts": {},
+      "common_causes": [
+        "buyer-facing frontage or offsite obligations not allocated cleanly"
+      ],
+      "common_impacts": [
+        "cost, closability, and timeline"
+      ],
+      "document_type_counts": {},
+      "feedback_stats": {},
+      "high_impact": true,
+      "impact_counts": {},
+      "issue_type": "offsite-frontage",
+      "last_updated": "",
+      "pattern_id": "offsite-frontage",
+      "preferred_document_types": [
+        "offsite",
+        "plan",
+        "legal"
+      ],
+      "priority_boost": 0,
+      "severity_overrides": {}
+    },
+    {
+      "canonical_title": "Fee stack unresolved",
+      "categories": [
+        "Fee / Exaction Burden"
+      ],
+      "cause_counts": {},
+      "common_causes": [
+        "fee schedule remaining preliminary or stale"
+      ],
+      "common_impacts": [
+        "price and underwriting"
+      ],
+      "document_type_counts": {},
+      "feedback_stats": {},
+      "high_impact": true,
+      "impact_counts": {},
+      "issue_type": "fee-stack",
+      "last_updated": "",
+      "pattern_id": "fee-stack",
+      "preferred_document_types": [
+        "cost",
+        "legal"
+      ],
+      "priority_boost": 0,
+      "severity_overrides": {}
+    },
+    {
+      "canonical_title": "Budget reliability unresolved",
+      "categories": [
+        "Budget / Cost Reliability"
+      ],
+      "cause_counts": {},
+      "common_causes": [
+        "site-cost support remaining budgetary rather than auditable"
+      ],
+      "common_impacts": [
+        "price and underwriting"
+      ],
+      "document_type_counts": {},
+      "feedback_stats": {},
+      "high_impact": true,
+      "impact_counts": {},
+      "issue_type": "budget-reliability",
+      "last_updated": "",
+      "pattern_id": "budget-reliability",
+      "preferred_document_types": [
+        "cost"
+      ],
+      "priority_boost": 0,
+      "severity_overrides": {}
+    }
+  ]
+}

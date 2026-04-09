@@ -161,5 +161,7 @@ class DealRunResult:
     manifest_json_path: str = ""
     manifest_csv_path: str = ""
     issue_registry_path: str = ""
+    issue_feedback_path: str = ""
+    issue_patterns_path: str = ""
     run_summary_path: str = ""
     latest_run_path: str = ""

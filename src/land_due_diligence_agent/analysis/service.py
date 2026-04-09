@@ -10,6 +10,10 @@ from land_due_diligence_agent.analysis.autonomous_agent import (
     load_autonomous_learning_records,
     persist_autonomous_learning_records,
 )
+from land_due_diligence_agent.analysis.feedback_loop import (
+    apply_feedback_learning_layer,
+    load_issue_knowledge_base,
+)
 from land_due_diligence_agent.analysis.front_end import apply_front_end_assessment
 from land_due_diligence_agent.analysis.heuristics import (
     aggregate_risks,
@@ -57,6 +61,7 @@ def run_analysis(
     mode: str = "full",
     autonomous_learning_enabled: bool = False,
     autonomous_store_path: Path | None = None,
+    issue_patterns_path: Path | None = None,
     web_researcher: OpenAIWebResearcher | None = None,
 ) -> DealSynthesis:
     """Run document summaries plus a deal-level synthesis."""
@@ -140,11 +145,28 @@ def run_analysis(
         learning_retriever=learning_engine.retrieve,
         deal_metadata=precedent_engine.deal_metadata,
     )
+    knowledge_base = load_issue_knowledge_base(issue_patterns_path)
     reading_order, further_diligence_roadmap = apply_front_end_assessment(
         registry=registry,
         document_analyses=document_analyses,
         omission_assessments=omission_assessments,
         contradictions=contradictions,
+    )
+    apply_feedback_learning_layer(
+        registry=registry,
+        document_analyses=document_analyses,
+        knowledge_base=knowledge_base,
+    )
+    reading_order, further_diligence_roadmap = apply_front_end_assessment(
+        registry=registry,
+        document_analyses=document_analyses,
+        omission_assessments=omission_assessments,
+        contradictions=contradictions,
+    )
+    apply_feedback_learning_layer(
+        registry=registry,
+        document_analyses=document_analyses,
+        knowledge_base=knowledge_base,
     )
     recommendation = build_recommendation_from_registry(registry)
     web_research_results = []

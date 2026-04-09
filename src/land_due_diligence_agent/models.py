@@ -242,6 +242,7 @@ class IssuePriorityScore:
     calibration_adjustment: int = 0
     precedent_adjustment: int = 0
     learning_adjustment: int = 0
+    feedback_adjustment: int = 0
     evaluator_adjustment: int = 0
 
 
@@ -383,6 +384,86 @@ class ReviewerIssueFeedback:
     resolved_by: str = "unknown"
     correct_action: str = ""
     notes: str = ""
+
+
+@dataclass(slots=True)
+class IssueFeedbackEntry:
+    """Per-issue reviewer feedback for one local deal run."""
+
+    issue_id: str
+    issue_type: str = ""
+    canonical_title: str = ""
+    category: str = ""
+    model_severity: str = ""
+    feedback_status: str = ""
+    severity_override: str = ""
+    reviewer_notes: str = ""
+    likely_cause: str = ""
+    observed_impact: str = ""
+    source_documents: list[str] = field(default_factory=list)
+    source_document_types: list[str] = field(default_factory=list)
+    confidence_score: int = 0
+    confidence_level: str = "low"
+
+
+@dataclass(slots=True)
+class MissedIssueFeedback:
+    """Reviewer-supplied issue that the current run failed to elevate."""
+
+    title: str
+    category: str = ""
+    issue_type: str = ""
+    expected_severity: str = ""
+    likely_cause: str = ""
+    observed_impact: str = ""
+    source_documents: list[str] = field(default_factory=list)
+    source_document_types: list[str] = field(default_factory=list)
+    reviewer_notes: str = ""
+
+
+@dataclass(slots=True)
+class DealFeedbackRecord:
+    """Structured per-deal feedback artifact used for deterministic learning."""
+
+    schema_version: str = "1.0"
+    deal_id: str = ""
+    deal_name: str = ""
+    run_id: str = ""
+    generated_at: str = ""
+    knowledge_base_path: str = ""
+    allowed_feedback_statuses: list[str] = field(default_factory=lambda: ["correct", "incorrect", "irrelevant", "missed"])
+    issue_feedback: list[IssueFeedbackEntry] = field(default_factory=list)
+    missed_issues: list[MissedIssueFeedback] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class IssuePatternRecord:
+    """Persistent deterministic pattern learned from prior reviewer feedback."""
+
+    pattern_id: str
+    issue_type: str
+    canonical_title: str = ""
+    categories: list[str] = field(default_factory=list)
+    common_causes: list[str] = field(default_factory=list)
+    common_impacts: list[str] = field(default_factory=list)
+    preferred_document_types: list[str] = field(default_factory=list)
+    high_impact: bool = False
+    priority_boost: int = 0
+    feedback_stats: dict[str, int] = field(default_factory=dict)
+    severity_overrides: dict[str, int] = field(default_factory=dict)
+    cause_counts: dict[str, int] = field(default_factory=dict)
+    impact_counts: dict[str, int] = field(default_factory=dict)
+    document_type_counts: dict[str, int] = field(default_factory=dict)
+    last_updated: str = ""
+
+
+@dataclass(slots=True)
+class IssueKnowledgeBase:
+    """Persistent issue-pattern knowledge base built from deterministic feedback."""
+
+    schema_version: str = "1.0"
+    updated_at: str = ""
+    patterns: list[IssuePatternRecord] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -536,6 +617,13 @@ class CanonicalIssue:
     genericity_penalty: int = 0
     missing_confirmation: str = ""
     research_agenda: list[ResearchAgendaItem] = field(default_factory=list)
+    confidence_score: int = 0
+    confidence_level: str = "low"
+    confidence_factors: list[str] = field(default_factory=list)
+    knowledge_pattern_id: str = ""
+    knowledge_pattern_summary: str = ""
+    knowledge_priority_boost: int = 0
+    knowledge_feedback_counts: dict[str, int] = field(default_factory=dict)
     output_bucket: str = "appendix"
 
 

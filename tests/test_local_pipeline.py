@@ -24,11 +24,13 @@ class LocalDealPipelineTests(unittest.TestCase):
             self.assertEqual(exit_code, 0)
             self.assertTrue(Path(result.manifest_json_path).samefile(deal_folder / "03_Metadata" / "deal_manifest.json"))
             self.assertTrue(Path(result.issue_registry_path).samefile(deal_folder / "03_Metadata" / "issue_registry.json"))
+            self.assertTrue(Path(result.issue_feedback_path).samefile(deal_folder / "03_Metadata" / "issue_feedback.json"))
             self.assertTrue(Path(result.review_report_path).samefile(deal_folder / "04_Output" / "Due_Diligence_Review.docx"))
             self.assertTrue(Path(result.run_log_path).samefile(deal_folder / "04_Output" / "run_log.txt"))
             self.assertEqual(result.latest_run_path, "")
             self.assertTrue(Path(result.manifest_json_path).exists())
             self.assertTrue(Path(result.issue_registry_path).exists())
+            self.assertTrue(Path(result.issue_feedback_path).exists())
             self.assertTrue(Path(result.review_report_path).exists())
             self.assertTrue(Path(result.run_log_path).exists())
 

@@ -1776,6 +1776,7 @@ def _score_issue(issue: CanonicalIssue, weights: PriorityWeights) -> IssuePriori
         calibration_adjustment=calibration_adjustment,
         precedent_adjustment=precedent_adjustment,
         learning_adjustment=learning_adjustment,
+        feedback_adjustment=0,
         evaluator_adjustment=0,
     )
 
