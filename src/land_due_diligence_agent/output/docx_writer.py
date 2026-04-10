@@ -29,6 +29,7 @@ from land_due_diligence_agent.models import (
     AcquisitionControllingFact,
     AcquisitionCriticalPathStep,
     AcquisitionRiskItem,
+    AcquisitionSanityCorrection,
     CanonicalIssue,
     Citation,
     DealSynthesis,
@@ -108,6 +109,12 @@ _CONTROL_DOC_BUCKET_ORDER = {
     "safe to rely on agent": 2,
 }
 _REAL_RISK_FLAGS = {"red flag", "yellow flag", "conflict / contradiction concern"}
+_ACQUISITION_BUCKETS = (
+    "True Deal Killers",
+    "Primary Drivers of Price",
+    "Secondary Execution Risks",
+    "Noise",
+)
 
 
 @dataclass(slots=True)
@@ -229,6 +236,7 @@ def _write_structured_report(document: Document, result: DealRunResult, synthesi
     )
     _add_deal_impact_summary_section(document, material_issues)
     _add_underwrite_confidence_section(document, synthesis, material_issues)
+    _add_sanity_corrections_section(document, synthesis)
     _add_controlling_facts_section(document, synthesis)
     _add_real_risk_classification_section(document, synthesis)
     _add_critical_path_chain_section(document, synthesis)
@@ -497,9 +505,23 @@ def _add_controlling_facts_section(document: Document, synthesis: DealSynthesis)
     )
 
 
+def _add_sanity_corrections_section(document: Document, synthesis: DealSynthesis) -> None:
+    _add_section(document, "Sanity Check / Corrections")
+    bullets = [_sanity_correction_bullet(item) for item in synthesis.acquisition_judgment.sanity_corrections]
+    _add_bullet_items(
+        document,
+        bullets
+        or [
+            _SectionBullet(
+                text="No controlling fact required a second-pass sanity correction beyond the current readable package."
+            )
+        ],
+    )
+
+
 def _add_real_risk_classification_section(document: Document, synthesis: DealSynthesis) -> None:
     _add_section(document, "Real Risk Classification")
-    for bucket in ("Deal Killers", "Pre-Close Gating Items", "Price Adjustments", "Execution Risks", "Noise"):
+    for bucket in _ACQUISITION_BUCKETS:
         _add_subsection(document, bucket)
         items = [item for item in synthesis.acquisition_judgment.risk_items if item.bucket == bucket]
         bullets = [_acquisition_risk_bullet(item) for item in items[:5]]
@@ -559,6 +581,27 @@ def _add_investment_decision_section(document: Document, synthesis: DealSynthesi
                 references=_citation_labels(decision.citations),
             )
         ],
+    )
+
+    _add_subsection(document, "What Has To Be True")
+    _add_bullet_items(
+        document,
+        [_SectionBullet(text=line) for line in decision.what_has_to_be_true]
+        or [_SectionBullet(text="No additional gating condition rises above the current reset risk ranking.")],
+    )
+
+    _add_subsection(document, "Risks Underwritten")
+    _add_bullet_items(
+        document,
+        [_SectionBullet(text=line) for line in decision.risks_underwritten]
+        or [_SectionBullet(text="No execution risk is currently being affirmatively underwritten beyond routine project friction.")],
+    )
+
+    _add_subsection(document, "Treated As Solved")
+    _add_bullet_items(
+        document,
+        [_SectionBullet(text=line) for line in decision.treated_as_solved]
+        or [_SectionBullet(text="No lane should currently be treated as solved beyond document-backed descriptors.")],
     )
 
 
@@ -1871,10 +1914,50 @@ def _controlling_fact_bullet(fact: AcquisitionControllingFact) -> _SectionBullet
     )
 
 
+def _sanity_correction_bullet(item: AcquisitionSanityCorrection) -> _SectionBullet:
+    return _SectionBullet(
+        text=(
+            f"{item.fact_type.replace('_', ' ').title()}: corrected to {item.corrected_value}. "
+            f"Prior read: {item.prior_value}."
+        ),
+        note=f"Why prior read was wrong: {item.why_prior_was_wrong} Credible interpretation: {item.credible_interpretation}",
+        references=_citation_labels(item.citations),
+    )
+
+
 def _acquisition_risk_bullet(item: AcquisitionRiskItem) -> _SectionBullet:
+    note_parts = [
+        f"Impact: {item.impact}.",
+        f"Timing: {item.timing}.",
+        f"Curability: {item.curability}.",
+    ]
+    if item.cost_impact:
+        note_parts.append(f"Cost: {item.cost_impact}")
+    if item.land_value_impact:
+        note_parts.append(f"Land value: {item.land_value_impact}")
+    if item.margin_impact:
+        note_parts.append(f"Margin: {item.margin_impact}")
+    if item.irr_impact:
+        note_parts.append(f"IRR: {item.irr_impact}")
+    if item.timing_impact:
+        note_parts.append(f"Timing impact: {item.timing_impact}")
+    if any((item.price_response, item.terms_response, item.timing_response, item.contingency_response)):
+        note_parts.append(
+            "Structure response: "
+            + " ".join(
+                part
+                for part in (
+                    f"Price={item.price_response}" if item.price_response else "",
+                    f"Terms={item.terms_response}" if item.terms_response else "",
+                    f"Timing={item.timing_response}" if item.timing_response else "",
+                    f"Contingency={item.contingency_response}" if item.contingency_response else "",
+                )
+                if part
+            )
+        )
     return _SectionBullet(
         text=f"{item.title}: {item.summary}",
-        note=f"Impact: {item.impact}. Timing: {item.timing}. Curability: {item.curability}.",
+        note=" ".join(note_parts),
         references=[*_citation_labels(item.citations), *item.source_documents],
     )
 

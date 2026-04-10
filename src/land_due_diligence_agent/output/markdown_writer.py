@@ -25,6 +25,14 @@ from land_due_diligence_agent.models import CanonicalIssue, DealSynthesis, RunSu
 from land_due_diligence_agent.utils.text import normalize_text
 
 
+_ACQUISITION_BUCKETS = (
+    "True Deal Killers",
+    "Primary Drivers of Price",
+    "Secondary Execution Risks",
+    "Noise",
+)
+
+
 def write_markdown_outputs(
     output_dir: Path,
     *,
@@ -730,14 +738,27 @@ def _build_deal_synthesis_markdown(synthesis: DealSynthesis) -> str:
     judgment = synthesis.acquisition_judgment
     risk_groups = {
         bucket: [item for item in judgment.risk_items if item.bucket == bucket]
-        for bucket in ("Deal Killers", "Pre-Close Gating Items", "Price Adjustments", "Execution Risks", "Noise")
+        for bucket in _ACQUISITION_BUCKETS
     }
     lines = [
         "# Deal Synthesis",
         "",
-        "## Controlling Facts",
+        "## Sanity Check / Corrections",
         "",
     ]
+    if judgment.sanity_corrections:
+        for correction in judgment.sanity_corrections:
+            lines.append(
+                f"- {correction.fact_type.replace('_', ' ').title()}: corrected to {correction.corrected_value}. Prior read: {correction.prior_value}. Why prior read was wrong: {correction.why_prior_was_wrong} Credible interpretation: {correction.credible_interpretation}"
+            )
+    else:
+        lines.append("- No controlling fact required a second-pass sanity correction beyond the current readable package.")
+
+    lines.extend([
+        "",
+        "## Controlling Facts",
+        "",
+    ])
     if judgment.controlling_facts:
         for fact in judgment.controlling_facts:
             rejected = f" Rejected alternatives: {', '.join(fact.rejected_alternatives[:3])}." if fact.rejected_alternatives else ""
@@ -748,7 +769,7 @@ def _build_deal_synthesis_markdown(synthesis: DealSynthesis) -> str:
         lines.append("- The second pass did not isolate a controlling answer for the core underwriting descriptors from the current readable package.")
 
     lines.extend(["", "## Real Risk Classification", ""])
-    for bucket in ("Deal Killers", "Pre-Close Gating Items", "Price Adjustments", "Execution Risks", "Noise"):
+    for bucket in _ACQUISITION_BUCKETS:
         lines.extend([f"### {bucket}", ""])
         items = risk_groups[bucket]
         if not items:
@@ -756,9 +777,7 @@ def _build_deal_synthesis_markdown(synthesis: DealSynthesis) -> str:
             lines.append("")
             continue
         for item in items[:5]:
-            lines.append(
-                f"- {item.title}: {item.summary} Impact={item.impact}; timing={item.timing}; curability={item.curability}."
-            )
+            lines.append(f"- {_acquisition_risk_markdown_line(item)}")
         lines.append("")
 
     lines.extend(["## Critical Path / Gating Chain", ""])
@@ -781,6 +800,12 @@ def _build_deal_synthesis_markdown(synthesis: DealSynthesis) -> str:
     lines.append("- Price / structure changes:")
     lines.extend(f"- {item}" for item in (decision.price_or_structure_changes or ["No specific price or structure change currently rises above routine contingency management."]))
     lines.append(f"- Single biggest unknown: {decision.biggest_unknown or 'No single unknown currently stands above the rest of the issue set.'}")
+    lines.append("- What has to be true:")
+    lines.extend(f"- {item}" for item in (decision.what_has_to_be_true or ["No additional gating condition rises above the current reset risk ranking."]))
+    lines.append("- Risks underwritten:")
+    lines.extend(f"- {item}" for item in (decision.risks_underwritten or ["No execution risk is currently being affirmatively underwritten beyond routine project friction."]))
+    lines.append("- Treated as solved:")
+    lines.extend(f"- {item}" for item in (decision.treated_as_solved or ["No lane should currently be treated as solved beyond document-backed descriptors."]))
 
     lines.extend(["", "## What A Weak Acquisitions Person Would Miss", ""])
     if judgment.weak_acquisition_misses:
@@ -822,7 +847,7 @@ def _build_investment_committee_brief_markdown(synthesis: DealSynthesis) -> str:
     )
     risk_groups = {
         bucket: [item for item in judgment.risk_items if item.bucket == bucket]
-        for bucket in ("Deal Killers", "Pre-Close Gating Items", "Price Adjustments", "Execution Risks", "Noise")
+        for bucket in _ACQUISITION_BUCKETS
     }
     decision = judgment.investment_decision
 
@@ -834,9 +859,22 @@ def _build_investment_committee_brief_markdown(synthesis: DealSynthesis) -> str:
         f"**Confidence In Initial Read:** {registry.confidence_in_initial_read}",
         f"**Underwrite Confidence:** {confidence_level}",
         "",
-        "## Controlling Facts",
+        "## Sanity Check / Corrections",
         "",
     ]
+    if judgment.sanity_corrections:
+        for correction in judgment.sanity_corrections:
+            lines.append(
+                f"- {correction.fact_type.replace('_', ' ').title()}: corrected to {correction.corrected_value}. Prior read: {correction.prior_value}. Why prior read was wrong: {correction.why_prior_was_wrong} Credible interpretation: {correction.credible_interpretation}"
+            )
+    else:
+        lines.append("- No controlling fact required a second-pass sanity correction beyond the current readable package.")
+
+    lines.extend([
+        "",
+        "## Controlling Facts",
+        "",
+    ])
     if judgment.controlling_facts:
         for fact in judgment.controlling_facts:
             rejected = f" Rejected alternatives: {', '.join(fact.rejected_alternatives[:3])}." if fact.rejected_alternatives else ""
@@ -845,7 +883,7 @@ def _build_investment_committee_brief_markdown(synthesis: DealSynthesis) -> str:
         lines.append("- The second pass did not isolate a controlling answer for the core underwriting descriptors from the current readable package.")
 
     lines.extend(["", "## Real Risk Classification", ""])
-    for bucket in ("Deal Killers", "Pre-Close Gating Items", "Price Adjustments", "Execution Risks", "Noise"):
+    for bucket in _ACQUISITION_BUCKETS:
         lines.extend([f"### {bucket}", ""])
         items = risk_groups[bucket]
         if not items:
@@ -853,7 +891,7 @@ def _build_investment_committee_brief_markdown(synthesis: DealSynthesis) -> str:
             lines.append("")
             continue
         for item in items[:4]:
-            lines.append(f"- {item.title}: {item.summary} Impact={item.impact}; timing={item.timing}; curability={item.curability}.")
+            lines.append(f"- {_acquisition_risk_markdown_line(item)}")
         lines.append("")
 
     lines.extend(["## Critical Path / Gating Chain", ""])
@@ -876,6 +914,12 @@ def _build_investment_committee_brief_markdown(synthesis: DealSynthesis) -> str:
     lines.append("- Price / structure changes:")
     lines.extend(f"- {item}" for item in (decision.price_or_structure_changes or ["No specific price or structure change currently rises above routine contingency management."]))
     lines.append(f"- Single biggest unknown: {decision.biggest_unknown or 'No single unknown currently stands above the rest of the issue set.'}")
+    lines.append("- What has to be true:")
+    lines.extend(f"- {item}" for item in (decision.what_has_to_be_true or ["No additional gating condition rises above the current reset risk ranking."]))
+    lines.append("- Risks underwritten:")
+    lines.extend(f"- {item}" for item in (decision.risks_underwritten or ["No execution risk is currently being affirmatively underwritten beyond routine project friction."]))
+    lines.append("- Treated as solved:")
+    lines.extend(f"- {item}" for item in (decision.treated_as_solved or ["No lane should currently be treated as solved beyond document-backed descriptors."]))
 
     lines.extend(["", "## What A Weak Acquisitions Person Would Miss", ""])
     if judgment.weak_acquisition_misses:
@@ -945,6 +989,39 @@ def _build_investment_committee_brief_markdown(synthesis: DealSynthesis) -> str:
     lines.append(f"- Status: {readiness_status}")
     lines.append(f"- Why: {readiness_reason}")
     return "\n".join(lines) + "\n"
+
+
+def _acquisition_risk_markdown_line(item) -> str:
+    segments = [
+        f"{item.title}: {item.summary}",
+        f"Impact={item.impact}; timing={item.timing}; curability={item.curability}.",
+    ]
+    economic_segments = [
+        segment
+        for segment in (
+            f"Cost={item.cost_impact}" if item.cost_impact else "",
+            f"Land value={item.land_value_impact}" if item.land_value_impact else "",
+            f"Margin={item.margin_impact}" if item.margin_impact else "",
+            f"IRR={item.irr_impact}" if item.irr_impact else "",
+            f"Timing impact={item.timing_impact}" if item.timing_impact else "",
+        )
+        if segment
+    ]
+    if economic_segments:
+        segments.append("Economics: " + " ".join(economic_segments))
+    structure_segments = [
+        segment
+        for segment in (
+            f"Price={item.price_response}" if item.price_response else "",
+            f"Terms={item.terms_response}" if item.terms_response else "",
+            f"Timing={item.timing_response}" if item.timing_response else "",
+            f"Contingency={item.contingency_response}" if item.contingency_response else "",
+        )
+        if segment
+    ]
+    if structure_segments:
+        segments.append("Structure response: " + " ".join(structure_segments))
+    return " ".join(segments)
 
 
 def _build_issue_registry_debug_markdown(

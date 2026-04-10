@@ -816,6 +816,18 @@ class AcquisitionControllingFact:
 
 
 @dataclass(slots=True)
+class AcquisitionSanityCorrection:
+    """Correction issued when the raw extracted read fails a development-logic sanity check."""
+
+    fact_type: str
+    corrected_value: str
+    prior_value: str
+    why_prior_was_wrong: str
+    credible_interpretation: str
+    citations: list[Citation] = field(default_factory=list)
+
+
+@dataclass(slots=True)
 class AcquisitionRiskItem:
     """IC-ready risk item grouped into a decisive acquisition bucket."""
 
@@ -828,6 +840,16 @@ class AcquisitionRiskItem:
     issue_id: str = ""
     citations: list[Citation] = field(default_factory=list)
     source_documents: list[str] = field(default_factory=list)
+    deal_shaping: bool = False
+    cost_impact: str = ""
+    land_value_impact: str = ""
+    margin_impact: str = ""
+    irr_impact: str = ""
+    timing_impact: str = ""
+    price_response: str = ""
+    terms_response: str = ""
+    timing_response: str = ""
+    contingency_response: str = ""
 
 
 @dataclass(slots=True)
@@ -862,6 +884,9 @@ class AcquisitionDecision:
     top_real_risks: list[str] = field(default_factory=list)
     price_or_structure_changes: list[str] = field(default_factory=list)
     biggest_unknown: str = ""
+    what_has_to_be_true: list[str] = field(default_factory=list)
+    risks_underwritten: list[str] = field(default_factory=list)
+    treated_as_solved: list[str] = field(default_factory=list)
     citations: list[Citation] = field(default_factory=list)
 
 
@@ -869,6 +894,7 @@ class AcquisitionDecision:
 class AcquisitionJudgment:
     """Acquisition-grade second-pass synthesis layered on top of issue reasoning."""
 
+    sanity_corrections: list[AcquisitionSanityCorrection] = field(default_factory=list)
     controlling_facts: list[AcquisitionControllingFact] = field(default_factory=list)
     risk_items: list[AcquisitionRiskItem] = field(default_factory=list)
     critical_path: list[AcquisitionCriticalPathStep] = field(default_factory=list)

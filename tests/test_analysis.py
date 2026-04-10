@@ -93,9 +93,64 @@ class AnalysisTests(unittest.TestCase):
         self.assertIn("R-1", controlling["zoning"].controlling_value)
         self.assertIn("Exampleville", controlling["jurisdiction"].controlling_value)
         self.assertIn("Example Land Holdings LLC", controlling["owner_name"].controlling_value)
-        self.assertTrue(any(item.bucket == "Pre-Close Gating Items" for item in synthesis.acquisition_judgment.risk_items))
+        self.assertTrue(
+            any(
+                item.bucket in {"Primary Drivers of Price", "Secondary Execution Risks", "True Deal Killers"}
+                for item in synthesis.acquisition_judgment.risk_items
+            )
+        )
+        self.assertTrue(any(item.cost_impact for item in synthesis.acquisition_judgment.risk_items))
+        self.assertTrue(any(item.price_response for item in synthesis.acquisition_judgment.risk_items))
         self.assertEqual(synthesis.acquisition_judgment.investment_decision.posture, "Advance Only If")
         self.assertTrue(any(step.target == "Final Map" for step in synthesis.acquisition_judgment.critical_path))
+
+    def test_second_pass_applies_sanity_corrections(self) -> None:
+        def document_with_chunk(relative_path: str, text: str) -> DocumentRecord:
+            document = _document(relative_path, text)
+            document.chunks = [
+                ExtractedChunk(
+                    document_name=document.title,
+                    chunk_id=f"chunk-{Path(relative_path).stem}",
+                    text=document.normalized_text,
+                    page_number=1,
+                )
+            ]
+            return document
+
+        documents = [
+            document_with_chunk(
+                "planning_staff_report.txt",
+                (
+                    "Planning Commission staff report. City of Exampleville. "
+                    "Current zoning is R-1. General plan land use is High Density Residential. "
+                    "The project proposes 84 lots and 84 single family homes. "
+                    "Tentative map approved subject to conditions of approval before final map."
+                ),
+            ),
+            document_with_chunk(
+                "design_review_notes.txt",
+                "Design review packet notes Building A has 12 units. Owner: Existing Conditions Plan.",
+            ),
+            document_with_chunk(
+                "title_report.txt",
+                "Preliminary title report states title is vested in Example Land Holdings LLC.",
+            ),
+        ]
+
+        synthesis = run_analysis(
+            deal_name="Sanity Correction Deal",
+            documents=documents,
+            llm_provider=HeuristicProvider(),
+            logger=logging.getLogger("test-sanity-corrections"),
+        )
+
+        corrections = {item.fact_type: item for item in synthesis.acquisition_judgment.sanity_corrections}
+        self.assertIn("unit_count", corrections)
+        self.assertEqual(corrections["unit_count"].corrected_value, "84 units")
+        self.assertIn("owner_name", corrections)
+        self.assertIn("Example Land Holdings LLC", corrections["owner_name"].corrected_value)
+        self.assertIn("zoning", corrections)
+        self.assertIn("R-1", corrections["zoning"].corrected_value)
 
     def test_normalize_text_repairs_common_mojibake(self) -> None:
         text = "The dealâ€™s geotech scopeâ€”and cost basisâ€”need review."
