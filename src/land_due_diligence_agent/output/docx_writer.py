@@ -140,6 +140,7 @@ def write_due_diligence_report_docx(path: Path, result: DealRunResult) -> Path:
     """Write the primary due diligence report as a Word document."""
 
     ensure_directory(path.parent)
+    path.parent.mkdir(parents=True, exist_ok=True)
     document = Document()
     _configure_document(document)
 

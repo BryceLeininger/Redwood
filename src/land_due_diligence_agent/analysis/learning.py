@@ -175,6 +175,7 @@ def save_learning_snapshot(
     path: Path,
 ) -> Path:
     ensure_directory(path.parent)
+    path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "feature_stats": {
             f"{feature_name}:{key}": {

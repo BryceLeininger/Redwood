@@ -175,6 +175,7 @@ def load_issue_knowledge_base(path: Path | None = None) -> IssueKnowledgeBase:
 def save_issue_knowledge_base(knowledge_base: IssueKnowledgeBase, path: Path | None = None) -> Path:
     resolved_path = default_issue_patterns_path(path)
     ensure_directory(resolved_path.parent)
+    resolved_path.parent.mkdir(parents=True, exist_ok=True)
     ordered_patterns = sorted(
         knowledge_base.patterns,
         key=lambda pattern: (pattern.pattern_id, pattern.issue_type, pattern.canonical_title),

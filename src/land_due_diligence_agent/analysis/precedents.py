@@ -194,6 +194,7 @@ def save_precedent_records(records: list[PrecedentIssueRecord], path: Path | Non
 
     resolved_path = path or _default_precedent_store_path()
     ensure_directory(resolved_path.parent)
+    resolved_path.parent.mkdir(parents=True, exist_ok=True)
     ordered = sorted(
         (_normalize_record(record) for record in records),
         key=lambda record: (

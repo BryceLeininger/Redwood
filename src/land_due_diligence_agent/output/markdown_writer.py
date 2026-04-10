@@ -103,6 +103,7 @@ def write_markdown_outputs(
 
     written_paths: list[Path] = []
     for path, content in files:
+        path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8")
         written_paths.append(path)
     return written_paths

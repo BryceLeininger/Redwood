@@ -17,6 +17,7 @@ def write_json(path: Path, payload: Any) -> Path:
     """Write a JSON artifact with stable formatting."""
 
     ensure_directory(path.parent)
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(_serialize(payload), indent=2, ensure_ascii=False), encoding="utf-8")
     return path
 
@@ -25,6 +26,7 @@ def write_manifest_csv(path: Path, manifest_entries: list[ManifestEntry]) -> Pat
     """Write the deal manifest to CSV for spreadsheet review."""
 
     ensure_directory(path.parent)
+    path.parent.mkdir(parents=True, exist_ok=True)
     fieldnames = [
         "file_path",
         "relative_path",
@@ -87,6 +89,7 @@ def write_document_artifacts(
     text_path = output_root / relative_parent / f"{document.source_path.name}.txt"
     json_path = output_root / relative_parent / f"{document.source_path.name}.json"
     ensure_directory(text_path.parent)
+    text_path.parent.mkdir(parents=True, exist_ok=True)
     text_path.write_text(document.raw_text or document.normalized_text, encoding="utf-8")
 
     payload = {
