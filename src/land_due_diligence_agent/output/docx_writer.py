@@ -25,7 +25,16 @@ from land_due_diligence_agent.analysis.front_end import (
     underwrite_confidence_reason,
 )
 from land_due_diligence_agent.deal_models import ConflictRecord, DealRunResult, FactRecord, MissingItem, SourceReference
-from land_due_diligence_agent.models import CanonicalIssue, Citation, DealSynthesis, DocumentAnalysis, OmissionAssessment
+from land_due_diligence_agent.models import (
+    AcquisitionControllingFact,
+    AcquisitionCriticalPathStep,
+    AcquisitionRiskItem,
+    CanonicalIssue,
+    Citation,
+    DealSynthesis,
+    DocumentAnalysis,
+    OmissionAssessment,
+)
 from land_due_diligence_agent.utils.files import ensure_directory
 from land_due_diligence_agent.utils.text import clip_text, unique_preserve_order
 
@@ -220,6 +229,11 @@ def _write_structured_report(document: Document, result: DealRunResult, synthesi
     )
     _add_deal_impact_summary_section(document, material_issues)
     _add_underwrite_confidence_section(document, synthesis, material_issues)
+    _add_controlling_facts_section(document, synthesis)
+    _add_real_risk_classification_section(document, synthesis)
+    _add_critical_path_chain_section(document, synthesis)
+    _add_investment_decision_section(document, synthesis)
+    _add_weak_acquisitions_section(document, synthesis)
     _add_key_documents_that_control_section(document, synthesis)
     _add_deal_overview(document, result, synthesis, fact_index)
     _add_gating_items_section(document, material_issues)
@@ -466,6 +480,100 @@ def _add_underwrite_confidence_section(
                 text="If the remaining assumptions break, the deal can still move on price, timing, or closability faster than the current package implies."
             )
         ],
+    )
+
+
+def _add_controlling_facts_section(document: Document, synthesis: DealSynthesis) -> None:
+    _add_section(document, "Controlling Facts")
+    bullets = [_controlling_fact_bullet(fact) for fact in synthesis.acquisition_judgment.controlling_facts]
+    _add_bullet_items(
+        document,
+        bullets
+        or [
+            _SectionBullet(
+                text="The second pass did not isolate a controlling answer for the core underwriting descriptors from the current readable package."
+            )
+        ],
+    )
+
+
+def _add_real_risk_classification_section(document: Document, synthesis: DealSynthesis) -> None:
+    _add_section(document, "Real Risk Classification")
+    for bucket in ("Deal Killers", "Pre-Close Gating Items", "Price Adjustments", "Execution Risks", "Noise"):
+        _add_subsection(document, bucket)
+        items = [item for item in synthesis.acquisition_judgment.risk_items if item.bucket == bucket]
+        bullets = [_acquisition_risk_bullet(item) for item in items[:5]]
+        _add_bullet_items(
+            document,
+            bullets or [_SectionBullet(text=f"No item currently lands in {bucket.lower()}.")],
+        )
+
+
+def _add_critical_path_chain_section(document: Document, synthesis: DealSynthesis) -> None:
+    _add_section(document, "Critical Path / Gating Chain")
+    for target in ("Final Map", "Grading Permit", "Vertical Start"):
+        _add_subsection(document, target)
+        steps = [step for step in synthesis.acquisition_judgment.critical_path if step.target == target]
+        bullets = [_critical_path_bullet(step) for step in steps]
+        _add_bullet_items(
+            document,
+            bullets or [_SectionBullet(text=f"No stage-specific blocker was isolated for {target.lower()} beyond the current general issue set.")],
+        )
+
+
+def _add_investment_decision_section(document: Document, synthesis: DealSynthesis) -> None:
+    decision = synthesis.acquisition_judgment.investment_decision
+    _add_section(document, "Investment Decision")
+
+    _add_subsection(document, "Decision")
+    _add_bullet_items(
+        document,
+        [
+            _SectionBullet(
+                text=f"{decision.posture}. {decision.rationale}",
+                references=_citation_labels(decision.citations),
+            )
+        ],
+    )
+
+    _add_subsection(document, "Top 3 Real Risks")
+    _add_bullet_items(
+        document,
+        [_SectionBullet(text=line) for line in decision.top_real_risks]
+        or [_SectionBullet(text="No real risk currently rises above routine diligence noise in the second-pass classification.")],
+    )
+
+    _add_subsection(document, "Price / Structure Changes")
+    _add_bullet_items(
+        document,
+        [_SectionBullet(text=line) for line in decision.price_or_structure_changes]
+        or [_SectionBullet(text="No specific price or structure change currently rises above routine contingency management.")],
+    )
+
+    _add_subsection(document, "Single Biggest Unknown")
+    _add_bullet_items(
+        document,
+        [
+            _SectionBullet(
+                text=decision.biggest_unknown or "No single unknown currently stands above the rest of the issue set.",
+                references=_citation_labels(decision.citations),
+            )
+        ],
+    )
+
+
+def _add_weak_acquisitions_section(document: Document, synthesis: DealSynthesis) -> None:
+    _add_section(document, "What A Weak Acquisitions Person Would Miss")
+    bullets = [
+        _SectionBullet(
+            text=f"{insight.title}: {insight.detail}",
+            references=[*_citation_labels(insight.citations), *insight.source_documents],
+        )
+        for insight in synthesis.acquisition_judgment.weak_acquisition_misses
+    ]
+    _add_bullet_items(
+        document,
+        bullets or [_SectionBullet(text="The second pass did not isolate three non-obvious points beyond the existing issue ranking.")],
     )
 
 
@@ -1666,6 +1774,10 @@ def _omission_reference_labels(assessment: OmissionAssessment) -> list[str]:
     return unique_preserve_order(labels)[:3]
 
 
+def _citation_labels(citations: list[Citation]) -> list[str]:
+    return unique_preserve_order([_citation_label(citation) for citation in citations])[:3]
+
+
 def _citation_label(citation: Citation) -> str:
     label = citation.document_name
     if citation.page_number is not None:
@@ -1749,3 +1861,26 @@ def _coerce_int(value: str) -> int | None:
         return int(float(value))
     except ValueError:
         return None
+
+
+def _controlling_fact_bullet(fact: AcquisitionControllingFact) -> _SectionBullet:
+    rejected = f" Rejected alternatives: {', '.join(fact.rejected_alternatives[:3])}." if fact.rejected_alternatives else ""
+    return _SectionBullet(
+        text=f"{fact.label}: {fact.controlling_value}. Control document: {fact.controlling_document}. Why it controls: {fact.why_it_controls}{rejected}",
+        references=_citation_labels(fact.citations),
+    )
+
+
+def _acquisition_risk_bullet(item: AcquisitionRiskItem) -> _SectionBullet:
+    return _SectionBullet(
+        text=f"{item.title}: {item.summary}",
+        note=f"Impact: {item.impact}. Timing: {item.timing}. Curability: {item.curability}.",
+        references=[*_citation_labels(item.citations), *item.source_documents],
+    )
+
+
+def _critical_path_bullet(step: AcquisitionCriticalPathStep) -> _SectionBullet:
+    return _SectionBullet(
+        text=f"Step {step.sequence}: {step.blocker}. {step.why_it_blocks}",
+        references=[*_citation_labels(step.citations), *step.source_documents],
+    )

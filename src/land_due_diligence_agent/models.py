@@ -803,6 +803,80 @@ class FurtherDiligenceRoadmap:
 
 
 @dataclass(slots=True)
+class AcquisitionControllingFact:
+    """Controlling fact adjudication for one underwriting-critical descriptor."""
+
+    fact_type: str
+    label: str
+    controlling_value: str
+    controlling_document: str
+    why_it_controls: str
+    rejected_alternatives: list[str] = field(default_factory=list)
+    citations: list[Citation] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class AcquisitionRiskItem:
+    """IC-ready risk item grouped into a decisive acquisition bucket."""
+
+    bucket: str
+    title: str
+    summary: str
+    impact: str
+    timing: str
+    curability: str
+    issue_id: str = ""
+    citations: list[Citation] = field(default_factory=list)
+    source_documents: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class AcquisitionCriticalPathStep:
+    """Ordered blocker on the path to a specific execution milestone."""
+
+    target: str
+    sequence: int
+    blocker: str
+    why_it_blocks: str
+    issue_id: str = ""
+    citations: list[Citation] = field(default_factory=list)
+    source_documents: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class AcquisitionInsight:
+    """Non-obvious acquisition insight surfaced by the second pass."""
+
+    title: str
+    detail: str
+    citations: list[Citation] = field(default_factory=list)
+    source_documents: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class AcquisitionDecision:
+    """Investment decision frame produced by the acquisition second pass."""
+
+    posture: str = "Advance Only If"
+    rationale: str = ""
+    top_real_risks: list[str] = field(default_factory=list)
+    price_or_structure_changes: list[str] = field(default_factory=list)
+    biggest_unknown: str = ""
+    citations: list[Citation] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class AcquisitionJudgment:
+    """Acquisition-grade second-pass synthesis layered on top of issue reasoning."""
+
+    controlling_facts: list[AcquisitionControllingFact] = field(default_factory=list)
+    risk_items: list[AcquisitionRiskItem] = field(default_factory=list)
+    critical_path: list[AcquisitionCriticalPathStep] = field(default_factory=list)
+    investment_decision: AcquisitionDecision = field(default_factory=AcquisitionDecision)
+    weak_acquisition_misses: list[AcquisitionInsight] = field(default_factory=list)
+
+
+@dataclass(slots=True)
 class WebResearchResult:
     """Public-web fallback result for an unresolved diligence question."""
 
@@ -844,6 +918,7 @@ class DealSynthesis:
     recommendation: RecommendationDecision = field(default_factory=RecommendationDecision)
     contradictions: list[ContradictionFinding] = field(default_factory=list)
     further_diligence_roadmap: FurtherDiligenceRoadmap = field(default_factory=FurtherDiligenceRoadmap)
+    acquisition_judgment: AcquisitionJudgment = field(default_factory=AcquisitionJudgment)
     web_research_results: list[WebResearchResult] = field(default_factory=list)
     autonomous_learning_summary: AutonomousLearningSummary = field(default_factory=AutonomousLearningSummary)
     autonomous_learning_records: list[PrecedentIssueRecord] = field(default_factory=list)

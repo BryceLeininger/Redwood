@@ -48,6 +48,55 @@ def _document(relative_path: str, text: str) -> DocumentRecord:
 
 
 class AnalysisTests(unittest.TestCase):
+    def test_second_pass_builds_acquisition_judgment(self) -> None:
+        def document_with_chunk(relative_path: str, text: str) -> DocumentRecord:
+            document = _document(relative_path, text)
+            document.chunks = [
+                ExtractedChunk(
+                    document_name=document.title,
+                    chunk_id=f"chunk-{Path(relative_path).stem}",
+                    text=document.normalized_text,
+                    page_number=1,
+                )
+            ]
+            return document
+
+        documents = [
+            document_with_chunk(
+                "planning_staff_report.txt",
+                (
+                    "Planning Commission staff report. City of Exampleville. "
+                    "Current zoning is R-1. The project proposes 84 lots and 84 single family homes. "
+                    "Tentative map approved subject to conditions of approval before final map and grading permit."
+                ),
+            ),
+            document_with_chunk(
+                "title_report.txt",
+                "Preliminary title report states title is vested in Example Land Holdings LLC. Easement exception remains open.",
+            ),
+            document_with_chunk(
+                "grading_memo.txt",
+                "Geotechnical memo states grading scope and drainage improvements remain unresolved before permit release.",
+            ),
+        ]
+
+        synthesis = run_analysis(
+            deal_name="IC Judgment Deal",
+            documents=documents,
+            llm_provider=HeuristicProvider(),
+            logger=logging.getLogger("test-acquisition-judgment"),
+        )
+
+        controlling = {fact.fact_type: fact for fact in synthesis.acquisition_judgment.controlling_facts}
+        self.assertEqual(controlling["lot_count"].controlling_value, "84 lots")
+        self.assertEqual(controlling["unit_count"].controlling_value, "84 units")
+        self.assertIn("R-1", controlling["zoning"].controlling_value)
+        self.assertIn("Exampleville", controlling["jurisdiction"].controlling_value)
+        self.assertIn("Example Land Holdings LLC", controlling["owner_name"].controlling_value)
+        self.assertTrue(any(item.bucket == "Pre-Close Gating Items" for item in synthesis.acquisition_judgment.risk_items))
+        self.assertEqual(synthesis.acquisition_judgment.investment_decision.posture, "Advance Only If")
+        self.assertTrue(any(step.target == "Final Map" for step in synthesis.acquisition_judgment.critical_path))
+
     def test_normalize_text_repairs_common_mojibake(self) -> None:
         text = "The dealâ€™s geotech scopeâ€”and cost basisâ€”need review."
         self.assertEqual(

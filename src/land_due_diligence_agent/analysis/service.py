@@ -10,6 +10,7 @@ from land_due_diligence_agent.analysis.autonomous_agent import (
     load_autonomous_learning_records,
     persist_autonomous_learning_records,
 )
+from land_due_diligence_agent.analysis.acquisition_judgment import build_acquisition_judgment
 from land_due_diligence_agent.analysis.fact_validation import clean_structured_facts
 from land_due_diligence_agent.analysis.feedback_loop import (
     apply_feedback_learning_layer,
@@ -250,6 +251,15 @@ def run_analysis(
             logger=logger,
         )
 
+    acquisition_judgment = build_acquisition_judgment(
+        documents=documents,
+        registry=registry,
+        omission_assessments=omission_assessments,
+        contradictions=contradictions,
+        recommendation=recommendation,
+        entitlement_status=entitlement_status,
+    )
+
     return DealSynthesis(
         deal_name=deal_name,
         executive_summary=executive_summary,
@@ -271,6 +281,7 @@ def run_analysis(
         recommendation=recommendation,
         contradictions=contradictions,
         further_diligence_roadmap=further_diligence_roadmap,
+        acquisition_judgment=acquisition_judgment,
         web_research_results=web_research_results,
         autonomous_learning_summary=autonomous_learning_summary,
         autonomous_learning_records=autonomous_learning_records_out,

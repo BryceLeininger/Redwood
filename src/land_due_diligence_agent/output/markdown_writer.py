@@ -727,12 +727,69 @@ def _build_missing_items_markdown(synthesis: DealSynthesis) -> str:
 
 
 def _build_deal_synthesis_markdown(synthesis: DealSynthesis) -> str:
+    judgment = synthesis.acquisition_judgment
+    risk_groups = {
+        bucket: [item for item in judgment.risk_items if item.bucket == bucket]
+        for bucket in ("Deal Killers", "Pre-Close Gating Items", "Price Adjustments", "Execution Risks", "Noise")
+    }
     lines = [
         "# Deal Synthesis",
         "",
-        "## Initial Judgment",
+        "## Controlling Facts",
         "",
     ]
+    if judgment.controlling_facts:
+        for fact in judgment.controlling_facts:
+            rejected = f" Rejected alternatives: {', '.join(fact.rejected_alternatives[:3])}." if fact.rejected_alternatives else ""
+            lines.append(
+                f"- {fact.label}: {fact.controlling_value}. Control document: {fact.controlling_document}. Why it controls: {fact.why_it_controls}.{rejected}"
+            )
+    else:
+        lines.append("- The second pass did not isolate a controlling answer for the core underwriting descriptors from the current readable package.")
+
+    lines.extend(["", "## Real Risk Classification", ""])
+    for bucket in ("Deal Killers", "Pre-Close Gating Items", "Price Adjustments", "Execution Risks", "Noise"):
+        lines.extend([f"### {bucket}", ""])
+        items = risk_groups[bucket]
+        if not items:
+            lines.append(f"- No item currently lands in {bucket.lower()}.")
+            lines.append("")
+            continue
+        for item in items[:5]:
+            lines.append(
+                f"- {item.title}: {item.summary} Impact={item.impact}; timing={item.timing}; curability={item.curability}."
+            )
+        lines.append("")
+
+    lines.extend(["## Critical Path / Gating Chain", ""])
+    for target in ("Final Map", "Grading Permit", "Vertical Start"):
+        lines.extend([f"### {target}", ""])
+        steps = [step for step in judgment.critical_path if step.target == target]
+        if not steps:
+            lines.append(f"- No stage-specific blocker was isolated for {target.lower()} beyond the current general issue set.")
+            lines.append("")
+            continue
+        for step in steps:
+            lines.append(f"- Step {step.sequence}: {step.blocker}. {step.why_it_blocks}")
+        lines.append("")
+
+    decision = judgment.investment_decision
+    lines.extend(["## Investment Decision", ""])
+    lines.append(f"- Decision: {decision.posture}. {decision.rationale}")
+    lines.append("- Top 3 real risks:")
+    lines.extend(f"- {item}" for item in (decision.top_real_risks or ["No real risk currently rises above routine diligence noise in the second-pass classification."]))
+    lines.append("- Price / structure changes:")
+    lines.extend(f"- {item}" for item in (decision.price_or_structure_changes or ["No specific price or structure change currently rises above routine contingency management."]))
+    lines.append(f"- Single biggest unknown: {decision.biggest_unknown or 'No single unknown currently stands above the rest of the issue set.'}")
+
+    lines.extend(["", "## What A Weak Acquisitions Person Would Miss", ""])
+    if judgment.weak_acquisition_misses:
+        for insight in judgment.weak_acquisition_misses:
+            lines.append(f"- {insight.title}: {insight.detail}")
+    else:
+        lines.append("- The second pass did not isolate three non-obvious points beyond the existing issue ranking.")
+
+    lines.extend(["", "## Initial Judgment", ""])
     lines.extend(f"- {item}" for item in _build_synthesis_judgment_lines(synthesis))
     lines.extend(["", "## Routine Vs Elevated", ""])
     lines.extend(f"- {item}" for item in _build_routine_vs_elevated_lines(synthesis))
@@ -745,7 +802,7 @@ def _build_deal_synthesis_markdown(synthesis: DealSynthesis) -> str:
 
 
 def _build_investment_committee_brief_markdown(synthesis: DealSynthesis) -> str:
-    overall_read = _build_ic_overall_read(synthesis)
+    judgment = synthesis.acquisition_judgment
     readiness_status, readiness_reason = _evaluate_decision_readiness(synthesis)
     registry = synthesis.canonical_issue_registry
     impact_issues = deal_impact_summary_issues(_selected_issues(synthesis, "09_investment_committee_brief.md", default_count=3), limit=3)
@@ -763,25 +820,74 @@ def _build_investment_committee_brief_markdown(synthesis: DealSynthesis) -> str:
         document_analyses=synthesis.document_analyses,
         issues=impact_issues or registry.issues,
     )
+    risk_groups = {
+        bucket: [item for item in judgment.risk_items if item.bucket == bucket]
+        for bucket in ("Deal Killers", "Pre-Close Gating Items", "Price Adjustments", "Execution Risks", "Noise")
+    }
+    decision = judgment.investment_decision
 
     lines = [
         "# Investment Committee Brief",
         "",
-        f"**Recommendation:** {synthesis.recommendation.posture}",
+        f"**Recommendation:** {decision.posture}",
         f"**Package Read:** {registry.package_quality or 'credible'}",
         f"**Confidence In Initial Read:** {registry.confidence_in_initial_read}",
+        f"**Underwrite Confidence:** {confidence_level}",
         "",
-        "## Overall Read",
+        "## Controlling Facts",
         "",
-        overall_read,
     ]
-    lines.extend(
-        [
-            "",
-            "## Deal Impact Summary",
-            "",
-        ]
-    )
+    if judgment.controlling_facts:
+        for fact in judgment.controlling_facts:
+            rejected = f" Rejected alternatives: {', '.join(fact.rejected_alternatives[:3])}." if fact.rejected_alternatives else ""
+            lines.append(f"- {fact.label}: {fact.controlling_value}. Control document: {fact.controlling_document}. Why it controls: {fact.why_it_controls}.{rejected}")
+    else:
+        lines.append("- The second pass did not isolate a controlling answer for the core underwriting descriptors from the current readable package.")
+
+    lines.extend(["", "## Real Risk Classification", ""])
+    for bucket in ("Deal Killers", "Pre-Close Gating Items", "Price Adjustments", "Execution Risks", "Noise"):
+        lines.extend([f"### {bucket}", ""])
+        items = risk_groups[bucket]
+        if not items:
+            lines.append(f"- No item currently lands in {bucket.lower()}.")
+            lines.append("")
+            continue
+        for item in items[:4]:
+            lines.append(f"- {item.title}: {item.summary} Impact={item.impact}; timing={item.timing}; curability={item.curability}.")
+        lines.append("")
+
+    lines.extend(["## Critical Path / Gating Chain", ""])
+    for target in ("Final Map", "Grading Permit", "Vertical Start"):
+        lines.extend([f"### {target}", ""])
+        steps = [step for step in judgment.critical_path if step.target == target]
+        if not steps:
+            lines.append(f"- No stage-specific blocker was isolated for {target.lower()} beyond the current general issue set.")
+            lines.append("")
+            continue
+        for step in steps:
+            lines.append(f"- Step {step.sequence}: {step.blocker}. {step.why_it_blocks}")
+        lines.append("")
+
+    lines.extend(["## Investment Decision", ""])
+    lines.append(f"- Decision: {decision.posture}. {decision.rationale}")
+    lines.append(f"- Underwrite confidence: {confidence_level}. {_compress_statement(confidence_reason, max_words=24, single_idea=False)}")
+    lines.append("- Top 3 real risks:")
+    lines.extend(f"- {item}" for item in (decision.top_real_risks or ["No real risk currently rises above routine diligence noise in the second-pass classification."]))
+    lines.append("- Price / structure changes:")
+    lines.extend(f"- {item}" for item in (decision.price_or_structure_changes or ["No specific price or structure change currently rises above routine contingency management."]))
+    lines.append(f"- Single biggest unknown: {decision.biggest_unknown or 'No single unknown currently stands above the rest of the issue set.'}")
+
+    lines.extend(["", "## What A Weak Acquisitions Person Would Miss", ""])
+    if judgment.weak_acquisition_misses:
+        for insight in judgment.weak_acquisition_misses:
+            lines.append(f"- {insight.title}: {insight.detail}")
+    else:
+        lines.append("- The second pass did not isolate three non-obvious points beyond the existing issue ranking.")
+
+    lines.extend(["", "## Supporting Read", ""])
+    lines.append(f"- Package read: {registry.package_quality or 'credible'}.")
+    lines.append(f"- Confidence in initial read: {registry.confidence_in_initial_read}.")
+    lines.extend(["", "## Deal Impact Summary", ""])
     if impact_issues:
         for issue in impact_issues:
             lines.append(
@@ -798,15 +904,10 @@ def _build_investment_committee_brief_markdown(synthesis: DealSynthesis) -> str:
             )
     else:
         lines.append("- No CRITICAL or HIGH issue currently rises high enough to reshape the deal beyond routine diligence judgment.")
-    lines.extend(
-        [
-            "",
-            "## Underwrite Confidence",
-            "",
-            f"- Current level: {confidence_level}.",
-            f"- Why: {_compress_statement(confidence_reason, max_words=24, single_idea=False)}",
-        ]
-    )
+
+    lines.extend(["", "## Underwrite Confidence", ""])
+    lines.append(f"- Current level: {confidence_level}.")
+    lines.append(f"- Why: {_compress_statement(confidence_reason, max_words=24, single_idea=False)}")
     lines.extend(
         f"- Assumption carrying the underwrite: {_compress_statement(line, max_words=22, single_idea=False)}"
         for line in underwrite_confidence_limiters(
@@ -818,57 +919,29 @@ def _build_investment_committee_brief_markdown(synthesis: DealSynthesis) -> str:
             limit=2,
         )
     )
-    lines.extend(
-        [
-            "",
-            "### If Wrong, What Happens?",
-            "",
-        ]
-    )
+
+    lines.extend(["", "### If Wrong, What Happens?", ""])
     if impact_issues:
         for issue in impact_issues:
-            lines.append(
-                f"- {issue.title}: {_compress_statement(if_wrong_line_for_issue(issue), max_words=20, single_idea=False)}"
-            )
+            lines.append(f"- {issue.title}: {_compress_statement(if_wrong_line_for_issue(issue), max_words=20, single_idea=False)}")
     else:
         lines.append("- If the remaining assumptions break, the deal can still move on price, timing, or closability faster than the current package implies.")
-    lines.extend(
-        [
-            "",
-            "## Top 3 Gating Issues",
-            "",
-        ]
-    )
+
+    lines.extend(["", "## Top 3 Gating Issues", ""])
     lines.extend(f"- {item}" for item in _build_gating_issue_lines(synthesis, limit=3))
-    lines.extend(
-        [
-            "",
-            "## Biggest Blind Spots",
-            "",
-        ]
-    )
+
+    lines.extend(["", "## Biggest Blind Spots", ""])
     lines.extend(
         f"- {item}"
         for item in (registry.front_end_unresolved_points[:4] or ["No large blind spot was isolated beyond the current package."])
     )
-    lines.extend(
-        [
-            "",
-            "## What I Would Verify Personally",
-            "",
-        ]
-    )
+
+    lines.extend(["", "## What I Would Verify Personally", ""])
     lines.extend(
         f"- {item}"
         for item in (_build_personal_verification_items(synthesis)[:3] or ["Personally verify the highest-ranked issue sources."])
     )
-    lines.extend(
-        [
-            "",
-            "## Decision Readiness",
-            "",
-        ]
-    )
+    lines.extend(["", "## Decision Readiness", ""])
     lines.append(f"- Status: {readiness_status}")
     lines.append(f"- Why: {readiness_reason}")
     return "\n".join(lines) + "\n"
