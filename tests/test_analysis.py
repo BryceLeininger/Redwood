@@ -95,12 +95,14 @@ class AnalysisTests(unittest.TestCase):
         self.assertIn("Example Land Holdings LLC", controlling["owner_name"].controlling_value)
         self.assertTrue(
             any(
-                item.bucket in {"Primary Drivers of Price", "Secondary Execution Risks", "True Deal Killers"}
+                item.bucket in {"Primary Deal Driver", "Secondary Drivers", "Supporting Risks"}
                 for item in synthesis.acquisition_judgment.risk_items
             )
         )
         self.assertTrue(any(item.cost_impact for item in synthesis.acquisition_judgment.risk_items))
-        self.assertTrue(any(item.price_response for item in synthesis.acquisition_judgment.risk_items))
+        self.assertTrue(any(item.primary_lever for item in synthesis.acquisition_judgment.risk_items))
+        self.assertTrue(synthesis.acquisition_judgment.investment_decision.primary_driver)
+        self.assertTrue(synthesis.acquisition_judgment.investment_decision.close_requirements)
         self.assertEqual(synthesis.acquisition_judgment.investment_decision.posture, "Advance Only If")
         self.assertTrue(any(step.target == "Final Map" for step in synthesis.acquisition_judgment.critical_path))
 

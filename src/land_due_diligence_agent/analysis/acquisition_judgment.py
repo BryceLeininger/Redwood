@@ -40,14 +40,30 @@ _FACT_LABELS = {
     "owner_name": "Ownership",
 }
 _CONFIDENCE_RANK = {"low": 1, "medium": 2, "high": 3}
-_DEAL_SHAPING_LIMIT = 2
+_SECONDARY_DRIVER_LIMIT = 2
 _RISK_BUCKETS = (
-    "True Deal Killers",
-    "Primary Drivers of Price",
-    "Secondary Execution Risks",
+    "Primary Deal Driver",
+    "Secondary Drivers",
+    "Supporting Risks",
     "Noise",
 )
 _BUCKET_ORDER = {name: index for index, name in enumerate(_RISK_BUCKETS)}
+_MONEY_SIGNAL_RE = re.compile(
+    r"(?:\$\s?\d[\d,]*(?:\.\d+)?(?:\s*(?:million|mm|m|k|thousand))?|\b\d[\d,]*(?:\.\d+)?\s*(?:per lot|/lot|per unit|/unit)\b)",
+    re.IGNORECASE,
+)
+_TIMING_SIGNAL_RE = re.compile(r"\b\d+\s*(?:business\s+days?|days?|weeks?|months?|quarters?)\b", re.IGNORECASE)
+_SCOPE_HINTS = (
+    ("impact fees or exactions", ("impact fee", "school fee", "fee", "fees", "exaction", "bond", "assessment district")),
+    ("budget refresh or bid package", ("budgetary", "bid", "proposal", "estimate", "gmp", "cost opinion", "allowance")),
+    ("offsite improvement scope", ("offsite", "frontage", "street improvement", "signal", "widening", "dedication", "public improvement")),
+    ("utility capacity or extension scope", ("will serve", "capacity", "utility", "sewer", "water", "dry utility", "lift station", "booster")),
+    ("environmental remediation scope", ("phase ii", "phase 2", "remediation", "mitigation", "cleanup", "contamination", "wetland")),
+    ("geotechnical earthwork scope", ("geotechnical", "geotech", "overexcavation", "undercut", "retaining wall", "slope", "rock")),
+    ("flood or drainage improvement scope", ("flood", "drainage", "storm drain", "detention", "basin", "hydrology")),
+    ("title or access cure", ("title", "easement", "access", "vesting", "encroachment", "non-interference")),
+    ("discretionary entitlement path", ("rezoning", "variance", "general plan amendment", "planning commission", "city council", "tentative map", "appeal")),
+)
 _OWNER_ENTITY_TERMS = (
     "llc",
     "lp",
@@ -236,21 +252,17 @@ class _ProductInference:
 
 
 @dataclass(slots=True, frozen=True)
-class _EconomicEstimate:
-    cost_low_total: int | None = None
-    cost_high_total: int | None = None
-    cost_low_per_lot: int | None = None
-    cost_high_per_lot: int | None = None
-    carry_low_per_month: int | None = None
-    carry_high_per_month: int | None = None
-    margin_bps_low: int = 0
-    margin_bps_high: int = 0
-    irr_bps_low: int = 0
-    irr_bps_high: int = 0
-    months_low: int = 0
-    months_high: int = 0
-    land_value_pct_low: int = 0
-    land_value_pct_high: int = 0
+class _ScopeRead:
+    scope_label: str = ""
+    cost_status: str = "unknown"
+    cost_detail: str = ""
+    land_value_detail: str = ""
+    margin_detail: str = ""
+    irr_detail: str = ""
+    timing_status: str = "unknown"
+    timing_detail: str = ""
+    explicit_costs: tuple[str, ...] = ()
+    explicit_timing: tuple[str, ...] = ()
 
 
 def build_acquisition_judgment(
@@ -280,6 +292,7 @@ def build_acquisition_judgment(
         controlling_facts=controlling_facts,
         sanity_corrections=sanity_corrections,
         risk_items=risk_items,
+        critical_path=critical_path,
         omission_assessments=omission_assessments,
         contradictions=contradictions,
         recommendation=recommendation,
@@ -755,13 +768,14 @@ def _build_risk_items(issues: list[CanonicalIssue], *, lot_count: int | None) ->
             issue.title.lower(),
         ),
     )
-    killer_ids = _true_deal_killer_ids(ranked_issues)
-    primary_driver_ids = _primary_driver_ids(ranked_issues, killer_ids)
+    primary_driver_id = _primary_driver_id(ranked_issues)
+    secondary_driver_ids = _secondary_driver_ids(ranked_issues, primary_driver_id)
 
     items: list[AcquisitionRiskItem] = []
     for issue in ranked_issues:
-        bucket = _risk_bucket_for_issue(issue, killer_ids, primary_driver_ids)
-        estimate = _economic_estimate_for_issue(issue, lot_count=lot_count)
+        bucket = _risk_bucket_for_issue(issue, primary_driver_id, secondary_driver_ids)
+        primary_lever = _primary_lever_for_issue(issue)
+        scope_read = _scope_read_for_issue(issue, primary_lever=primary_lever, lot_count=lot_count)
         items.append(
             AcquisitionRiskItem(
                 bucket=bucket,
@@ -780,60 +794,49 @@ def _build_risk_items(issues: list[CanonicalIssue], *, lot_count: int | None) ->
                 issue_id=issue.issue_id,
                 citations=issue.citations[:3],
                 source_documents=issue.source_documents[:3],
-                deal_shaping=bucket in {"True Deal Killers", "Primary Drivers of Price"},
-                cost_impact=_cost_impact_text(issue, estimate, lot_count=lot_count),
-                land_value_impact=_land_value_impact_text(issue, estimate, lot_count=lot_count),
-                margin_impact=_margin_impact_text(issue, estimate),
-                irr_impact=_irr_impact_text(issue, estimate),
-                timing_impact=_timing_impact_text(issue, estimate),
-                price_response=_price_response_text(issue, estimate, bucket=bucket, lot_count=lot_count),
-                terms_response=_terms_response_text(issue, bucket=bucket),
-                timing_response=_timing_response_text(issue, estimate),
-                contingency_response=_contingency_response_text(issue),
+                deal_shaping=bucket in {"Primary Deal Driver", "Secondary Drivers"},
+                primary_lever=primary_lever,
+                cost_impact=scope_read.cost_detail,
+                land_value_impact=scope_read.land_value_detail,
+                margin_impact=scope_read.margin_detail,
+                irr_impact=scope_read.irr_detail,
+                timing_impact=scope_read.timing_detail,
+                price_response=_price_response_text(primary_lever=primary_lever, scope_read=scope_read),
+                terms_response=_terms_response_text(issue, primary_lever=primary_lever, bucket=bucket, scope_read=scope_read),
+                timing_response=_timing_response_text(issue, primary_lever=primary_lever, scope_read=scope_read),
+                contingency_response=_contingency_response_text(issue, primary_lever=primary_lever, bucket=bucket),
             )
         )
     items.sort(key=lambda item: (_BUCKET_ORDER.get(item.bucket, 9), 0 if item.deal_shaping else 1, item.title.lower()))
     return items
 
 
-def _true_deal_killer_ids(ranked_issues: list[CanonicalIssue]) -> set[str]:
-    killer_ids: set[str] = set()
+def _primary_driver_id(ranked_issues: list[CanonicalIssue]) -> str | None:
     for issue in ranked_issues:
-        if issue.decision_action == "treat as fatal":
-            killer_ids.add(issue.issue_id)
-            break
-        if (
-            issue.acquisition_severity == "CRITICAL"
-            and issue.blocking_flag
-            and issue.fixability == "low"
-            and deal_impact_type_for_issue(issue) in {"legal/title risk", "entitlement risk"}
-        ):
-            killer_ids.add(issue.issue_id)
-            break
-    return killer_ids
+        if not _noise_issue(issue):
+            return issue.issue_id
+    return None
 
 
-def _primary_driver_ids(ranked_issues: list[CanonicalIssue], killer_ids: set[str]) -> set[str]:
+def _secondary_driver_ids(ranked_issues: list[CanonicalIssue], primary_driver_id: str | None) -> set[str]:
     selected: set[str] = set()
-    deal_shaping_count = len(killer_ids)
     for issue in ranked_issues:
-        if issue.issue_id in killer_ids or _noise_issue(issue):
+        if issue.issue_id == primary_driver_id or _noise_issue(issue):
             continue
-        if deal_shaping_count >= _DEAL_SHAPING_LIMIT:
+        if len(selected) >= _SECONDARY_DRIVER_LIMIT:
             break
         selected.add(issue.issue_id)
-        deal_shaping_count += 1
     return selected
 
 
-def _risk_bucket_for_issue(issue: CanonicalIssue, killer_ids: set[str], primary_driver_ids: set[str]) -> str:
-    if issue.issue_id in killer_ids:
-        return "True Deal Killers"
-    if issue.issue_id in primary_driver_ids:
-        return "Primary Drivers of Price"
+def _risk_bucket_for_issue(issue: CanonicalIssue, primary_driver_id: str | None, secondary_driver_ids: set[str]) -> str:
+    if issue.issue_id == primary_driver_id:
+        return "Primary Deal Driver"
+    if issue.issue_id in secondary_driver_ids:
+        return "Secondary Drivers"
     if _noise_issue(issue):
         return "Noise"
-    return "Secondary Execution Risks"
+    return "Supporting Risks"
 
 
 def _noise_issue(issue: CanonicalIssue) -> bool:
@@ -845,229 +848,188 @@ def _noise_issue(issue: CanonicalIssue) -> bool:
     )
 
 
-def _economic_estimate_for_issue(issue: CanonicalIssue, *, lot_count: int | None) -> _EconomicEstimate:
-    factor = _severity_factor(issue)
-    months_low, months_high = _timing_month_range(issue)
+def _primary_lever_for_issue(issue: CanonicalIssue) -> str:
+    signal_text = _issue_signal_text(issue)
+    if issue.decision_action == "treat as fatal":
+        return "closeability"
+    if issue.category in {"Title / Access Concerns", "Entitlement Status"} and (issue.blocking_flag or issue.gating_item):
+        return "closeability"
+    if issue.category in {"Fee / Exaction Burden", "Budget / Cost Reliability"}:
+        return "price"
+    if _MONEY_SIGNAL_RE.search(_issue_source_text(issue)) or any(
+        term in signal_text
+        for term in ("seller credit", "purchase price", "price adjustment", "basis", "cost stack", "fee", "fees", "bid", "proposal", "estimate")
+    ):
+        return "price"
+    if issue.schedule_impact_classification != "non-blocking" or any(
+        term in signal_text
+        for term in ("delay", "backlog", "schedule", "timing", "permit", "final map", "grading", "vertical")
+    ):
+        return "timing"
+    if issue.category in {"Title / Access Concerns", "Entitlement Status"}:
+        return "closeability"
+    return "execution complexity"
 
-    if issue.category == "Title / Access Concerns":
-        return _EconomicEstimate(
-            cost_low_total=int(50_000 * factor),
-            cost_high_total=int(250_000 * factor),
-            margin_bps_low=25,
-            margin_bps_high=100,
-            irr_bps_low=50,
-            irr_bps_high=250,
-            months_low=months_low,
-            months_high=months_high,
-            land_value_pct_low=5,
-            land_value_pct_high=15,
+
+def _scope_read_for_issue(issue: CanonicalIssue, *, primary_lever: str, lot_count: int | None) -> _ScopeRead:
+    del lot_count
+    signal_text = _issue_signal_text(issue)
+    source_text = _issue_source_text(issue)
+    scope_label = _scope_label_for_issue(signal_text)
+    explicit_costs = tuple(unique_preserve_order(match.strip() for match in _MONEY_SIGNAL_RE.findall(source_text))[:2])
+    explicit_timing = tuple(unique_preserve_order(match.strip() for match in _TIMING_SIGNAL_RE.findall(source_text))[:2])
+
+    if explicit_costs:
+        cost_status = "known"
+        cost_detail = _status_line(
+            "known",
+            f"readable support cites {', '.join(explicit_costs)} tied to {scope_label or 'this issue'}.",
         )
-    if issue.category in {"Entitlement Status", "Schedule Risks"}:
-        return _EconomicEstimate(
-            carry_low_per_month=int(100_000 * factor),
-            carry_high_per_month=int(250_000 * factor),
-            margin_bps_low=75,
-            margin_bps_high=250,
-            irr_bps_low=75,
-            irr_bps_high=300,
-            months_low=months_low,
-            months_high=months_high,
-            land_value_pct_low=2,
-            land_value_pct_high=10,
+    elif scope_label:
+        cost_status = "estimable"
+        cost_detail = _status_line(
+            "estimable",
+            f"the package identifies {scope_label}, but no current bid, fee backup, or seller-backed amount is attached.",
+        )
+    else:
+        cost_status = "unknown"
+        cost_detail = _status_line(
+            "unknown",
+            "the current readable package does not isolate a priced scope for this issue.",
         )
 
-    per_lot_templates = {
-        "Environmental Risks": (3_000, 15_000),
-        "Geotechnical Risks": (5_000, 25_000),
-        "Flood / Drainage Issues": (4_000, 20_000),
-        "Utilities / Infrastructure Issues": (5_000, 18_000),
-        "Offsite Obligations": (10_000, 35_000),
-        "Fee / Exaction Burden": (5_000, 20_000),
-        "Budget / Cost Reliability": (7_500, 30_000),
-    }
-    low_per_lot, high_per_lot = per_lot_templates.get(issue.category, (2_500, 10_000))
-    low_per_lot = int(low_per_lot * factor)
-    high_per_lot = int(high_per_lot * factor)
-    if lot_count is not None:
-        return _EconomicEstimate(
-            cost_low_total=low_per_lot * lot_count,
-            cost_high_total=high_per_lot * lot_count,
-            cost_low_per_lot=low_per_lot,
-            cost_high_per_lot=high_per_lot,
-            margin_bps_low=100,
-            margin_bps_high=400,
-            irr_bps_low=50,
-            irr_bps_high=200,
-            months_low=months_low,
-            months_high=months_high,
+    if primary_lever == "price":
+        if cost_status == "known":
+            land_value_detail = _status_line("estimable", "land value should move with the cited cost once it is carried into basis.")
+            margin_detail = _status_line("estimable", "margin moves directly with the cited scope, but no disciplined spread is supportable from the package alone.")
+            irr_detail = _status_line("estimable", "IRR moves once the cited scope is carried through the current close date and business plan.")
+        elif cost_status == "estimable":
+            land_value_detail = _status_line("estimable", f"land value should move once {scope_label or 'the scope'} is refreshed with current pricing.")
+            margin_detail = _status_line("estimable", "margin impact is real, but it should be sized only after the missing bid or fee support is loaded.")
+            irr_detail = _status_line("unknown", "IRR should not be sized until the price-side scope is quantified and timed.")
+        else:
+            land_value_detail = _status_line("unknown", "land-basis impact cannot be sized from the current package.")
+            margin_detail = _status_line("unknown", "price pressure is plausible, but no defensible amount is supported.")
+            irr_detail = _status_line("unknown", "IRR impact is not supportable without a quantified price-side scope.")
+    elif primary_lever == "timing":
+        land_value_detail = _status_line("estimable", "land value changes only through carry if timing slips, but the duration is not defensible yet.")
+        margin_detail = _status_line("estimable", "margin leakage comes through carry and overhead if the blocker slips, not through a fabricated cost range.")
+        irr_detail = _status_line("estimable", "IRR is timing-sensitive here, but the package does not defend a specific duration yet.")
+    elif primary_lever == "closeability":
+        land_value_detail = _status_line("unknown", "value is binary until the closeability issue is cured or papered.")
+        margin_detail = _status_line("unknown", "this is a closeability decision first, not a margin-tuning item.")
+        irr_detail = _status_line("unknown", "IRR is not the right frame until the deal is actually closeable.")
+    else:
+        land_value_detail = _status_line("estimable", "value impact depends on how much of the execution scope converts into real field cost or redesign.")
+        margin_detail = _status_line("estimable", "margin depends on whether the execution scope resolves through field cost, redesign, or coordination only.")
+        irr_detail = _status_line("unknown", "IRR should not be sized until the execution scope is translated into actual cost or delay.")
+
+    if explicit_timing:
+        timing_status = "known"
+        timing_detail = _status_line("known", f"readable support references {', '.join(explicit_timing)} of timing exposure.")
+    elif primary_lever in {"timing", "closeability"} or issue.blocking_flag or issue.critical_path_flag:
+        timing_status = "estimable"
+        timing_detail = _status_line(
+            "estimable",
+            f"this is a blocker to {_close_milestone_for_issue(issue) or 'the next execution milestone'}, but the package does not support a defensible duration yet.",
         )
-    return _EconomicEstimate(
-        cost_low_per_lot=low_per_lot,
-        cost_high_per_lot=high_per_lot,
-        margin_bps_low=100,
-        margin_bps_high=400,
-        irr_bps_low=50,
-        irr_bps_high=200,
-        months_low=months_low,
-        months_high=months_high,
+    else:
+        timing_status = "unknown"
+        timing_detail = _status_line("unknown", "no specific schedule duration is supported by the current package.")
+
+    return _ScopeRead(
+        scope_label=scope_label,
+        cost_status=cost_status,
+        cost_detail=cost_detail,
+        land_value_detail=land_value_detail,
+        margin_detail=margin_detail,
+        irr_detail=irr_detail,
+        timing_status=timing_status,
+        timing_detail=timing_detail,
+        explicit_costs=explicit_costs,
+        explicit_timing=explicit_timing,
     )
 
 
-def _severity_factor(issue: CanonicalIssue) -> float:
-    return {
-        "LOW": 0.7,
-        "MODERATE": 1.0,
-        "HIGH": 1.3,
-        "CRITICAL": 1.6,
-    }.get(issue.acquisition_severity, 1.0)
+def _status_line(status: str, detail: str) -> str:
+    return f"{status.title()}: {detail}"
 
 
-def _timing_month_range(issue: CanonicalIssue) -> tuple[int, int]:
-    base = {
-        "immediate blocker": (3, 9),
-        "pre-close blocker": (2, 6),
-        "pre-underwriting blocker": (1, 4),
-        "pre-final-map blocker": (2, 6),
-        "pre-vertical-start blocker": (1, 4),
-        "non-blocking": (0, 2),
-    }.get(issue.schedule_impact_classification, (1, 3))
-    if issue.category in {"Entitlement Status", "Title / Access Concerns", "Environmental Risks"}:
-        return (base[0] + 1, base[1] + 2)
-    return base
+def _scope_label_for_issue(signal_text: str) -> str:
+    for label, terms in _SCOPE_HINTS:
+        if any(term in signal_text for term in terms):
+            return label
+    return ""
 
 
-def _cost_impact_text(issue: CanonicalIssue, estimate: _EconomicEstimate, *, lot_count: int | None) -> str:
-    if (
-        estimate.cost_low_per_lot is not None
-        and estimate.cost_high_per_lot is not None
-        and estimate.cost_low_total is not None
-        and estimate.cost_high_total is not None
-    ):
-        return (
-            f"+${_format_money(estimate.cost_low_per_lot)}-${_format_money(estimate.cost_high_per_lot)}/lot "
-            f"(~${_format_money(estimate.cost_low_total)}-${_format_money(estimate.cost_high_total)} total at {lot_count} lots)."
-        )
-    if estimate.carry_low_per_month is not None and estimate.carry_high_per_month is not None:
-        total_low = estimate.carry_low_per_month * max(estimate.months_low, 1)
-        total_high = estimate.carry_high_per_month * max(estimate.months_high, 1)
-        return (
-            f"Carry and consultant burn of about ${_format_money(estimate.carry_low_per_month)}-"
-            f"${_format_money(estimate.carry_high_per_month)}/month; roughly ${_format_money(total_low)}-"
-            f"${_format_money(total_high)} total if timing slips by {estimate.months_low}-{estimate.months_high} months."
-        )
-    if estimate.cost_low_total is not None and estimate.cost_high_total is not None:
-        return (
-            f"Direct cure usually runs about ${_format_money(estimate.cost_low_total)}-"
-            f"${_format_money(estimate.cost_high_total)} total if the issue is administrative rather than redesign-heavy."
-        )
-    return f"Translate this as roughly +{issue.acquisition_severity.lower()}-tier cost pressure that still needs a numeric estimate before approval."
+def _price_response_text(*, primary_lever: str, scope_read: _ScopeRead) -> str:
+    if primary_lever != "price":
+        return ""
+    if scope_read.cost_status == "known":
+        return f"Reset price or require seller credit against {scope_read.scope_label or 'the cited scope'}."
+    if scope_read.cost_status == "estimable":
+        return f"Keep price floating until {scope_read.scope_label or 'the scope'} is refreshed with current bids or fee support."
+    return "Do not rely on a narrative reserve; quantify the missing scope before taking price credit."
 
 
-def _land_value_impact_text(issue: CanonicalIssue, estimate: _EconomicEstimate, *, lot_count: int | None) -> str:
-    if (
-        estimate.cost_low_per_lot is not None
-        and estimate.cost_high_per_lot is not None
-        and estimate.cost_low_total is not None
-        and estimate.cost_high_total is not None
-    ):
-        return (
-            f"Land value should move roughly dollar-for-dollar with the direct site delta, or -${_format_money(estimate.cost_low_per_lot)}-"
-            f"${_format_money(estimate.cost_high_per_lot)}/lot (~-${_format_money(estimate.cost_low_total)}-"
-            f"${_format_money(estimate.cost_high_total)} total) unless the seller cures or credits it."
-        )
-    if estimate.land_value_pct_high:
-        return f"Do not value the site as fully clean land yet; hold back roughly {estimate.land_value_pct_low}% to {estimate.land_value_pct_high}% of land value until this issue is cured."
-    return "Land value should discount for the unresolved carry and execution premium until the milestone is actually cleared."
+def _terms_response_text(issue: CanonicalIssue, *, primary_lever: str, bucket: str, scope_read: _ScopeRead) -> str:
+    del scope_read
+    if primary_lever == "closeability":
+        return "Make cure of this item a condition to close, with walk rights if the cure is not delivered."
+    if primary_lever == "timing":
+        return f"Use milestone-based closing or hard-money release tied to {_close_milestone_for_issue(issue) or 'the next execution milestone'}."
+    if primary_lever == "price":
+        return "Use seller credit, price reset, or a true-up mechanic rather than treating the issue as a soft reserve."
+    if bucket != "Noise":
+        return "Paper scope owner, reimbursement, and design responsibility explicitly so the issue does not drift post-close."
+    return ""
 
 
-def _margin_impact_text(issue: CanonicalIssue, estimate: _EconomicEstimate) -> str:
-    if issue.category == "Title / Access Concerns":
-        return f"If the issue cures administratively, margin impact is roughly -{estimate.margin_bps_low} to -{estimate.margin_bps_high} bps; if it does not cure, this is a deal-validity problem rather than just a margin problem."
-    return f"Margin hit is roughly -{estimate.margin_bps_low} to -{estimate.margin_bps_high} bps if the buyer absorbs the current downside."
+def _timing_response_text(issue: CanonicalIssue, *, primary_lever: str, scope_read: _ScopeRead) -> str:
+    milestone = _close_milestone_for_issue(issue) or "the next execution milestone"
+    if primary_lever == "timing":
+        if scope_read.timing_status == "known":
+            return f"Carry the stated timing exposure to {milestone} in the business plan and outside dates."
+        return f"Do not promise {milestone} timing until the blocker is converted from a stage gate into a cleared deliverable."
+    if primary_lever == "closeability":
+        return f"Do not schedule close ahead of the cure path for {milestone}."
+    return ""
 
 
-def _irr_impact_text(issue: CanonicalIssue, estimate: _EconomicEstimate) -> str:
-    if issue.category == "Title / Access Concerns":
-        return f"IRR impact is roughly -{estimate.irr_bps_low} to -{estimate.irr_bps_high} bps if cured; if not cured, the issue should be treated as binary closeability risk."
-    return f"IRR impact is roughly -{estimate.irr_bps_low} to -{estimate.irr_bps_high} bps once both cost and delay are carried into the business plan."
-
-
-def _timing_impact_text(issue: CanonicalIssue, estimate: _EconomicEstimate) -> str:
-    if estimate.months_high <= 0:
-        return "Timing impact is likely limited to routine coordination, about 0-2 months."
-    return f"Timing impact is about +{estimate.months_low} to +{estimate.months_high} months if the issue stays on the buyer side of the critical path."
-
-
-def _price_response_text(
-    issue: CanonicalIssue,
-    estimate: _EconomicEstimate,
-    *,
-    bucket: str,
-    lot_count: int | None,
-) -> str:
-    if bucket == "True Deal Killers":
-        return "Do not try to solve this with a light haircut; either the seller cures it before close or the deal should not be underwritten as buyable land."
-    if estimate.cost_low_per_lot is not None and estimate.cost_high_per_lot is not None:
-        return (
-            f"Reduce price by about ${_format_money(estimate.cost_low_per_lot)}-${_format_money(estimate.cost_high_per_lot)}/lot "
-            f"(~${_format_money(estimate.cost_low_total or 0)}-${_format_money(estimate.cost_high_total or 0)} total) unless the seller takes the scope back."
-        )
-    if estimate.carry_low_per_month is not None and estimate.carry_high_per_month is not None:
-        return (
-            f"Do not pay full basis for a slip-sensitive deal; either haircut value by roughly {estimate.land_value_pct_low}% to {estimate.land_value_pct_high}% or keep the price floating until the next milestone clears."
-        )
-    return "Reduce price by the expected cure cost plus contingency, or keep the land basis provisional until the issue is solved."
-
-
-def _terms_response_text(issue: CanonicalIssue, *, bucket: str) -> str:
-    if issue.category == "Title / Access Concerns":
-        return "Require seller cure, title endorsement, or a recorded non-interference / easement fix before close."
-    if issue.category == "Entitlement Status":
-        return "Shift to milestone close, preferably Final Map or equivalent condition-closeout, rather than a blind current close."
-    if issue.category == "Environmental Risks":
-        return "Require seller indemnity, escrow holdback, or a defined remediation cost-sharing structure."
-    if issue.category in {"Geotechnical Risks", "Flood / Drainage Issues", "Utilities / Infrastructure Issues", "Offsite Obligations"}:
-        return "Require seller reimbursement, fixed-scope completion, or a true-up mechanism tied to final engineer and agency scope."
-    if issue.category in {"Fee / Exaction Burden", "Budget / Cost Reliability"}:
-        return "Use a price-adjustment or seller-credit mechanic tied to refreshed bids, fees, or the final site-cost stack."
-    if bucket == "True Deal Killers":
-        return "Keep full walk rights and avoid hard-money conversion until the issue is cured."
-    return "Add a targeted deliverable so the issue does not drift into a post-close surprise."
-
-
-def _timing_response_text(issue: CanonicalIssue, estimate: _EconomicEstimate) -> str:
-    milestone = _close_milestone_for_issue(issue)
-    if milestone:
-        return f"Move close or the next hard-money release to {milestone} if the seller is not curing this before then."
-    return f"Assume +{estimate.months_low} to +{estimate.months_high} months in the business plan until the issue is clearly off the critical path."
-
-
-def _contingency_response_text(issue: CanonicalIssue) -> str:
-    if issue.category == "Title / Access Concerns":
-        return "Keep title, access, and survey objections open until the cure is recorded or endorsed."
-    if issue.category == "Entitlement Status":
-        return "Keep entitlement / approval contingency open until the conditions tracker shows the path to Final Map, grading, and vertical is clean."
-    if issue.category == "Environmental Risks":
-        return "Keep environmental contingency open until follow-up scope, cost owner, and agency path are documented."
-    if issue.category in {"Geotechnical Risks", "Flood / Drainage Issues", "Utilities / Infrastructure Issues", "Offsite Obligations"}:
-        return "Keep engineering, utility, and offsite contingencies open until current plans, bids, and agency responsibility are reconciled."
-    if issue.category in {"Fee / Exaction Burden", "Budget / Cost Reliability"}:
-        return "Keep fee and site-cost contingencies open until the basis is refreshed with current third-party support."
-    return "Keep a targeted contingency open until the cited support is current enough to underwrite."
+def _contingency_response_text(issue: CanonicalIssue, *, primary_lever: str, bucket: str) -> str:
+    del issue
+    if bucket == "Noise":
+        return ""
+    if primary_lever == "closeability":
+        return "Keep the relevant closing contingency open until the cited cure is recorded, approved, or endorsed."
+    if primary_lever == "timing":
+        return "Keep the milestone contingency open until the blocker is removed from the stage path."
+    if primary_lever == "price":
+        return "Keep the cost or fee contingency open until the identified scope is backed by current third-party or agency support."
+    return "Keep a scope-specific diligence contingency open until responsibility and execution path are documented."
 
 
 def _close_milestone_for_issue(issue: CanonicalIssue) -> str | None:
     if issue.category in {"Title / Access Concerns", "Entitlement Status"}:
-        return "Final Map close"
+        return "close"
     if issue.category in {"Geotechnical Risks", "Flood / Drainage Issues", "Utilities / Infrastructure Issues", "Offsite Obligations"}:
-        return "Grading Permit or a milestone takedown after civil scope is fixed"
+        return "grading start"
     if issue.category in {"Fee / Exaction Burden", "Budget / Cost Reliability", "Schedule Risks"}:
-        return "a refreshed underwriting milestone before hard money or vertical release"
+        return "vertical start"
     return None
 
 
 def _build_clean_gating_chain(issues: list[CanonicalIssue]) -> list[AcquisitionCriticalPathStep]:
-    ranked = [issue for issue in issues if not _noise_issue(issue)]
+    ranked = [
+        issue
+        for issue in issues
+        if not _noise_issue(issue)
+        and (
+            issue.blocking_flag
+            or issue.critical_path_flag
+            or issue.schedule_impact_classification != "non-blocking"
+        )
+    ]
     ranked.sort(
         key=lambda issue: (
             0 if issue.blocking_flag else 1,
@@ -1132,44 +1094,66 @@ def _build_investment_decision(
     controlling_facts: list[AcquisitionControllingFact],
     sanity_corrections: list[AcquisitionSanityCorrection],
     risk_items: list[AcquisitionRiskItem],
+    critical_path: list[AcquisitionCriticalPathStep],
     omission_assessments: list[OmissionAssessment],
     contradictions: list[ContradictionFinding],
     recommendation: RecommendationDecision,
 ) -> AcquisitionDecision:
-    killers = [item for item in risk_items if item.bucket == "True Deal Killers"]
-    primary = [item for item in risk_items if item.bucket == "Primary Drivers of Price"]
-    secondary = [item for item in risk_items if item.bucket == "Secondary Execution Risks"]
+    primary = next((item for item in risk_items if item.bucket == "Primary Deal Driver"), None)
+    secondary = [item for item in risk_items if item.bucket == "Secondary Drivers"]
+    supporting = [item for item in risk_items if item.bucket == "Supporting Risks"]
 
     posture = _normalize_posture(recommendation.posture)
-    if killers:
+    if primary is not None and primary.primary_lever == "closeability" and (primary.curability == "low" or primary.timing == "immediate blocker"):
         posture = "Do Not Advance"
-    elif primary or _material_unknowns(omission_assessments) or contradictions:
+    elif primary is not None or secondary or _material_unknowns(omission_assessments) or contradictions:
         posture = "Advance Only If"
     else:
         posture = "Advance"
 
     biggest_unknown_text, biggest_unknown_citations = _biggest_unknown(omission_assessments, contradictions, sanity_corrections)
-    top_real_risks = [
-        f"{item.title}: {item.cost_impact} {item.timing_impact}"
-        for item in (killers + primary + secondary)[:3]
-    ]
+    primary_driver = f"{primary.title} ({primary.primary_lever})" if primary is not None else ""
+    secondary_drivers = [f"{item.title} ({item.primary_lever})" for item in secondary[:2]]
+    top_real_risks = []
+    if primary is not None:
+        top_real_risks.append(f"Primary driver - {primary.title} [{primary.primary_lever}]: {primary.cost_impact} {primary.timing_impact}")
+    top_real_risks.extend(
+        f"Secondary driver - {item.title} [{item.primary_lever}]: {item.cost_impact} {item.timing_impact}"
+        for item in secondary[:2]
+    )
     price_or_structure_changes = [
-        f"{item.title}: Price={item.price_response} Terms={item.terms_response} Timing={item.timing_response} Contingencies={item.contingency_response}"
-        for item in (killers + primary)[:3]
+        f"{item.title}: Lever={item.primary_lever}. "
+        + " ".join(
+            part
+            for part in (
+                f"Price={item.price_response}" if item.price_response else "",
+                f"Terms={item.terms_response}" if item.terms_response else "",
+                f"Timing={item.timing_response}" if item.timing_response else "",
+                f"Contingency={item.contingency_response}" if item.contingency_response else "",
+            )
+            if part
+        )
+        for item in ([primary] if primary is not None else []) + secondary[:2]
     ]
     rationale_parts = []
-    if killers:
-        rationale_parts.append(f"The deal does not clear IC because {killers[0].title.lower()} remains a binary closeability problem.")
-    elif primary:
+    if posture == "Do Not Advance" and primary is not None:
+        rationale_parts.append(f"Do not advance until {primary.title.lower()} is cured or papered; it is a closeability issue, not routine execution noise.")
+    elif primary is not None:
         rationale_parts.append(
-            f"The deal can only advance if {primary[0].title.lower()} and {primary[1].title.lower() if len(primary) > 1 else 'the main pricing driver'} are explicitly priced, papered, or cured."
+            f"Advance only if {primary.title.lower()} is handled through its main lever ({primary.primary_lever}) and the secondary drivers are kept out of the blind side of the close."
         )
     else:
         rationale_parts.append("The current package resolves the core land descriptor lanes well enough that the remaining issues should be underwritten as normal execution risk.")
 
     what_has_to_be_true = []
-    for item in killers + primary:
-        what_has_to_be_true.append(f"{item.title} must be either seller-cured or contractually priced and papered before close.")
+    if primary is not None:
+        what_has_to_be_true.append(
+            f"Primary driver: {primary.title} must be handled through {primary.primary_lever} before the deal is treated as approved."
+        )
+    for item in secondary[:2]:
+        what_has_to_be_true.append(
+            f"Secondary driver: {item.title} should be carried through {item.primary_lever}, not treated as solved by narrative alone."
+        )
     if not what_has_to_be_true:
         what_has_to_be_true.extend(
             f"{fact.label} stays as currently read: {fact.controlling_value}."
@@ -1177,10 +1161,14 @@ def _build_investment_decision(
             if not fact.controlling_value.startswith("Not cleanly established")
         )
 
+    close_requirements = _requirements_for_target(critical_path, "Final Map")
+    grading_requirements = _requirements_for_target(critical_path, "Grading Permit")
+    vertical_requirements = _requirements_for_target(critical_path, "Vertical Start")
+
     risks_underwritten = [
-        f"{item.title}: {item.cost_impact} {item.timing_impact}"
-        for item in secondary[:3]
-    ] or ["No secondary execution risk currently rises above routine diligence friction."]
+        f"{item.title}: lever={item.primary_lever}. {item.cost_impact} {item.timing_impact}"
+        for item in supporting[:3]
+    ] or ["No supporting risk currently rises above routine diligence friction."]
     corrected_fact_types = {correction.fact_type for correction in sanity_corrections}
     treated_as_solved = [
         f"{fact.label}: {fact.controlling_value}."
@@ -1193,13 +1181,18 @@ def _build_investment_decision(
     return AcquisitionDecision(
         posture=posture,
         rationale=clip_text(" ".join(rationale_parts), 260),
+        primary_driver=primary_driver,
+        secondary_drivers=secondary_drivers,
         top_real_risks=top_real_risks or ["No real risk currently rises above routine diligence noise in the reset ranking."],
         price_or_structure_changes=price_or_structure_changes or ["No specific price or structure change currently rises above routine contingency management."],
         biggest_unknown=biggest_unknown_text,
         what_has_to_be_true=what_has_to_be_true[:3],
+        close_requirements=close_requirements,
+        grading_requirements=grading_requirements,
+        vertical_requirements=vertical_requirements,
         risks_underwritten=risks_underwritten[:3],
         treated_as_solved=treated_as_solved[:3],
-        citations=_dedupe_citations(biggest_unknown_citations + [citation for item in (killers + primary)[:2] for citation in item.citations])[:3],
+        citations=_dedupe_citations(biggest_unknown_citations + [citation for item in ([primary] if primary is not None else []) + secondary[:2] for citation in item.citations])[:3],
     )
 
 
@@ -1222,13 +1215,13 @@ def _build_weak_acquisition_misses(
         )
         break
 
-    primary = next((item for item in risk_items if item.bucket == "Primary Drivers of Price"), None)
+    primary = next((item for item in risk_items if item.bucket == "Primary Deal Driver"), None)
     if primary is not None:
         insights.append(
             AcquisitionInsight(
                 title="The biggest issue should change paper, not just commentary",
                 detail=clip_text(
-                    f"{primary.title} is a price-and-terms issue because {primary.cost_impact} {primary.price_response}",
+                    f"{primary.title} is mainly a {primary.primary_lever} issue, so the recommendation should move that lever in paper rather than spreading the impact across everything.",
                     220,
                 ),
                 citations=primary.citations[:3],
@@ -1271,6 +1264,15 @@ def _build_weak_acquisition_misses(
         if len(unique) >= 3:
             break
     return unique
+
+
+def _requirements_for_target(critical_path: list[AcquisitionCriticalPathStep], target: str) -> list[str]:
+    requirements = [
+        f"{step.blocker}: {clip_text(step.why_it_blocks, 170)}"
+        for step in critical_path
+        if step.target == target
+    ]
+    return requirements[:3] or [f"No blocker is currently isolated on the path to {target.lower()}."]
 
 
 def _count_candidate_confidence(excerpt: str) -> str:
@@ -1547,19 +1549,29 @@ def _excerpt(text: str, start: int, end: int, *, max_chars: int = 180) -> str:
 
 
 def _issue_signal_text(issue: CanonicalIssue) -> str:
+    return _issue_source_text(issue).lower()
+
+
+def _issue_source_text(issue: CanonicalIssue) -> str:
     return " ".join(
-        part.lower()
+        part
         for part in (
             issue.title,
             issue.category,
+            " ".join(issue.best_evidence),
+            " ".join(issue.core_facts),
             issue.blocking_reason,
             issue.critical_path_reason,
             issue.practical_impact,
+            issue.likely_cost_effect,
             issue.likely_schedule_effect,
             issue.likely_closing_effect,
+            issue.likely_structure_effect,
             issue.likely_underwriting_effect,
             issue.why_it_matters,
             issue.likely_implication,
+            issue.what_would_resolve_it,
+            " ".join(issue.open_questions),
             " ".join(issue.gating_flags),
         )
         if part

@@ -26,6 +26,7 @@ from land_due_diligence_agent.output.deal_writer import (
     write_manifest_csv,
 )
 from land_due_diligence_agent.output.docx_writer import write_due_diligence_report_docx
+from land_due_diligence_agent.parsing.cache import compute_file_hash, load_cached_parse, save_cached_parse
 from land_due_diligence_agent.parsing.service import parse_document
 from land_due_diligence_agent.utils.files import ensure_directory
 from land_due_diligence_agent.utils.logging import close_logging, configure_logging
@@ -110,8 +111,46 @@ def run_local_deal_pipeline(
 
             result.supported_files += 1
             try:
+                cached_parse = load_cached_parse(file_path, deal_paths.source_drop_dir, deal_paths.extraction_cache_dir)
+                if cached_parse is not None:
+                    document = cached_parse.document
+                    classification = cached_parse.classification
+                    manifest_entry.file_hash = cached_parse.file_hash
+                    manifest_entry.cache_hit = True
+                    manifest_entry.ocr_used = bool(document.ocr_pages)
+                    manifest_entry.ocr_pages = document.ocr_pages.copy()
+                    manifest_entry.extraction_status = "success"
+                    manifest_entry.notes.append("Extraction cache hit; reused prior parsed text because the source file is unchanged.")
+                    manifest_entry.notes.extend(document.warnings)
+                    manifest_entry.extracted_text_path = str(cached_parse.text_path)
+                    manifest_entry.structured_text_path = str(cached_parse.metadata_path)
+                    if settings.debug_mode:
+                        write_document_artifacts(deal_paths.text_run_dir, document, classification)
+                    processed_documents.append(
+                        ProcessedDocument(
+                            document=document,
+                            classification=classification,
+                            manifest_entry=manifest_entry,
+                        )
+                    )
+                    result.extracted_files += 1
+                    result.cache_hits += 1
+                    if document.ocr_pages:
+                        result.ocr_files += 1
+                    logger.info("Reused cached extraction for %s.", manifest_entry.relative_path)
+                    continue
+
                 document = parse_document(file_path, deal_paths.source_drop_dir)
                 classification = classify_document(file_path, document.normalized_text)
+                file_hash = compute_file_hash(file_path)
+                cache_text_path, cache_metadata_path = save_cached_parse(
+                    path=file_path,
+                    input_root=deal_paths.source_drop_dir,
+                    cache_root=deal_paths.extraction_cache_dir,
+                    document=document,
+                    classification=classification,
+                    file_hash=file_hash,
+                )
                 text_path = None
                 json_path = None
                 if settings.debug_mode:
@@ -121,11 +160,18 @@ def run_local_deal_pipeline(
                 manifest_entry.category = classification.category
                 manifest_entry.classification_confidence = classification.confidence
                 manifest_entry.ocr_used = bool(document.ocr_pages)
+                manifest_entry.file_hash = file_hash
+                manifest_entry.cache_hit = False
                 manifest_entry.ocr_pages = document.ocr_pages.copy()
                 manifest_entry.extraction_status = "success"
                 manifest_entry.notes.extend(document.warnings)
-                manifest_entry.extracted_text_path = str(text_path) if text_path is not None else None
-                manifest_entry.structured_text_path = str(json_path) if json_path is not None else None
+                manifest_entry.extracted_text_path = str(cache_text_path)
+                manifest_entry.structured_text_path = str(cache_metadata_path)
+                if text_path is not None and json_path is not None:
+                    manifest_entry.notes.append(
+                        "Debug extraction artifacts written to "
+                        f"{text_path.relative_to(deal_paths.deal_folder).as_posix()} and {json_path.relative_to(deal_paths.deal_folder).as_posix()}."
+                    )
 
                 processed_documents.append(
                     ProcessedDocument(
@@ -223,6 +269,7 @@ def _resolve_deal_paths(deal_folder: Path, settings: Settings, run_id: str) -> D
         )
 
     working_dir = ensure_directory(deal_folder / settings.deal_working_subdir)
+    extraction_cache_dir = ensure_directory(working_dir / "extraction_cache")
     text_extraction_dir = ensure_directory(deal_folder / settings.text_extraction_subdir)
     metadata_dir = ensure_directory(deal_folder / settings.metadata_subdir)
     output_dir = ensure_directory(deal_folder / settings.report_output_subdir)
@@ -240,6 +287,7 @@ def _resolve_deal_paths(deal_folder: Path, settings: Settings, run_id: str) -> D
         deal_folder=deal_folder,
         source_drop_dir=source_drop_dir,
         working_dir=working_dir,
+        extraction_cache_dir=extraction_cache_dir,
         text_extraction_dir=text_extraction_dir,
         metadata_dir=metadata_dir,
         output_dir=output_dir,
@@ -336,6 +384,7 @@ def _write_run_artifacts(
         "deal_name": result.deal_name,
         "deal_folder": str(result.deal_paths.deal_folder),
         "source_drop_dir": str(result.deal_paths.source_drop_dir),
+        "extraction_cache_dir": str(result.deal_paths.extraction_cache_dir),
         "text_extraction_dir": str(result.deal_paths.text_extraction_dir),
         "metadata_dir": str(result.deal_paths.metadata_dir),
         "report_dir": str(result.deal_paths.output_dir),
@@ -346,6 +395,7 @@ def _write_run_artifacts(
         "failed_files": result.failed_files,
         "unsupported_files": result.unsupported_files,
         "ocr_files": result.ocr_files,
+        "cache_hits": result.cache_hits,
         "category_counts": result.category_counts,
         "issue_registry_validation": result.issue_registry.validation_stats,
         "run_log_path": result.run_log_path,

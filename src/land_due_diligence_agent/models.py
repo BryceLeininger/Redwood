@@ -841,6 +841,7 @@ class AcquisitionRiskItem:
     citations: list[Citation] = field(default_factory=list)
     source_documents: list[str] = field(default_factory=list)
     deal_shaping: bool = False
+    primary_lever: str = ""
     cost_impact: str = ""
     land_value_impact: str = ""
     margin_impact: str = ""
@@ -881,10 +882,15 @@ class AcquisitionDecision:
 
     posture: str = "Advance Only If"
     rationale: str = ""
+    primary_driver: str = ""
+    secondary_drivers: list[str] = field(default_factory=list)
     top_real_risks: list[str] = field(default_factory=list)
     price_or_structure_changes: list[str] = field(default_factory=list)
     biggest_unknown: str = ""
     what_has_to_be_true: list[str] = field(default_factory=list)
+    close_requirements: list[str] = field(default_factory=list)
+    grading_requirements: list[str] = field(default_factory=list)
+    vertical_requirements: list[str] = field(default_factory=list)
     risks_underwritten: list[str] = field(default_factory=list)
     treated_as_solved: list[str] = field(default_factory=list)
     citations: list[Citation] = field(default_factory=list)

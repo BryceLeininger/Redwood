@@ -6,10 +6,12 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from docx import Document
 
 from land_due_diligence_agent.config import Settings
+import land_due_diligence_agent.deal_pipeline as deal_pipeline_module
 from land_due_diligence_agent.deal_pipeline import run_local_deal_pipeline
 
 
@@ -42,6 +44,11 @@ class LocalDealPipelineTests(unittest.TestCase):
             }
             self.assertEqual(statuses["image.png"], "unsupported")
             self.assertEqual(statuses["purchase_agreement.txt"], "success")
+            purchase_manifest = next(item for item in manifest_payload["files"] if item["file_name"] == "purchase_agreement.txt")
+            self.assertTrue(purchase_manifest["file_hash"])
+            self.assertFalse(purchase_manifest["cache_hit"])
+            self.assertTrue(Path(purchase_manifest["extracted_text_path"]).exists())
+            self.assertTrue(Path(purchase_manifest["structured_text_path"]).exists())
 
             registry_payload = json.loads(Path(result.issue_registry_path).read_text(encoding="utf-8"))
             self.assertTrue(registry_payload["facts"])
@@ -139,6 +146,65 @@ class LocalDealPipelineTests(unittest.TestCase):
             self.assertTrue((deal_folder / "03_Metadata" / result.run_id / "run_summary.json").exists())
             self.assertTrue((deal_folder / "04_Output" / result.run_id / "Due_Diligence_Review.docx").exists())
             self.assertTrue(Path(result.review_report_path).exists())
+
+    def test_pipeline_reuses_cached_extraction_for_unchanged_files(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            deal_folder, _ = self._build_sample_deal(Path(temp_dir))
+
+            settings = Settings(log_level="INFO")
+            first_result, first_exit_code = run_local_deal_pipeline(deal_folder, settings=settings)
+
+            self.assertEqual(first_exit_code, 0)
+            self.assertEqual(first_result.cache_hits, 0)
+
+            with patch(
+                "land_due_diligence_agent.deal_pipeline.parse_document",
+                side_effect=AssertionError("parse_document should not run for unchanged files"),
+            ):
+                second_result, second_exit_code = run_local_deal_pipeline(deal_folder, settings=settings)
+
+            self.assertEqual(second_exit_code, 0)
+            self.assertEqual(second_result.cache_hits, 3)
+
+            manifest_payload = json.loads(Path(second_result.manifest_json_path).read_text(encoding="utf-8"))
+            cache_flags = {
+                item["file_name"]: item["cache_hit"]
+                for item in manifest_payload["files"]
+                if item["supported"]
+            }
+            self.assertTrue(cache_flags["purchase_agreement.txt"])
+            self.assertTrue(cache_flags["title_report.txt"])
+            self.assertTrue(cache_flags["environment_notes.csv"])
+
+    def test_pipeline_reprocesses_changed_file_when_source_updates(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            deal_folder, source_drop = self._build_sample_deal(Path(temp_dir))
+
+            settings = Settings(log_level="INFO")
+            first_result, first_exit_code = run_local_deal_pipeline(deal_folder, settings=settings)
+
+            self.assertEqual(first_exit_code, 0)
+            purchase_path = source_drop / "purchase_agreement.txt"
+            purchase_path.write_text(
+                "Purchase Price: $12,750,000. APN: 123-456-78. Zoning: R-1. 84 lots. Seller credit under discussion.",
+                encoding="utf-8",
+            )
+
+            with patch(
+                "land_due_diligence_agent.deal_pipeline.parse_document",
+                wraps=deal_pipeline_module.parse_document,
+            ) as mocked_parse_document:
+                second_result, second_exit_code = run_local_deal_pipeline(deal_folder, settings=settings)
+
+            self.assertEqual(second_exit_code, 0)
+            self.assertGreaterEqual(mocked_parse_document.call_count, 1)
+            self.assertGreaterEqual(second_result.cache_hits, 2)
+
+            manifest_payload = json.loads(Path(second_result.manifest_json_path).read_text(encoding="utf-8"))
+            purchase_manifest = next(item for item in manifest_payload["files"] if item["file_name"] == "purchase_agreement.txt")
+            title_manifest = next(item for item in manifest_payload["files"] if item["file_name"] == "title_report.txt")
+            self.assertFalse(purchase_manifest["cache_hit"])
+            self.assertTrue(title_manifest["cache_hit"])
 
     def _build_sample_deal(self, root: Path) -> tuple[Path, Path]:
         deal_folder = root / "d1_375Diana"

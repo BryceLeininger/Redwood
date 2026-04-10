@@ -26,9 +26,9 @@ from land_due_diligence_agent.utils.text import normalize_text
 
 
 _ACQUISITION_BUCKETS = (
-    "True Deal Killers",
-    "Primary Drivers of Price",
-    "Secondary Execution Risks",
+    "Primary Deal Driver",
+    "Secondary Drivers",
+    "Supporting Risks",
     "Noise",
 )
 
@@ -794,6 +794,9 @@ def _build_deal_synthesis_markdown(synthesis: DealSynthesis) -> str:
 
     decision = judgment.investment_decision
     lines.extend(["## Investment Decision", ""])
+    lines.append(f"- Primary driver: {decision.primary_driver or 'No single primary deal driver is isolated beyond routine execution noise.'}")
+    lines.append("- Secondary drivers:")
+    lines.extend(f"- {item}" for item in (decision.secondary_drivers or ["No secondary driver rises above supporting execution risk."]))
     lines.append(f"- Decision: {decision.posture}. {decision.rationale}")
     lines.append("- Top 3 real risks:")
     lines.extend(f"- {item}" for item in (decision.top_real_risks or ["No real risk currently rises above routine diligence noise in the second-pass classification."]))
@@ -802,6 +805,12 @@ def _build_deal_synthesis_markdown(synthesis: DealSynthesis) -> str:
     lines.append(f"- Single biggest unknown: {decision.biggest_unknown or 'No single unknown currently stands above the rest of the issue set.'}")
     lines.append("- What has to be true:")
     lines.extend(f"- {item}" for item in (decision.what_has_to_be_true or ["No additional gating condition rises above the current reset risk ranking."]))
+    lines.append("- What must be true to close:")
+    lines.extend(f"- {item}" for item in (decision.close_requirements or ["No close blocker is currently isolated beyond routine closing work."]))
+    lines.append("- What must be true to start grading:")
+    lines.extend(f"- {item}" for item in (decision.grading_requirements or ["No grading-start blocker is currently isolated beyond routine engineering coordination."]))
+    lines.append("- What must be true for vertical start:")
+    lines.extend(f"- {item}" for item in (decision.vertical_requirements or ["No vertical-start blocker is currently isolated beyond routine budget and permit coordination."]))
     lines.append("- Risks underwritten:")
     lines.extend(f"- {item}" for item in (decision.risks_underwritten or ["No execution risk is currently being affirmatively underwritten beyond routine project friction."]))
     lines.append("- Treated as solved:")
@@ -907,6 +916,9 @@ def _build_investment_committee_brief_markdown(synthesis: DealSynthesis) -> str:
         lines.append("")
 
     lines.extend(["## Investment Decision", ""])
+    lines.append(f"- Primary driver: {decision.primary_driver or 'No single primary deal driver is isolated beyond routine execution noise.'}")
+    lines.append("- Secondary drivers:")
+    lines.extend(f"- {item}" for item in (decision.secondary_drivers or ["No secondary driver rises above supporting execution risk."]))
     lines.append(f"- Decision: {decision.posture}. {decision.rationale}")
     lines.append(f"- Underwrite confidence: {confidence_level}. {_compress_statement(confidence_reason, max_words=24, single_idea=False)}")
     lines.append("- Top 3 real risks:")
@@ -916,6 +928,12 @@ def _build_investment_committee_brief_markdown(synthesis: DealSynthesis) -> str:
     lines.append(f"- Single biggest unknown: {decision.biggest_unknown or 'No single unknown currently stands above the rest of the issue set.'}")
     lines.append("- What has to be true:")
     lines.extend(f"- {item}" for item in (decision.what_has_to_be_true or ["No additional gating condition rises above the current reset risk ranking."]))
+    lines.append("- What must be true to close:")
+    lines.extend(f"- {item}" for item in (decision.close_requirements or ["No close blocker is currently isolated beyond routine closing work."]))
+    lines.append("- What must be true to start grading:")
+    lines.extend(f"- {item}" for item in (decision.grading_requirements or ["No grading-start blocker is currently isolated beyond routine engineering coordination."]))
+    lines.append("- What must be true for vertical start:")
+    lines.extend(f"- {item}" for item in (decision.vertical_requirements or ["No vertical-start blocker is currently isolated beyond routine budget and permit coordination."]))
     lines.append("- Risks underwritten:")
     lines.extend(f"- {item}" for item in (decision.risks_underwritten or ["No execution risk is currently being affirmatively underwritten beyond routine project friction."]))
     lines.append("- Treated as solved:")
@@ -994,7 +1012,7 @@ def _build_investment_committee_brief_markdown(synthesis: DealSynthesis) -> str:
 def _acquisition_risk_markdown_line(item) -> str:
     segments = [
         f"{item.title}: {item.summary}",
-        f"Impact={item.impact}; timing={item.timing}; curability={item.curability}.",
+        f"Primary lever={item.primary_lever}; impact={item.impact}; timing={item.timing}; curability={item.curability}.",
     ]
     economic_segments = [
         segment

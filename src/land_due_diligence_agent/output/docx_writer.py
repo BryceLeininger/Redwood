@@ -110,9 +110,9 @@ _CONTROL_DOC_BUCKET_ORDER = {
 }
 _REAL_RISK_FLAGS = {"red flag", "yellow flag", "conflict / contradiction concern"}
 _ACQUISITION_BUCKETS = (
-    "True Deal Killers",
-    "Primary Drivers of Price",
-    "Secondary Execution Risks",
+    "Primary Deal Driver",
+    "Secondary Drivers",
+    "Supporting Risks",
     "Noise",
 )
 
@@ -547,6 +547,20 @@ def _add_investment_decision_section(document: Document, synthesis: DealSynthesi
     decision = synthesis.acquisition_judgment.investment_decision
     _add_section(document, "Investment Decision")
 
+    _add_subsection(document, "Primary Driver")
+    _add_bullet_items(
+        document,
+        [_SectionBullet(text=decision.primary_driver)]
+        or [_SectionBullet(text="No single primary deal driver is isolated beyond routine execution noise.")],
+    )
+
+    _add_subsection(document, "Secondary Drivers")
+    _add_bullet_items(
+        document,
+        [_SectionBullet(text=line) for line in decision.secondary_drivers]
+        or [_SectionBullet(text="No secondary driver rises above supporting execution risk.")],
+    )
+
     _add_subsection(document, "Decision")
     _add_bullet_items(
         document,
@@ -588,6 +602,27 @@ def _add_investment_decision_section(document: Document, synthesis: DealSynthesi
         document,
         [_SectionBullet(text=line) for line in decision.what_has_to_be_true]
         or [_SectionBullet(text="No additional gating condition rises above the current reset risk ranking.")],
+    )
+
+    _add_subsection(document, "What Must Be True To Close")
+    _add_bullet_items(
+        document,
+        [_SectionBullet(text=line) for line in decision.close_requirements]
+        or [_SectionBullet(text="No close blocker is currently isolated beyond routine closing work.")],
+    )
+
+    _add_subsection(document, "What Must Be True To Start Grading")
+    _add_bullet_items(
+        document,
+        [_SectionBullet(text=line) for line in decision.grading_requirements]
+        or [_SectionBullet(text="No grading-start blocker is currently isolated beyond routine engineering coordination.")],
+    )
+
+    _add_subsection(document, "What Must Be True For Vertical Start")
+    _add_bullet_items(
+        document,
+        [_SectionBullet(text=line) for line in decision.vertical_requirements]
+        or [_SectionBullet(text="No vertical-start blocker is currently isolated beyond routine budget and permit coordination.")],
     )
 
     _add_subsection(document, "Risks Underwritten")
@@ -1927,6 +1962,7 @@ def _sanity_correction_bullet(item: AcquisitionSanityCorrection) -> _SectionBull
 
 def _acquisition_risk_bullet(item: AcquisitionRiskItem) -> _SectionBullet:
     note_parts = [
+        f"Primary lever: {item.primary_lever}.",
         f"Impact: {item.impact}.",
         f"Timing: {item.timing}.",
         f"Curability: {item.curability}.",
