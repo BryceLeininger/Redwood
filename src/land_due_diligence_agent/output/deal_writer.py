@@ -120,6 +120,7 @@ def write_failure_artifact(output_root: Path, relative_path: Path, error_message
 
     failure_path = output_root / "failed" / relative_path.parent / f"{relative_path.name}.error.txt"
     ensure_directory(failure_path.parent)
+    failure_path.parent.mkdir(parents=True, exist_ok=True)
     failure_path.write_text(error_message.strip() + "\n", encoding="utf-8")
     return failure_path
 

@@ -99,6 +99,7 @@ def save_cached_parse(
     relative_path = path.relative_to(input_root)
     text_path, metadata_path = _cache_paths(cache_root, relative_path)
     ensure_directory(text_path.parent)
+    text_path.parent.mkdir(parents=True, exist_ok=True)
     raw_text = document.raw_text or document.normalized_text
     text_path.write_text(raw_text, encoding="utf-8")
 
@@ -135,6 +136,7 @@ def save_cached_parse(
             for chunk in document.chunks
         ],
     }
+    metadata_path.parent.mkdir(parents=True, exist_ok=True)
     metadata_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
     return text_path, metadata_path
 
