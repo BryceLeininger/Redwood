@@ -20,7 +20,6 @@ class DealPaths:
     deal_folder: Path
     source_drop_dir: Path
     working_dir: Path
-    extraction_cache_dir: Path
     text_extraction_dir: Path
     metadata_dir: Path
     output_dir: Path
@@ -64,8 +63,6 @@ class ManifestEntry:
     category: str
     classification_confidence: str
     ocr_used: bool
-    file_hash: str = ""
-    cache_hit: bool = False
     ocr_pages: list[int] = field(default_factory=list)
     extraction_status: str = "pending"
     notes: list[str] = field(default_factory=list)
@@ -166,7 +163,6 @@ class DealRunResult:
     failed_files: int = 0
     unsupported_files: int = 0
     ocr_files: int = 0
-    cache_hits: int = 0
     review_report_path: str = ""
     run_log_path: str = ""
     manifest_json_path: str = ""
