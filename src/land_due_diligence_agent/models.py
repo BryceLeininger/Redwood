@@ -832,6 +832,7 @@ class AcquisitionRiskItem:
     """IC-ready risk item grouped into a decisive acquisition bucket."""
 
     bucket: str
+    issue_class: str
     title: str
     summary: str
     impact: str
@@ -842,6 +843,9 @@ class AcquisitionRiskItem:
     source_documents: list[str] = field(default_factory=list)
     deal_shaping: bool = False
     primary_lever: str = ""
+    evidence_confidence: str = ""
+    stage_materiality: str = ""
+    direct_blocker_evidence: bool = False
     cost_impact: str = ""
     land_value_impact: str = ""
     margin_impact: str = ""
@@ -882,9 +886,17 @@ class AcquisitionDecision:
 
     posture: str = "Advance Only If"
     rationale: str = ""
+    deal_stage: str = ""
+    deal_stage_basis: str = ""
     primary_driver: str = ""
     secondary_drivers: list[str] = field(default_factory=list)
     top_real_risks: list[str] = field(default_factory=list)
+    true_blockers: list[str] = field(default_factory=list)
+    routine_items: list[str] = field(default_factory=list)
+    material_missing: list[str] = field(default_factory=list)
+    unsettled_facts: list[str] = field(default_factory=list)
+    material_unsettled_facts: list[str] = field(default_factory=list)
+    risk_elevation_guardrail: str = ""
     price_or_structure_changes: list[str] = field(default_factory=list)
     biggest_unknown: str = ""
     what_has_to_be_true: list[str] = field(default_factory=list)

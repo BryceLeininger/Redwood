@@ -37,7 +37,7 @@ from land_due_diligence_agent.models import (
     OmissionAssessment,
 )
 from land_due_diligence_agent.utils.files import ensure_directory
-from land_due_diligence_agent.utils.text import clip_text, unique_preserve_order
+from land_due_diligence_agent.utils.text import clip_text, tight_sentence, unique_preserve_order
 
 _MATERIAL_ISSUE_CATEGORIES = {
     "Title / Access Concerns",
@@ -225,109 +225,116 @@ def _write_minimal_report(document: Document, result: DealRunResult) -> None:
 def _write_structured_report(document: Document, result: DealRunResult, synthesis: DealSynthesis) -> None:
     fact_index = _build_fact_index(result.issue_registry.facts)
     material_issues = _material_issues(synthesis)
-    material_conflicts = _material_conflicts(result.issue_registry.conflicts)
-    missing_inputs = _material_missing_inputs(result, synthesis)
+    _add_short_bottom_line_section(document, result, synthesis, fact_index)
+    _add_deal_stage_section(document, result, synthesis, fact_index)
+    _add_short_top_risks_section(document, synthesis)
+    _add_gating_vs_routine_section(document, synthesis)
+    _add_material_missing_section(document, synthesis)
+    _add_overall_package_read_section(document, synthesis, material_issues)
 
-    _add_bottom_line_section(
-        document=document,
-        result=result,
-        synthesis=synthesis,
-        fact_index=fact_index,
-        material_issues=material_issues,
-        missing_inputs=missing_inputs,
+
+def _add_short_bottom_line_section(
+    document: Document,
+    result: DealRunResult,
+    synthesis: DealSynthesis,
+    fact_index: dict[str, list[FactRecord]],
+) -> None:
+    decision = synthesis.acquisition_judgment.investment_decision
+    _add_section(document, "BOTTOM LINE")
+    _add_bullet_items(
+        document,
+        [
+            _SectionBullet(text=tight_sentence(f"Decision: {decision.posture}. {decision.rationale}", 220), references=_citation_labels(decision.citations)),
+            _SectionBullet(text=tight_sentence(f"Deal read: {decision.deal_stage or 'stage not clearly established'}. Location { _location_text(fact_index, synthesis) }; scale { _scale_text(fact_index, synthesis) }.", 220)),
+            _SectionBullet(text=tight_sentence(decision.risk_elevation_guardrail or "Cannot conclude high-risk from provided documents without direct blocker evidence.", 220)),
+        ],
     )
-    _add_deal_impact_summary_section(document, material_issues)
-    _add_underwrite_confidence_section(document, synthesis, material_issues)
-    _add_sanity_corrections_section(document, synthesis)
-    _add_controlling_facts_section(document, synthesis)
-    _add_real_risk_classification_section(document, synthesis)
-    _add_critical_path_chain_section(document, synthesis)
-    _add_investment_decision_section(document, synthesis)
-    _add_weak_acquisitions_section(document, synthesis)
-    _add_key_documents_that_control_section(document, synthesis)
-    _add_deal_overview(document, result, synthesis, fact_index)
-    _add_gating_items_section(document, material_issues)
-    _add_category_section(
-        document=document,
-        title="Entitlement & Zoning",
-        fact_index=fact_index,
-        material_conflicts=material_conflicts,
-        material_issues=material_issues,
-        missing_inputs=missing_inputs,
-        fact_types=("jurisdiction", "zoning"),
-        issue_categories={"Entitlement Status"},
-        omission_categories={"Entitlement Status"},
-        first_pass_missing_categories={"Entitlement / Planning / Conditions"},
-        conflict_types={"zoning", "jurisdiction"},
+
+
+def _add_deal_stage_section(
+    document: Document,
+    result: DealRunResult,
+    synthesis: DealSynthesis,
+    fact_index: dict[str, list[FactRecord]],
+) -> None:
+    del result
+    decision = synthesis.acquisition_judgment.investment_decision
+    _add_section(document, "Deal Stage")
+    bullets = [
+        _SectionBullet(text=tight_sentence(f"Stage: {decision.deal_stage or 'Not reliably established from provided documents'}. {decision.deal_stage_basis}", 220), references=_citation_labels(decision.citations)),
+        _SectionBullet(text=tight_sentence(f"Location and scale: {_location_text(fact_index, synthesis)}; {_scale_text(fact_index, synthesis)}.", 220), references=_summary_references(fact_index, synthesis)),
+        _SectionBullet(text=tight_sentence(f"Current entitlement read: {synthesis.entitlement_status or 'Not reliably established from provided documents'}.", 220)),
+    ]
+    _add_bullet_items(document, bullets)
+
+
+def _add_short_top_risks_section(document: Document, synthesis: DealSynthesis) -> None:
+    decision = synthesis.acquisition_judgment.investment_decision
+    _add_section(document, "Top 3 Real Risks")
+    _add_bullet_items(
+        document,
+        [_SectionBullet(text=line) for line in decision.top_real_risks[:3]]
+        or [_SectionBullet(text="No real risk currently rises above routine closeout or normal execution friction.")],
     )
-    _add_category_section(
-        document=document,
-        title="Site & Product",
-        fact_index=fact_index,
-        material_conflicts=material_conflicts,
-        material_issues=material_issues,
-        missing_inputs=missing_inputs,
-        fact_types=("gross_acreage", "net_acreage", "site_acreage", "lot_count", "unit_count"),
-        issue_categories=set(),
-        omission_categories=set(),
-        first_pass_missing_categories={"Map / Plat / Improvement Plans", "Financial / underwriting support"},
-        conflict_types={"gross_acreage", "net_acreage", "site_acreage", "lot_count", "unit_count"},
+
+
+def _add_gating_vs_routine_section(document: Document, synthesis: DealSynthesis) -> None:
+    decision = synthesis.acquisition_judgment.investment_decision
+    _add_section(document, "What Is Truly Gating Vs Routine")
+    _add_subsection(document, "Gating")
+    _add_bullet_items(
+        document,
+        [_SectionBullet(text=line) for line in decision.true_blockers]
+        or [_SectionBullet(text="No direct blocker is established from the provided documents.")],
     )
-    _add_category_section(
-        document=document,
-        title="Title & Ownership",
-        fact_index=fact_index,
-        material_conflicts=material_conflicts,
-        material_issues=material_issues,
-        missing_inputs=missing_inputs,
-        fact_types=("apn", "owner_name"),
-        issue_categories={"Title / Access Concerns"},
-        omission_categories={"Title / Access Concerns"},
-        first_pass_missing_categories={"Title", "Vesting / Legal"},
-        conflict_types={"apn", "owner_name"},
+    _add_subsection(document, "Routine")
+    _add_bullet_items(
+        document,
+        [_SectionBullet(text=line) for line in decision.routine_items]
+        or [_SectionBullet(text="The remaining open items read as routine closeout or normal confirmation work for this deal stage.")],
     )
-    _add_category_section(
-        document=document,
-        title="Environmental & Geotech",
-        fact_index=fact_index,
-        material_conflicts=material_conflicts,
-        material_issues=material_issues,
-        missing_inputs=missing_inputs,
-        fact_types=(),
-        issue_categories={"Environmental Risks", "Geotechnical Risks", "Flood / Drainage Issues"},
-        omission_categories={"Environmental Risks", "Geotechnical Risks", "Flood / Drainage Issues"},
-        first_pass_missing_categories={"Environmental", "Geotech / Soils"},
-        conflict_types=set(),
+
+
+def _add_material_missing_section(document: Document, synthesis: DealSynthesis) -> None:
+    decision = synthesis.acquisition_judgment.investment_decision
+    _add_section(document, "What Is Missing But Actually Material")
+    material_lines = unique_preserve_order([*decision.material_missing, *decision.material_unsettled_facts])[:5]
+    _add_bullet_items(
+        document,
+        [_SectionBullet(text=line) for line in material_lines]
+        or [_SectionBullet(text="No additional missing item currently rises above the real-risk list for this deal stage.")],
     )
-    _add_category_section(
-        document=document,
-        title="Utilities & Infrastructure",
-        fact_index=fact_index,
-        material_conflicts=material_conflicts,
-        material_issues=material_issues,
-        missing_inputs=missing_inputs,
-        fact_types=(),
-        issue_categories={"Utilities / Infrastructure Issues", "Offsite Obligations"},
-        omission_categories={"Utilities / Infrastructure Issues"},
-        first_pass_missing_categories={"Utilities", "Map / Plat / Improvement Plans"},
-        conflict_types=set(),
+
+
+def _add_overall_package_read_section(
+    document: Document,
+    synthesis: DealSynthesis,
+    material_issues: list[CanonicalIssue],
+) -> None:
+    decision = synthesis.acquisition_judgment.investment_decision
+    confidence_level = underwrite_confidence_level(
+        registry=synthesis.canonical_issue_registry,
+        omission_assessments=synthesis.omission_assessments,
+        contradictions=synthesis.contradictions,
+        document_analyses=synthesis.document_analyses,
+        issues=material_issues,
     )
-    _add_category_section(
-        document=document,
-        title="Fees / Cost Drivers",
-        fact_index=fact_index,
-        material_conflicts=material_conflicts,
-        material_issues=material_issues,
-        missing_inputs=missing_inputs,
-        fact_types=("purchase_price",),
-        issue_categories={"Fee / Exaction Burden", "Budget / Cost Reliability"},
-        omission_categories={"Fee / Exaction Burden", "Budget / Cost Reliability"},
-        first_pass_missing_categories={"Purchase / Sale / Contract"},
-        conflict_types={"purchase_price"},
+    confidence_reason = underwrite_confidence_reason(
+        registry=synthesis.canonical_issue_registry,
+        omission_assessments=synthesis.omission_assessments,
+        contradictions=synthesis.contradictions,
+        document_analyses=synthesis.document_analyses,
+        issues=material_issues,
     )
-    _add_key_risks_section(document, material_issues)
-    _add_missing_information_section(document, result, synthesis, missing_inputs)
-    _add_questions_for_seller_section(document, material_issues, missing_inputs)
+    _add_section(document, "Overall Package Read")
+    _add_bullet_items(
+        document,
+        [
+            _SectionBullet(text=tight_sentence(f"Package read: {synthesis.canonical_issue_registry.package_quality or 'mixed'}. {decision.rationale}", 220)),
+            _SectionBullet(text=tight_sentence(f"Confidence: {confidence_level}. {confidence_reason}", 220)),
+            _SectionBullet(text=tight_sentence(decision.risk_elevation_guardrail or "Cannot conclude high-risk from provided documents without direct blocker evidence.", 220)),
+        ],
+    )
 
 
 def _add_bottom_line_section(
@@ -1568,10 +1575,10 @@ def _location_text(
     fact = _controlling_fact(synthesis, "jurisdiction")
     if _is_reliable_controlling_fact(fact):
         return fact.controlling_value
-    if fact is not None and fact.rejected_alternatives:
-        return "jurisdiction unresolved"
+    if fact is not None:
+        return "Not reliably established from provided documents"
     raw_fact, _ = _best_fact_bundle(fact_index, "jurisdiction")
-    return raw_fact.value if raw_fact is not None else "jurisdiction not clearly established"
+    return raw_fact.value if raw_fact is not None else "Not reliably established from provided documents"
 
 
 def _scale_text(
@@ -1596,17 +1603,6 @@ def _scale_text(
     if _is_reliable_controlling_fact(units):
         parts.append(units.controlling_value)
 
-    unresolved_candidates = unique_preserve_order(
-        alternative
-        for fact in (gross, net, site, lots, units)
-        if fact is not None and not _is_reliable_controlling_fact(fact)
-        for alternative in fact.rejected_alternatives[:3]
-    )[:3]
-
-    if not parts and unresolved_candidates:
-        return f"project scale remains unresolved; most credible readable candidates are {', '.join(unresolved_candidates)}"
-    if parts and unresolved_candidates and any(not _is_reliable_controlling_fact(fact) for fact in (lots, units)):
-        return f"{', '.join(parts)}; unresolved count candidates: {', '.join(unresolved_candidates)}"
     if parts:
         return ", ".join(parts)
 
@@ -1625,7 +1621,7 @@ def _scale_text(
         parts.append(f"{lots_fact.normalized_value} lots")
     if units_fact is not None:
         parts.append(f"{units_fact.normalized_value} units")
-    return ", ".join(parts) if parts else "scale not clearly established"
+    return ", ".join(parts) if parts else "Not reliably established from provided documents"
 
 
 def _product_text(

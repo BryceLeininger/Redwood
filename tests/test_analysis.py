@@ -104,7 +104,9 @@ class AnalysisTests(unittest.TestCase):
         self.assertTrue(any(item.primary_lever for item in synthesis.acquisition_judgment.risk_items))
         self.assertTrue(synthesis.acquisition_judgment.investment_decision.primary_driver)
         self.assertTrue(synthesis.acquisition_judgment.investment_decision.close_requirements)
-        self.assertEqual(synthesis.acquisition_judgment.investment_decision.posture, "Advance Only If")
+        self.assertEqual(synthesis.acquisition_judgment.investment_decision.deal_stage, "approved horizontal land")
+        self.assertEqual(synthesis.acquisition_judgment.investment_decision.posture, "Needs Targeted Confirmation")
+        self.assertEqual(synthesis.acquisition_judgment.investment_decision.true_blockers, [])
         self.assertTrue(any(step.target == "Final Map" for step in synthesis.acquisition_judgment.critical_path))
 
     def test_second_pass_applies_sanity_corrections(self) -> None:
@@ -254,9 +256,47 @@ class AnalysisTests(unittest.TestCase):
         self.assertTrue(any("96 lots" in candidate for candidate in controlling["lot_count"].rejected_alternatives))
 
         scale_summary = _scale_text({}, synthesis)
-        self.assertIn("project scale remains unresolved", scale_summary)
-        candidate_summary = scale_summary.split("are ", 1)[1]
-        self.assertLessEqual(len(candidate_summary.split(", ")), 3)
+        self.assertEqual(scale_summary, "Not reliably established from provided documents")
+
+    def test_finished_lot_stage_does_not_promote_routine_title_items_to_true_blockers(self) -> None:
+        def document_with_chunk(relative_path: str, text: str) -> DocumentRecord:
+            document = _document(relative_path, text)
+            document.chunks = [
+                ExtractedChunk(
+                    document_name=document.title,
+                    chunk_id=f"chunk-{Path(relative_path).stem}",
+                    text=document.normalized_text,
+                    page_number=1,
+                )
+            ]
+            return document
+
+        documents = [
+            document_with_chunk(
+                "recorded_final_map.txt",
+                "Recorded final map for 52 finished lots. Final map recorded and lot closure calculations complete.",
+            ),
+            document_with_chunk(
+                "closure_calculations.txt",
+                "Finished lot closure calculations confirm 52 finished lots and improvement acceptance sequencing.",
+            ),
+            document_with_chunk(
+                "title_commitment.txt",
+                "Current title commitment states title is vested in Finished Lot Seller LLC. Standard easement exceptions remain listed.",
+            ),
+        ]
+
+        synthesis = run_analysis(
+            deal_name="Finished Lot Deal",
+            documents=documents,
+            llm_provider=HeuristicProvider(),
+            logger=logging.getLogger("test-finished-lot-stage"),
+        )
+
+        decision = synthesis.acquisition_judgment.investment_decision
+        self.assertEqual(decision.deal_stage, "finished lot / near-finished lot")
+        self.assertNotEqual(decision.posture, "Do Not Advance")
+        self.assertEqual(decision.true_blockers, [])
 
     def test_normalize_text_repairs_common_mojibake(self) -> None:
         text = "The dealâ€™s geotech scopeâ€”and cost basisâ€”need review."

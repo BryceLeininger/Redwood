@@ -119,6 +119,25 @@ def clip_text(text: str, max_chars: int) -> str:
     return text[: max_chars - 3].rstrip() + "..."
 
 
+def tight_sentence(text: str, max_chars: int) -> str:
+    """Trim text to a complete sentence-like line without trailing ellipses."""
+
+    cleaned = normalize_text(text).replace("\n", " ").strip(" .;:,-")
+    if not cleaned:
+        return ""
+    if len(cleaned) <= max_chars:
+        return cleaned if cleaned.endswith((".", "!", "?")) else f"{cleaned}."
+
+    shortened = cleaned[:max_chars].rsplit(" ", 1)[0].rstrip(" ,;:-")
+    boundary = max(shortened.rfind(". "), shortened.rfind("; "), shortened.rfind(": "))
+    if boundary >= max_chars // 2:
+        shortened = shortened[: boundary + 1].rstrip()
+
+    if shortened.endswith((".", "!", "?")):
+        return shortened
+    return f"{shortened}."
+
+
 def extractive_summary(text: str, *, max_sentences: int = 4) -> str:
     """Build a deterministic summary from the first substantive sentences."""
 
