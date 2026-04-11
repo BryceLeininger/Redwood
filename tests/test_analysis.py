@@ -32,6 +32,7 @@ from land_due_diligence_agent.models import (
     RiskFinding,
     WebResearchResult,
 )
+from land_due_diligence_agent.output.docx_writer import _location_text, _scale_text
 from land_due_diligence_agent.utils.text import normalize_text
 
 
@@ -153,6 +154,109 @@ class AnalysisTests(unittest.TestCase):
         self.assertIn("Example Land Holdings LLC", corrections["owner_name"].corrected_value)
         self.assertIn("zoning", corrections)
         self.assertIn("R-1", corrections["zoning"].corrected_value)
+
+    def test_second_pass_rejects_ocr_fact_fragments_and_docx_summary_uses_controlling_facts(self) -> None:
+        def document_with_chunk(relative_path: str, text: str, *, ocr_used: bool = False) -> DocumentRecord:
+            document = _document(relative_path, text)
+            document.chunks = [
+                ExtractedChunk(
+                    document_name=document.title,
+                    chunk_id=f"chunk-{Path(relative_path).stem}",
+                    text=document.normalized_text,
+                    page_number=1,
+                    ocr_used=ocr_used,
+                )
+            ]
+            return document
+
+        documents = [
+            document_with_chunk(
+                "planning_staff_report.txt",
+                (
+                    "Planning Commission staff report. City of Morgan Hill. "
+                    "Current zoning is R-1. The project proposes 84 lots and 84 single family homes."
+                ),
+            ),
+            document_with_chunk(
+                "ocr_utility_fragment.txt",
+                (
+                    "City of Morgan HillGas And Electric provides utility service. "
+                    "Current zoning laws; land use and development standards apply generally. "
+                    "Owner: Ship has not changed since the time of the disaster."
+                ),
+                ocr_used=True,
+            ),
+            document_with_chunk(
+                "title_report.txt",
+                "Preliminary title report states title is vested in Morgan Hill Development LLC.",
+            ),
+        ]
+
+        synthesis = run_analysis(
+            deal_name="OCR Fragment Deal",
+            documents=documents,
+            llm_provider=HeuristicProvider(),
+            logger=logging.getLogger("test-ocr-fragment-filter"),
+        )
+
+        controlling = {fact.fact_type: fact for fact in synthesis.acquisition_judgment.controlling_facts}
+        self.assertEqual(controlling["jurisdiction"].controlling_value, "Morgan Hill")
+        self.assertIn("R-1", controlling["zoning"].controlling_value)
+        self.assertEqual(controlling["owner_name"].controlling_value, "Morgan Hill Development LLC")
+        self.assertNotIn("Morgan HillGas And Electric", controlling["jurisdiction"].controlling_value)
+        self.assertNotIn("Zoning laws; land use and", controlling["zoning"].controlling_value)
+        self.assertNotIn("Ship has not changed since the time of the disaster", controlling["owner_name"].controlling_value)
+        self.assertEqual(_location_text({}, synthesis), controlling["jurisdiction"].controlling_value)
+
+    def test_second_pass_conflicting_counts_fall_back_and_scale_summary_caps_candidates(self) -> None:
+        def document_with_chunk(relative_path: str, text: str) -> DocumentRecord:
+            document = _document(relative_path, text)
+            document.chunks = [
+                ExtractedChunk(
+                    document_name=document.title,
+                    chunk_id=f"chunk-{Path(relative_path).stem}",
+                    text=document.normalized_text,
+                    page_number=1,
+                )
+            ]
+            return document
+
+        documents = [
+            document_with_chunk(
+                "planning_staff_report_a.txt",
+                (
+                    "Planning Commission staff report. City of Exampleville. "
+                    "Current zoning is R-1. The project proposes 84 lots and 84 single family homes."
+                ),
+            ),
+            document_with_chunk(
+                "planning_staff_report_b.txt",
+                (
+                    "Planning Commission staff report. City of Exampleville. "
+                    "Current zoning is R-1. The project proposes 96 lots and 96 single family homes."
+                ),
+            ),
+        ]
+
+        synthesis = run_analysis(
+            deal_name="Conflicting Count Deal",
+            documents=documents,
+            llm_provider=HeuristicProvider(),
+            logger=logging.getLogger("test-conflicting-count-filter"),
+        )
+
+        controlling = {fact.fact_type: fact for fact in synthesis.acquisition_judgment.controlling_facts}
+        self.assertEqual(controlling["lot_count"].controlling_value, "No reliable controlling value extracted")
+        self.assertEqual(controlling["unit_count"].controlling_value, "No reliable controlling value extracted")
+        self.assertLessEqual(len(controlling["lot_count"].rejected_alternatives), 3)
+        self.assertLessEqual(len(controlling["unit_count"].rejected_alternatives), 3)
+        self.assertTrue(any("84 lots" in candidate for candidate in controlling["lot_count"].rejected_alternatives))
+        self.assertTrue(any("96 lots" in candidate for candidate in controlling["lot_count"].rejected_alternatives))
+
+        scale_summary = _scale_text({}, synthesis)
+        self.assertIn("project scale remains unresolved", scale_summary)
+        candidate_summary = scale_summary.split("are ", 1)[1]
+        self.assertLessEqual(len(candidate_summary.split(", ")), 3)
 
     def test_normalize_text_repairs_common_mojibake(self) -> None:
         text = "The dealâ€™s geotech scopeâ€”and cost basisâ€”need review."

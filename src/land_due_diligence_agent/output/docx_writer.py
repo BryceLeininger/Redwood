@@ -115,6 +115,7 @@ _ACQUISITION_BUCKETS = (
     "Supporting Risks",
     "Noise",
 )
+_NO_RELIABLE_CONTROLLING_VALUE = "No reliable controlling value extracted"
 
 
 @dataclass(slots=True)
@@ -763,9 +764,9 @@ def _add_deal_overview(
 ) -> None:
     _add_section(document, "Deal Overview")
     bullets = [
-        _build_location_bullet(fact_index),
-        _build_scale_bullet(fact_index),
-        _build_product_bullet(result, fact_index),
+        _build_location_bullet(fact_index, synthesis),
+        _build_scale_bullet(fact_index, synthesis),
+        _build_product_bullet(result, fact_index, synthesis),
         _build_price_bullet(fact_index),
         _SectionBullet(
             text=f"Entitlement stage: {clip_text(synthesis.entitlement_status, 180)}",
@@ -930,15 +931,13 @@ def _build_snapshot_bullet(
     synthesis: DealSynthesis,
     fact_index: dict[str, list[FactRecord]],
 ) -> _SectionBullet:
-    location = _location_text(fact_index)
-    scale = _scale_text(fact_index)
-    product = _product_text(result, fact_index)
+    location = _location_text(fact_index, synthesis)
+    scale = _scale_text(fact_index, synthesis)
+    product = _product_text(result, fact_index, synthesis)
     entitlement = clip_text(synthesis.entitlement_status, 140)
     text = f"{result.deal_name}: {location}; {scale}; {product}; entitlement stage currently reads as {entitlement}."
 
-    references: list[str] = []
-    for fact_type in ("jurisdiction", "gross_acreage", "net_acreage", "site_acreage", "lot_count", "unit_count"):
-        references.extend(_reference_labels_for_fact_bundle(fact_index, fact_type))
+    references = _summary_references(fact_index, synthesis)
 
     return _SectionBullet(text=text, references=references[:3])
 
@@ -1375,16 +1374,18 @@ def _bottom_line_deal_text(
     synthesis: DealSynthesis,
     fact_index: dict[str, list[FactRecord]],
 ) -> str:
-    location = _location_text(fact_index)
-    scale = _scale_text(fact_index)
-    product = _product_text(result, fact_index)
+    location = _location_text(fact_index, synthesis)
+    scale = _scale_text(fact_index, synthesis)
+    product = _product_text(result, fact_index, synthesis)
     sentence = f"The package describes {result.deal_name} as {product}"
-    if location != "jurisdiction not clearly established":
+    if location not in {"jurisdiction not clearly established", "jurisdiction unresolved"}:
         sentence += f" in {location}"
-    if scale != "scale not clearly established" and scale not in product:
+    if scale != "scale not clearly established" and not scale.startswith("project scale remains unresolved") and scale not in product:
         sentence += f", with {scale}"
     sentence = sentence.rstrip(".") + "."
-    return clip_text(f"{sentence} Current entitlement read: {clip_text(synthesis.entitlement_status, 140)}.", 280)
+    if scale.startswith("project scale remains unresolved"):
+        sentence += f" {scale}."
+    return clip_text(f"{sentence} Current entitlement read: {clip_text(synthesis.entitlement_status, 140)}.", 320)
 
 
 def _bottom_line_issue_text(issue: CanonicalIssue) -> str:
@@ -1500,31 +1501,52 @@ def _material_conflicts(conflicts: list[ConflictRecord]) -> list[ConflictRecord]
     )
 
 
-def _build_location_bullet(fact_index: dict[str, list[FactRecord]]) -> _SectionBullet:
-    fact, supporting_facts = _best_fact_bundle(fact_index, "jurisdiction")
-    if fact is None:
+def _build_location_bullet(
+    fact_index: dict[str, list[FactRecord]],
+    synthesis: DealSynthesis,
+) -> _SectionBullet:
+    fact = _controlling_fact(synthesis, "jurisdiction")
+    if _is_reliable_controlling_fact(fact):
+        return _SectionBullet(
+            text=f"Location / jurisdiction: {fact.controlling_value}.",
+            references=_citation_labels(fact.citations),
+        )
+    if fact is not None and fact.rejected_alternatives:
+        return _SectionBullet(
+            text=(
+                "Location / jurisdiction unresolved. Most credible readable candidates: "
+                f"{', '.join(fact.rejected_alternatives[:3])}."
+            ),
+            references=_citation_labels(fact.citations),
+        )
+
+    raw_fact, supporting_facts = _best_fact_bundle(fact_index, "jurisdiction")
+    if raw_fact is None:
         return _SectionBullet(text="Location / jurisdiction is not clearly established from the readable package.")
     return _SectionBullet(
-        text=f"Location / jurisdiction: {fact.value}.",
+        text=f"Location / jurisdiction: {raw_fact.value}.",
         references=_reference_labels_from_facts(supporting_facts),
     )
 
 
-def _build_scale_bullet(fact_index: dict[str, list[FactRecord]]) -> _SectionBullet:
+def _build_scale_bullet(
+    fact_index: dict[str, list[FactRecord]],
+    synthesis: DealSynthesis,
+) -> _SectionBullet:
     return _SectionBullet(
-        text=f"Scale: {_scale_text(fact_index)}.",
-        references=_scale_references(fact_index),
+        text=f"Scale: {_scale_text(fact_index, synthesis)}.",
+        references=_scale_references(fact_index, synthesis),
     )
 
 
-def _build_product_bullet(result: DealRunResult, fact_index: dict[str, list[FactRecord]]) -> _SectionBullet:
-    references = [
-        *_reference_labels_for_fact_bundle(fact_index, "lot_count"),
-        *_reference_labels_for_fact_bundle(fact_index, "unit_count"),
-    ]
+def _build_product_bullet(
+    result: DealRunResult,
+    fact_index: dict[str, list[FactRecord]],
+    synthesis: DealSynthesis,
+) -> _SectionBullet:
     return _SectionBullet(
-        text=f"Product: {_product_text(result, fact_index)}.",
-        references=references[:3],
+        text=f"Product: {_product_text(result, fact_index, synthesis)}.",
+        references=_scale_references(fact_index, synthesis),
     )
 
 
@@ -1539,45 +1561,98 @@ def _build_price_bullet(fact_index: dict[str, list[FactRecord]]) -> _SectionBull
     )
 
 
-def _location_text(fact_index: dict[str, list[FactRecord]]) -> str:
-    fact, _ = _best_fact_bundle(fact_index, "jurisdiction")
-    return fact.value if fact is not None else "jurisdiction not clearly established"
+def _location_text(
+    fact_index: dict[str, list[FactRecord]],
+    synthesis: DealSynthesis,
+) -> str:
+    fact = _controlling_fact(synthesis, "jurisdiction")
+    if _is_reliable_controlling_fact(fact):
+        return fact.controlling_value
+    if fact is not None and fact.rejected_alternatives:
+        return "jurisdiction unresolved"
+    raw_fact, _ = _best_fact_bundle(fact_index, "jurisdiction")
+    return raw_fact.value if raw_fact is not None else "jurisdiction not clearly established"
 
 
-def _scale_text(fact_index: dict[str, list[FactRecord]]) -> str:
+def _scale_text(
+    fact_index: dict[str, list[FactRecord]],
+    synthesis: DealSynthesis,
+) -> str:
     parts: list[str] = []
-    gross, _ = _best_fact_bundle(fact_index, "gross_acreage")
-    net, _ = _best_fact_bundle(fact_index, "net_acreage")
-    site, _ = _best_fact_bundle(fact_index, "site_acreage")
-    lots, _ = _best_fact_bundle(fact_index, "lot_count")
-    units, _ = _best_fact_bundle(fact_index, "unit_count")
+    gross = _controlling_fact(synthesis, "gross_acreage")
+    net = _controlling_fact(synthesis, "net_acreage")
+    site = _controlling_fact(synthesis, "site_acreage")
+    lots = _controlling_fact(synthesis, "lot_count")
+    units = _controlling_fact(synthesis, "unit_count")
 
-    if gross is not None:
-        parts.append(f"gross acreage referenced at {gross.normalized_value} acres")
-    if net is not None:
-        parts.append(f"net acreage referenced at {net.normalized_value} acres")
-    elif site is not None and gross is None:
-        parts.append(f"site acreage referenced at {site.normalized_value} acres")
-    if lots is not None:
-        parts.append(f"{lots.normalized_value} lots")
-    if units is not None:
-        parts.append(f"{units.normalized_value} units")
+    if _is_reliable_controlling_fact(gross):
+        parts.append(f"gross acreage {gross.controlling_value}")
+    if _is_reliable_controlling_fact(net):
+        parts.append(f"net acreage {net.controlling_value}")
+    elif _is_reliable_controlling_fact(site) and not _is_reliable_controlling_fact(gross):
+        parts.append(f"site acreage {site.controlling_value}")
+    if _is_reliable_controlling_fact(lots):
+        parts.append(lots.controlling_value)
+    if _is_reliable_controlling_fact(units):
+        parts.append(units.controlling_value)
+
+    unresolved_candidates = unique_preserve_order(
+        alternative
+        for fact in (gross, net, site, lots, units)
+        if fact is not None and not _is_reliable_controlling_fact(fact)
+        for alternative in fact.rejected_alternatives[:3]
+    )[:3]
+
+    if not parts and unresolved_candidates:
+        return f"project scale remains unresolved; most credible readable candidates are {', '.join(unresolved_candidates)}"
+    if parts and unresolved_candidates and any(not _is_reliable_controlling_fact(fact) for fact in (lots, units)):
+        return f"{', '.join(parts)}; unresolved count candidates: {', '.join(unresolved_candidates)}"
+    if parts:
+        return ", ".join(parts)
+
+    gross_fact, _ = _best_fact_bundle(fact_index, "gross_acreage")
+    net_fact, _ = _best_fact_bundle(fact_index, "net_acreage")
+    site_fact, _ = _best_fact_bundle(fact_index, "site_acreage")
+    lots_fact, _ = _best_fact_bundle(fact_index, "lot_count")
+    units_fact, _ = _best_fact_bundle(fact_index, "unit_count")
+    if gross_fact is not None:
+        parts.append(f"gross acreage referenced at {gross_fact.normalized_value} acres")
+    if net_fact is not None:
+        parts.append(f"net acreage referenced at {net_fact.normalized_value} acres")
+    elif site_fact is not None and gross_fact is None:
+        parts.append(f"site acreage referenced at {site_fact.normalized_value} acres")
+    if lots_fact is not None:
+        parts.append(f"{lots_fact.normalized_value} lots")
+    if units_fact is not None:
+        parts.append(f"{units_fact.normalized_value} units")
     return ", ".join(parts) if parts else "scale not clearly established"
 
 
-def _product_text(result: DealRunResult, fact_index: dict[str, list[FactRecord]]) -> str:
+def _product_text(
+    result: DealRunResult,
+    fact_index: dict[str, list[FactRecord]],
+    synthesis: DealSynthesis,
+) -> str:
+    lot_control = _controlling_fact(synthesis, "lot_count")
+    unit_control = _controlling_fact(synthesis, "unit_count")
+    lot_value = _leading_number(lot_control.controlling_value) if _is_reliable_controlling_fact(lot_control) else None
+    unit_value = _leading_number(unit_control.controlling_value) if _is_reliable_controlling_fact(unit_control) else None
     lot_fact, _ = _best_fact_bundle(fact_index, "lot_count")
     unit_fact, _ = _best_fact_bundle(fact_index, "unit_count")
     document_text = " ".join(processed.document.normalized_text.lower() for processed in result.processed_documents[:12])
 
     for label, terms in _PRODUCT_KEYWORDS:
         if any(term in document_text for term in terms):
-            if lot_fact is not None:
-                return f"{label} with {lot_fact.normalized_value} lots referenced"
-            if unit_fact is not None:
-                return f"{label} with {unit_fact.normalized_value} units referenced"
+            if lot_value is not None:
+                return f"{label} with {lot_value} lots referenced"
+            if unit_value is not None:
+                return f"{label} with {unit_value} units referenced"
             return label
 
+    if lot_value is not None:
+        return f"lot-based residential subdivision with {lot_value} lots referenced"
+    if unit_value is not None:
+        return f"unit-based residential project with {unit_value} units referenced"
     if lot_fact is not None:
         return f"lot-based residential subdivision with {lot_fact.normalized_value} lots referenced"
     if unit_fact is not None:
@@ -1585,11 +1660,48 @@ def _product_text(result: DealRunResult, fact_index: dict[str, list[FactRecord]]
     return "product type not clearly established from the readable package"
 
 
-def _scale_references(fact_index: dict[str, list[FactRecord]]) -> list[str]:
-    references: list[str] = []
+def _scale_references(
+    fact_index: dict[str, list[FactRecord]],
+    synthesis: DealSynthesis,
+) -> list[str]:
+    references = _summary_references(fact_index, synthesis)
+    if references:
+        return references[:3]
+
+    fallback_references: list[str] = []
     for fact_type in ("gross_acreage", "net_acreage", "site_acreage", "lot_count", "unit_count"):
-        references.extend(_reference_labels_for_fact_bundle(fact_index, fact_type))
-    return references[:3]
+        fallback_references.extend(_reference_labels_for_fact_bundle(fact_index, fact_type))
+    return fallback_references[:3]
+
+
+def _summary_references(
+    fact_index: dict[str, list[FactRecord]],
+    synthesis: DealSynthesis,
+) -> list[str]:
+    references: list[str] = []
+    for fact_type in ("jurisdiction", "gross_acreage", "net_acreage", "site_acreage", "lot_count", "unit_count"):
+        fact = _controlling_fact(synthesis, fact_type)
+        if fact is not None and fact.citations:
+            references.extend(_citation_labels(fact.citations))
+        else:
+            references.extend(_reference_labels_for_fact_bundle(fact_index, fact_type))
+    return unique_preserve_order(references)
+
+
+def _controlling_fact(synthesis: DealSynthesis, fact_type: str) -> AcquisitionControllingFact | None:
+    for fact in synthesis.acquisition_judgment.controlling_facts:
+        if fact.fact_type == fact_type:
+            return fact
+    return None
+
+
+def _is_reliable_controlling_fact(fact: AcquisitionControllingFact | None) -> bool:
+    return fact is not None and fact.controlling_value != _NO_RELIABLE_CONTROLLING_VALUE
+
+
+def _leading_number(text: str) -> str | None:
+    match = re.search(r"\d+(?:\.\d+)?", text)
+    return match.group(0) if match is not None else None
 
 
 def _fact_section_text(fact: FactRecord, supporting_facts: list[FactRecord]) -> str:

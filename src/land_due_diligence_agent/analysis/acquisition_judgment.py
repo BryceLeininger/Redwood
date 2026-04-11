@@ -2,10 +2,18 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 import re
 
+from land_due_diligence_agent.analysis.fact_validation import (
+    _coerce_float,
+    _coerce_int,
+    _contains_camelcase_artifact,
+    _contains_non_alphanumeric_noise,
+    _generic_text_issues,
+    _looks_like_entity_name,
+)
 from land_due_diligence_agent.analysis.front_end import (
     deal_impact_mechanism_for_issue,
     deal_impact_type_for_issue,
@@ -32,14 +40,20 @@ from land_due_diligence_agent.models import (
 from land_due_diligence_agent.utils.text import clip_text, unique_preserve_order
 
 _FACT_LABELS = {
+    "gross_acreage": "Gross Acreage",
+    "net_acreage": "Net Acreage",
+    "site_acreage": "Site Acreage",
     "lot_count": "Lot Count",
     "unit_count": "Unit Count",
     "entitlement_status": "Entitlement Status",
     "zoning": "Zoning / Land Use",
     "jurisdiction": "Jurisdiction",
     "owner_name": "Ownership",
+    "apn": "APN",
 }
 _CONFIDENCE_RANK = {"low": 1, "medium": 2, "high": 3}
+_NO_RELIABLE_CONTROLLING_VALUE = "No reliable controlling value extracted"
+_MAX_CREDIBLE_CANDIDATES = 3
 _SECONDARY_DRIVER_LIMIT = 2
 _RISK_BUCKETS = (
     "Primary Deal Driver",
@@ -100,11 +114,34 @@ _OWNER_REJECT_TERMS = {
     "north",
     "scale",
 }
+_LEGAL_PROSE_REJECT_TERMS = {
+    "assigns",
+    "grantee",
+    "grantor",
+    "herein",
+    "lease",
+    "leases",
+    "subject to",
+    "successors",
+    "tenant",
+    "undersigned",
+    "whereas",
+}
+_UTILITY_PROVIDER_TERMS = {
+    "electric",
+    "energy",
+    "gas",
+    "power",
+    "telephone",
+    "utility",
+    "water",
+}
 _ZONING_REJECT_TERMS = {
     "approval",
     "condition",
     "conditions",
     "development standards",
+    "laws",
     "sheet",
     "setback",
     "setbacks",
@@ -140,12 +177,80 @@ _REAL_ZONING_CODE_RE = re.compile(
     r")(?:[\s/-][A-Z0-9]{1,4})*$",
     re.IGNORECASE,
 )
+_APN_VALUE_RE = re.compile(r"^(?:[A-Z0-9]{2,6}(?:-[A-Z0-9]{1,6}){1,5}|\d{6,16})$", re.IGNORECASE)
 _PRODUCT_HINTS = (
     ("single-family detached", ("single family detached", "single-family detached", "detached home", "detached homes"), True),
     ("single-family attached / townhome", ("townhome", "town home", "townhouse", "single-family attached"), True),
     ("multifamily", ("multifamily", "multi-family", "apartment", "apartments", "stacked flat"), False),
 )
 _COUNT_SUBCOMPONENT_TERMS = ("building", "phase", "product type", "plan type", "model", "stacked")
+_JURISDICTION_CONTEXT_TERMS = (
+    "city of",
+    "county of",
+    "jurisdiction",
+    "staff report",
+    "planning commission",
+    "city council",
+    "site description",
+    "environmental site assessment",
+    "esa",
+)
+_OWNER_SOURCE_TERMS = (
+    "environmental site assessment",
+    "fee owner",
+    "owner:",
+    "preliminary title",
+    "record owner",
+    "seller:",
+    "seller is",
+    "site description",
+    "title report",
+    "vested in",
+    "vesting",
+)
+_ZONING_CONTEXT_TERMS = (
+    "approval",
+    "conditions of approval",
+    "district",
+    "general plan",
+    "land use",
+    "resolution",
+    "staff report",
+    "zoning",
+    "zone",
+)
+_COUNT_CONTEXT_TERMS = {
+    "lot_count": (
+        "approval",
+        "approved",
+        "lots",
+        "plan cover",
+        "project proposes",
+        "site plan",
+        "staff report",
+        "subdivide",
+        "tentative map",
+        "tract",
+    ),
+    "unit_count": (
+        "approval",
+        "approved",
+        "design review",
+        "dwelling units",
+        "homes",
+        "project proposes",
+        "site plan",
+        "staff report",
+        "tentative map",
+        "total units",
+        "units",
+    ),
+}
+_ACREAGE_CONTEXT_TERMS = {
+    "gross_acreage": ("gross acreage", "gross site", "legal description", "parcel map", "site area", "staff report", "survey", "title"),
+    "net_acreage": ("legal description", "net acreage", "parcel map", "site area", "staff report", "survey", "title"),
+    "site_acreage": ("parcel acreage", "project acreage", "property acreage", "site acreage", "site area", "site plan", "staff report", "survey"),
+}
 _STAGE_RULES = (
     (
         "Final Map",
@@ -220,14 +325,18 @@ _STAGE_RULES = (
     ),
 )
 _DOC_AUTHORITY_TERMS = {
-    "lot_count": (("tentative map", 4), ("staff report", 3), ("tract", 3), ("approval", 2), ("plan", 2)),
-    "unit_count": (("tentative map", 4), ("staff report", 3), ("design review", 3), ("site plan", 2), ("approval", 2)),
-    "zoning": (("resolution", 4), ("conditions", 4), ("staff report", 3), ("approval", 3), ("zoning", 3), ("general plan", 1)),
-    "jurisdiction": (("city of", 4), ("county of", 3), ("staff report", 2), ("title", 1)),
-    "owner_name": (("vested in", 5), ("title", 4), ("preliminary report", 4), ("commitment", 4), ("fee owner", 3), ("owner", 1)),
+    "gross_acreage": (("survey", 6), ("legal description", 5), ("title", 5), ("parcel map", 4), ("tract", 4), ("site plan", 3), ("staff report", 2), ("esa", 1)),
+    "net_acreage": (("survey", 6), ("legal description", 5), ("title", 5), ("parcel map", 4), ("tract", 4), ("site plan", 3), ("staff report", 2), ("esa", 1)),
+    "site_acreage": (("survey", 5), ("parcel map", 4), ("site plan", 4), ("tract", 4), ("title", 3), ("staff report", 2), ("esa", 1)),
+    "lot_count": (("tentative map", 6), ("tract", 5), ("staff report", 5), ("approval", 4), ("resolution", 4), ("site plan", 3), ("cover sheet", 2), ("plan set", 2)),
+    "unit_count": (("tentative map", 6), ("staff report", 5), ("design review", 4), ("approval", 4), ("resolution", 4), ("site plan", 3), ("cover sheet", 2), ("plan set", 2)),
+    "zoning": (("staff report", 6), ("resolution", 5), ("conditions", 5), ("approval", 4), ("zoning", 4), ("general plan", 3), ("title", 2), ("esa", 1), ("site description", 1)),
+    "jurisdiction": (("city of", 6), ("county of", 5), ("staff report", 4), ("approval", 3), ("title", 2), ("esa", 1), ("site description", 1)),
+    "owner_name": (("vested in", 7), ("title", 6), ("preliminary report", 5), ("commitment", 5), ("fee owner", 4), ("record owner", 4), ("seller", 2), ("esa", 1), ("site description", 1)),
+    "apn": (("title", 7), ("preliminary report", 6), ("commitment", 6), ("parcel", 4), ("legal description", 4), ("vesting", 3), ("esa", 1), ("site description", 1)),
     "entitlement_status": (("resolution", 5), ("conditions", 5), ("planning commission", 4), ("city council", 4), ("tentative map", 4), ("approval", 3)),
 }
-_DOC_NEGATIVE_TERMS = (("summary", -2), ("overview", -2), ("matrix", -2), ("tracker", -1), ("draft", -1))
+_DOC_NEGATIVE_TERMS = (("summary", -2), ("overview", -2), ("matrix", -2), ("tracker", -1), ("draft", -1), ("legend", -3), ("general notes", -3), ("utility", -2))
 
 
 @dataclass(slots=True, frozen=True)
@@ -238,6 +347,7 @@ class _FactCandidate:
     relative_path: str
     excerpt: str
     page_number: int | None = None
+    ocr_used: bool = False
     chunk_id: str = ""
     confidence: str = "medium"
     subtype: str = ""
@@ -321,6 +431,63 @@ def _extract_control_fact_candidates(documents: list[DocumentRecord]) -> dict[st
         for chunk in _iter_document_chunks(document):
             text = chunk.text or ""
 
+            for match in re.finditer(
+                r"\b(?:A\.?P\.?N\.?|APN|Assessor(?:'s)? Parcel Number(?:\(s\))?)\s*(?:No\.?|#|:)?\s*([A-Z0-9-]{6,})",
+                text,
+                re.IGNORECASE,
+            ):
+                value = _normalize_apn_value(match.group(1))
+                _append_candidate(
+                    candidates["apn"],
+                    seen,
+                    _FactCandidate(
+                        fact_type="apn",
+                        value=value,
+                        normalized_value=value.lower(),
+                        relative_path=document.relative_path.as_posix(),
+                        excerpt=_excerpt(text, match.start(), match.end()),
+                        page_number=chunk.page_number,
+                        ocr_used=chunk.ocr_used,
+                        chunk_id=chunk.chunk_id,
+                        confidence="high",
+                        quality_note="APN-style parcel number extracted from labeled parcel context.",
+                    ),
+                )
+
+            for fact_type, regex in (
+                (
+                    "gross_acreage",
+                    re.compile(r"\bgross(?:\s+site)?\s+(?:acreage|acres?)\s*(?:is|=|:)?\s*(\d+(?:\.\d+)?)\s*(?:acres?|ac\.?)", re.IGNORECASE),
+                ),
+                (
+                    "net_acreage",
+                    re.compile(r"\bnet\s+(?:acreage|acres?)\s*(?:is|=|:)?\s*(\d+(?:\.\d+)?)\s*(?:acres?|ac\.?)", re.IGNORECASE),
+                ),
+                (
+                    "site_acreage",
+                    re.compile(r"\b(?:site|property|parcel|project)\s+(?:acreage|area)\s*(?:is|=|:)?\s*(\d+(?:\.\d+)?)\s*(?:acres?|ac\.?)", re.IGNORECASE),
+                ),
+            ):
+                for match in regex.finditer(text):
+                    value = _normalize_numeric(match.group(1))
+                    excerpt = _excerpt(text, match.start(), match.end())
+                    _append_candidate(
+                        candidates[fact_type],
+                        seen,
+                        _FactCandidate(
+                            fact_type=fact_type,
+                            value=value,
+                            normalized_value=value,
+                            relative_path=document.relative_path.as_posix(),
+                            excerpt=excerpt,
+                            page_number=chunk.page_number,
+                            ocr_used=chunk.ocr_used,
+                            chunk_id=chunk.chunk_id,
+                            confidence="high" if any(term in excerpt.lower() for term in _ACREAGE_CONTEXT_TERMS[fact_type]) else "medium",
+                            quality_note="Acreage candidate extracted from a labeled site-measurement reference.",
+                        ),
+                    )
+
             for regex in (
                 re.compile(r"\b(\d{1,4})\s+(?:single[- ]family\s+)?lots?\b", re.IGNORECASE),
                 re.compile(r"\b(?:into|subdivide(?:d)?\s+into)\s+(\d{1,4})\s+(?:parcels?|lots?)\b", re.IGNORECASE),
@@ -336,6 +503,7 @@ def _extract_control_fact_candidates(documents: list[DocumentRecord]) -> dict[st
                             relative_path=document.relative_path.as_posix(),
                             excerpt=_excerpt(text, match.start(), match.end()),
                             page_number=chunk.page_number,
+                            ocr_used=chunk.ocr_used,
                             chunk_id=chunk.chunk_id,
                             confidence=_count_candidate_confidence(_excerpt(text, match.start(), match.end())),
                         ),
@@ -359,6 +527,7 @@ def _extract_control_fact_candidates(documents: list[DocumentRecord]) -> dict[st
                             relative_path=document.relative_path.as_posix(),
                             excerpt=excerpt,
                             page_number=chunk.page_number,
+                            ocr_used=chunk.ocr_used,
                             chunk_id=chunk.chunk_id,
                             confidence=_count_candidate_confidence(excerpt),
                         ),
@@ -383,6 +552,7 @@ def _extract_control_fact_candidates(documents: list[DocumentRecord]) -> dict[st
                             relative_path=document.relative_path.as_posix(),
                             excerpt=_excerpt(text, match.start(), match.end()),
                             page_number=chunk.page_number,
+                            ocr_used=chunk.ocr_used,
                             chunk_id=chunk.chunk_id,
                             confidence=confidence,
                             subtype=subtype,
@@ -404,6 +574,7 @@ def _extract_control_fact_candidates(documents: list[DocumentRecord]) -> dict[st
                         relative_path=document.relative_path.as_posix(),
                         excerpt=_excerpt(text, match.start(), match.end()),
                         page_number=chunk.page_number,
+                        ocr_used=chunk.ocr_used,
                         chunk_id=chunk.chunk_id,
                         confidence=confidence,
                         subtype=subtype,
@@ -411,7 +582,7 @@ def _extract_control_fact_candidates(documents: list[DocumentRecord]) -> dict[st
                     ),
                 )
 
-            for match in re.finditer(r"\bCity of\s+([A-Z][A-Za-z .-]{2,40})", text):
+            for match in re.finditer(r"\bCity of\s+([A-Z][A-Za-z .-]{2,40}?)(?=[.;,\n]|$)", text):
                 value = _normalize_named_value(match.group(1))
                 _append_candidate(
                     candidates["jurisdiction"],
@@ -423,12 +594,13 @@ def _extract_control_fact_candidates(documents: list[DocumentRecord]) -> dict[st
                         relative_path=document.relative_path.as_posix(),
                         excerpt=_excerpt(text, match.start(), match.end()),
                         page_number=chunk.page_number,
+                        ocr_used=chunk.ocr_used,
                         chunk_id=chunk.chunk_id,
                         confidence="high",
                         quality_note="City reference is typically the operative land-use jurisdiction.",
                     ),
                 )
-            for match in re.finditer(r"\bCounty of\s+([A-Z][A-Za-z .-]{2,40})", text):
+            for match in re.finditer(r"\bCounty of\s+([A-Z][A-Za-z .-]{2,40}?)(?=[.;,\n]|$)", text):
                 value = _normalize_named_value(match.group(1))
                 _append_candidate(
                     candidates["jurisdiction"],
@@ -440,6 +612,7 @@ def _extract_control_fact_candidates(documents: list[DocumentRecord]) -> dict[st
                         relative_path=document.relative_path.as_posix(),
                         excerpt=_excerpt(text, match.start(), match.end()),
                         page_number=chunk.page_number,
+                        ocr_used=chunk.ocr_used,
                         chunk_id=chunk.chunk_id,
                         confidence="medium",
                         quality_note="County references can be geographic but not always the operative planning jurisdiction.",
@@ -448,7 +621,9 @@ def _extract_control_fact_candidates(documents: list[DocumentRecord]) -> dict[st
 
             for regex in (
                 re.compile(r"\bvested in\s*:?\s*([A-Z][A-Za-z0-9 ,.()&-]{3,100}?)(?=[.;\n]|$)"),
-                re.compile(r"\b(?:fee owner|record owner|owner)\s*(?:is|:)?\s*([A-Z][A-Za-z0-9 ,.()&-]{3,100}?)(?=[.;\n]|$)", re.IGNORECASE),
+                re.compile(r"\bownership\s*(?:is|:)?\s*([A-Z][A-Za-z0-9 ,.()&-]{3,100}?)(?=[.;\n]|$)", re.IGNORECASE),
+                re.compile(r"\b(?:fee owner|record owner|owner)\b\s*(?:is|:)?\s*([A-Z][A-Za-z0-9 ,.()&-]{3,100}?)(?=[.;\n]|$)", re.IGNORECASE),
+                re.compile(r"\b(?:seller)\b\s*(?:is|:)?\s*([A-Z][A-Za-z0-9 ,.()&-]{3,100}?)(?=[.;\n]|$)", re.IGNORECASE),
             ):
                 for match in regex.finditer(text):
                     value = _normalize_named_value(match.group(1))
@@ -465,6 +640,7 @@ def _extract_control_fact_candidates(documents: list[DocumentRecord]) -> dict[st
                             relative_path=document.relative_path.as_posix(),
                             excerpt=_excerpt(text, match.start(), match.end()),
                             page_number=chunk.page_number,
+                            ocr_used=chunk.ocr_used,
                             chunk_id=chunk.chunk_id,
                             confidence=confidence,
                             quality_note=note,
@@ -482,11 +658,15 @@ def _build_controlling_facts(
     entitlement_status: str,
     product: _ProductInference,
 ) -> tuple[list[AcquisitionControllingFact], list[AcquisitionSanityCorrection]]:
+    gross_fact = _build_standard_controlling_fact("gross_acreage", fact_candidates.get("gross_acreage", []))
+    net_fact = _build_standard_controlling_fact("net_acreage", fact_candidates.get("net_acreage", []))
+    site_fact = _build_standard_controlling_fact("site_acreage", fact_candidates.get("site_acreage", []))
     lot_fact = _build_standard_controlling_fact("lot_count", fact_candidates.get("lot_count", []))
     unit_fact = _build_standard_controlling_fact("unit_count", fact_candidates.get("unit_count", []))
     jurisdiction_fact = _build_standard_controlling_fact("jurisdiction", fact_candidates.get("jurisdiction", []))
     owner_fact, owner_correction = _build_owner_controlling_fact(fact_candidates.get("owner_name", []))
     zoning_fact, zoning_correction = _build_zoning_controlling_fact(fact_candidates.get("zoning", []))
+    apn_fact = _build_standard_controlling_fact("apn", fact_candidates.get("apn", []))
     entitlement_fact = _build_entitlement_controlling_fact(
         documents=documents,
         contradictions=contradictions,
@@ -500,12 +680,16 @@ def _build_controlling_facts(
     )
 
     controlling_facts = [
+        gross_fact,
+        net_fact,
+        site_fact,
         lot_fact,
         unit_fact,
         entitlement_fact,
         zoning_fact,
         jurisdiction_fact,
         owner_fact,
+        apn_fact,
     ]
     corrections = [
         correction
@@ -517,27 +701,30 @@ def _build_controlling_facts(
 
 def _build_standard_controlling_fact(fact_type: str, candidates: list[_FactCandidate]) -> AcquisitionControllingFact:
     label = _FACT_LABELS[fact_type]
-    viable = [candidate for candidate in candidates if candidate.confidence != "low"]
+    viable, rejected, support_counts = _review_fact_candidates(fact_type, candidates)
     if not viable:
-        return AcquisitionControllingFact(
-            fact_type=fact_type,
-            label=label,
-            controlling_value="Not cleanly established from the current readable package.",
-            controlling_document="No controlling source isolated",
-            why_it_controls="No medium- or high-confidence candidate was extracted strongly enough to control this lane.",
-            rejected_alternatives=_candidate_alt_labels(candidates),
-            citations=_candidate_citations(candidates[:1]),
+        return _fallback_controlling_fact(
+            fact_type,
+            rejected or candidates,
+            why_it_controls=f"No candidate passed the field-specific sanity filter for {label.lower()}.",
         )
 
-    support_counts = _support_counts(candidates)
-    chosen = sorted(viable, key=lambda item: _fact_sort_key(fact_type, item, support_counts))[0]
+    if _candidate_set_is_unresolved(fact_type, viable, support_counts):
+        return _fallback_controlling_fact(
+            fact_type,
+            viable,
+            why_it_controls=f"Multiple readable {label.lower()} candidates remain credible, but no single value clearly outranks the others.",
+            controlling_document="Conflicting authoritative sources",
+        )
+
+    chosen = viable[0]
     return AcquisitionControllingFact(
         fact_type=fact_type,
         label=label,
         controlling_value=_format_fact_value(fact_type, chosen.value),
         controlling_document=_source_label(chosen.relative_path, chosen.page_number),
         why_it_controls=_why_fact_controls(fact_type, chosen, support_counts.get(chosen.normalized_value, 1)),
-        rejected_alternatives=_candidate_alt_labels(candidates, chosen),
+        rejected_alternatives=_candidate_alt_labels([*viable, *rejected], chosen),
         citations=[_citation_from_candidate(chosen)],
     )
 
@@ -546,8 +733,8 @@ def _build_owner_controlling_fact(
     candidates: list[_FactCandidate],
 ) -> tuple[AcquisitionControllingFact, AcquisitionSanityCorrection | None]:
     fact = _build_standard_controlling_fact("owner_name", candidates)
-    suspicious = [candidate for candidate in candidates if candidate.confidence == "low"]
-    if not suspicious or fact.controlling_value.startswith("Not cleanly established"):
+    _, suspicious, _ = _review_fact_candidates("owner_name", candidates)
+    if not suspicious or not _fact_has_reliable_value(fact):
         return fact, None
 
     prior = suspicious[0]
@@ -565,17 +752,27 @@ def _build_owner_controlling_fact(
 def _build_zoning_controlling_fact(
     candidates: list[_FactCandidate],
 ) -> tuple[AcquisitionControllingFact, AcquisitionSanityCorrection | None]:
-    real_zoning = [candidate for candidate in candidates if candidate.subtype == "zoning" and candidate.confidence != "low"]
-    land_use = [candidate for candidate in candidates if candidate.subtype == "land_use"]
-    noisy = [candidate for candidate in candidates if candidate.confidence == "low" and candidate.subtype != "land_use"]
+    viable, rejected, support_counts = _review_fact_candidates("zoning", candidates)
+    real_zoning = [candidate for candidate in viable if candidate.subtype == "zoning"]
+    land_use = [candidate for candidate in viable if candidate.subtype == "land_use"]
+    noisy = rejected
 
     if real_zoning:
-        support_counts = _support_counts(candidates)
-        chosen = sorted(real_zoning, key=lambda item: _fact_sort_key("zoning", item, support_counts))[0]
+        if _candidate_set_is_unresolved("zoning", real_zoning, support_counts):
+            return (
+                _fallback_controlling_fact(
+                    "zoning",
+                    real_zoning,
+                    why_it_controls="Multiple zoning-style candidates passed validation, but the readable package does not establish one operative district cleanly enough to control.",
+                    controlling_document="Conflicting authoritative sources",
+                ),
+                None,
+            )
+        chosen = real_zoning[0]
         controlling_value = chosen.value
         citations = [_citation_from_candidate(chosen)]
         if land_use:
-            chosen_land_use = sorted(land_use, key=lambda item: _fact_sort_key("zoning", item, support_counts))[0]
+            chosen_land_use = land_use[0]
             if chosen_land_use.normalized_value != chosen.normalized_value:
                 controlling_value = f"Zoning {chosen.value}; land use {chosen_land_use.value}"
                 citations.append(_citation_from_candidate(chosen_land_use))
@@ -585,7 +782,7 @@ def _build_zoning_controlling_fact(
             controlling_value=controlling_value,
             controlling_document=_source_label(chosen.relative_path, chosen.page_number),
             why_it_controls=_why_fact_controls("zoning", chosen, support_counts.get(chosen.normalized_value, 1)),
-            rejected_alternatives=_candidate_alt_labels(candidates, chosen),
+            rejected_alternatives=_candidate_alt_labels([*viable, *rejected], chosen),
             citations=_dedupe_citations(citations)[:3],
         )
         correction = None
@@ -609,7 +806,7 @@ def _build_zoning_controlling_fact(
             controlling_value=f"Actual zoning not cleanly established; most credible land-use read is {chosen.value}",
             controlling_document=_source_label(chosen.relative_path, chosen.page_number),
             why_it_controls="The package yields a credible land-use designation, but not a clean zoning district label. Underwrite the land-use read and treat zoning as still needing confirmation.",
-            rejected_alternatives=_candidate_alt_labels(candidates, chosen),
+            rejected_alternatives=_candidate_alt_labels([*viable, *rejected], chosen),
             citations=[_citation_from_candidate(chosen)],
         )
         correction = AcquisitionSanityCorrection(
@@ -622,16 +819,14 @@ def _build_zoning_controlling_fact(
         )
         return fact, correction
 
-    fact = AcquisitionControllingFact(
-        fact_type="zoning",
-        label=_FACT_LABELS["zoning"],
-        controlling_value="Zoning / land use is not cleanly established from the current readable package.",
-        controlling_document="No controlling source isolated",
-        why_it_controls="The package does not contain a clean zoning or land-use reference strong enough to control underwriting.",
-        rejected_alternatives=_candidate_alt_labels(candidates),
-        citations=_candidate_citations(candidates[:1]),
+    return (
+        _fallback_controlling_fact(
+            "zoning",
+            rejected or candidates,
+            why_it_controls="The package does not contain a zoning or land-use candidate that passes the sanity filter strongly enough to control underwriting.",
+        ),
+        None,
     )
-    return fact, None
 
 
 def _build_entitlement_controlling_fact(
@@ -685,6 +880,9 @@ def _reconcile_unit_count(
     unit_candidates: list[_FactCandidate],
     product: _ProductInference,
 ) -> tuple[AcquisitionControllingFact, AcquisitionSanityCorrection | None]:
+    if not _fact_has_reliable_value(lot_fact):
+        return unit_fact, None
+
     lot_count = _count_from_text(lot_fact.controlling_value)
     unit_count = _count_from_text(unit_fact.controlling_value)
     if not product.one_unit_per_lot or lot_count is None:
@@ -1158,7 +1356,7 @@ def _build_investment_decision(
         what_has_to_be_true.extend(
             f"{fact.label} stays as currently read: {fact.controlling_value}."
             for fact in controlling_facts[:2]
-            if not fact.controlling_value.startswith("Not cleanly established")
+            if _fact_has_reliable_value(fact)
         )
 
     close_requirements = _requirements_for_target(critical_path, "Final Map")
@@ -1173,7 +1371,7 @@ def _build_investment_decision(
     treated_as_solved = [
         f"{fact.label}: {fact.controlling_value}."
         for fact in controlling_facts
-        if not fact.controlling_value.startswith("Not cleanly established") and fact.fact_type not in corrected_fact_types
+        if _fact_has_reliable_value(fact) and fact.fact_type not in corrected_fact_types
     ][:3]
     if not treated_as_solved:
         treated_as_solved = ["No lane should be treated as fully solved beyond the current document-backed descriptors."]
@@ -1299,16 +1497,12 @@ def _classify_zoning_candidate(value: str, *, land_use_only: bool = False) -> tu
 
 def _classify_owner_candidate(value: str) -> tuple[str | None, str]:
     lowered = value.lower()
-    tokens = [token for token in re.split(r"[ ,()&/-]+", value) if token]
-    if len(tokens) < 2:
-        return None, ""
     if any(term in lowered for term in _OWNER_REJECT_TERMS):
         return "low", "The rejected text reads like a plan label or drawing note, not a vesting entity."
-    if any(term in lowered for term in _OWNER_ENTITY_TERMS):
+    if any(term in lowered for term in _LEGAL_PROSE_REJECT_TERMS):
+        return "low", "The rejected text reads like legal prose rather than a vesting or seller name."
+    if any(term in lowered for term in _OWNER_ENTITY_TERMS) or _looks_like_entity_name(value):
         return "high", "The chosen text includes an entity suffix and reads like a vesting party."
-    capitalized = sum(token[:1].isupper() for token in tokens if token[:1].isalpha())
-    if capitalized >= max(2, len(tokens) - 1):
-        return "medium", "The chosen text reads like an owner name even without an entity suffix."
     return None, ""
 
 
@@ -1367,7 +1561,7 @@ def _candidate_alt_labels(candidates: list[_FactCandidate], chosen: _FactCandida
     for candidate in candidates:
         if chosen is not None and candidate.normalized_value == chosen.normalized_value:
             continue
-        labels.append(f"{candidate.value} ({_source_label(candidate.relative_path, candidate.page_number)})")
+        labels.append(f"{_format_fact_value(candidate.fact_type, candidate.value)} ({_source_label(candidate.relative_path, candidate.page_number)})")
     return unique_preserve_order(labels)[:4]
 
 
@@ -1387,6 +1581,7 @@ def _fact_sort_key(fact_type: str, candidate: _FactCandidate, support_counts: di
         -_CONFIDENCE_RANK.get(candidate.confidence, 2),
         -_authority_score(fact_type, candidate),
         -support_counts.get(candidate.normalized_value, 1),
+        1 if candidate.ocr_used else 0,
         candidate.value.lower(),
     )
 
@@ -1494,10 +1689,14 @@ def _citation_for_entitlement_document(document: DocumentRecord) -> Citation:
 
 
 def _format_fact_value(fact_type: str, value: str) -> str:
+    if fact_type in {"gross_acreage", "net_acreage", "site_acreage"}:
+        return f"{value} acres"
     if fact_type == "lot_count":
         return f"{value} lots"
     if fact_type == "unit_count":
         return f"{value} units"
+    if fact_type == "apn":
+        return value.upper()
     return value
 
 
@@ -1523,6 +1722,251 @@ def _normalize_numeric(value: str) -> str:
 
 def _normalize_named_value(value: str) -> str:
     return re.sub(r"\s+", " ", value).strip(" .;,:\"'")
+
+
+def _normalize_apn_value(value: str) -> str:
+    return re.sub(r"[^A-Z0-9-]", "", value.upper())
+
+
+def _review_fact_candidates(
+    fact_type: str,
+    candidates: list[_FactCandidate],
+) -> tuple[list[_FactCandidate], list[_FactCandidate], dict[str, int]]:
+    support_counts = _support_counts(candidates)
+    accepted: list[_FactCandidate] = []
+    rejected: list[_FactCandidate] = []
+    for candidate in candidates:
+        rejection_note = _candidate_rejection_note(fact_type, candidate, support_counts)
+        reviewed = candidate
+        if rejection_note:
+            reviewed = replace(
+                candidate,
+                confidence="low",
+                quality_note=_join_quality_notes(candidate.quality_note, rejection_note),
+            )
+        if reviewed.confidence == "low":
+            rejected.append(reviewed)
+        else:
+            accepted.append(reviewed)
+
+    accepted.sort(key=lambda item: _fact_sort_key(fact_type, item, support_counts))
+    rejected.sort(key=lambda item: _fact_sort_key(fact_type, item, support_counts))
+    return accepted, rejected, support_counts
+
+
+def _candidate_rejection_note(
+    fact_type: str,
+    candidate: _FactCandidate,
+    support_counts: dict[str, int],
+) -> str | None:
+    reasons: list[str] = []
+    if fact_type in {"jurisdiction", "zoning", "owner_name"}:
+        reasons.extend(_generic_text_issues(candidate.value))
+    elif fact_type in {"lot_count", "unit_count", "gross_acreage", "net_acreage", "site_acreage"}:
+        if _contains_non_alphanumeric_noise(candidate.value):
+            reasons.append("contains non-alphanumeric noise")
+
+    if candidate.ocr_used and support_counts.get(candidate.normalized_value, 1) == 1 and _authority_score(fact_type, candidate) <= 0:
+        reasons.append("OCR fragment is not corroborated by a preferred source")
+
+    field_specific = {
+        "gross_acreage": _validate_acreage_candidate,
+        "net_acreage": _validate_acreage_candidate,
+        "site_acreage": _validate_acreage_candidate,
+        "lot_count": _validate_count_candidate,
+        "unit_count": _validate_count_candidate,
+        "zoning": _validate_zoning_candidate,
+        "jurisdiction": _validate_jurisdiction_candidate,
+        "owner_name": _validate_owner_candidate,
+        "apn": _validate_apn_candidate,
+    }.get(fact_type)
+    if field_specific is not None:
+        note = field_specific(fact_type, candidate)
+        if note:
+            reasons.append(note)
+
+    if not reasons:
+        return None
+    return "; ".join(dict.fromkeys(reasons))
+
+
+def _validate_count_candidate(fact_type: str, candidate: _FactCandidate) -> str | None:
+    count = _coerce_int(candidate.normalized_value)
+    if count is None:
+        return f"{_FACT_LABELS[fact_type].lower()} is not numeric"
+    if count < 1 or count > 2000:
+        return f"{_FACT_LABELS[fact_type].lower()} falls outside a realistic project-scale range"
+    if 1900 <= count <= 2100:
+        return f"{_FACT_LABELS[fact_type].lower()} looks more like a year or sheet label than a project total"
+    context = _candidate_context(candidate)
+    if any(term in context for term in _COUNT_SUBCOMPONENT_TERMS):
+        return f"{_FACT_LABELS[fact_type].lower()} looks like a subplan or building count, not the controlling project total"
+    if not any(term in context for term in _COUNT_CONTEXT_TERMS[fact_type]):
+        return f"{_FACT_LABELS[fact_type].lower()} is not anchored to a staff report, map, plan, or approval context"
+    return None
+
+
+def _validate_acreage_candidate(fact_type: str, candidate: _FactCandidate) -> str | None:
+    acreage = _coerce_float(candidate.normalized_value)
+    if acreage is None:
+        return "acreage is not numeric"
+    if acreage < 0.1 or acreage > 500:
+        return "acreage falls outside a realistic site-scale range"
+    context = _candidate_context(candidate)
+    if not any(term in context for term in _ACREAGE_CONTEXT_TERMS[fact_type]):
+        return "acreage is not anchored to a survey, title, map, or site-area context"
+    return None
+
+
+def _validate_jurisdiction_candidate(_fact_type: str, candidate: _FactCandidate) -> str | None:
+    value = candidate.value
+    context = _candidate_context(candidate)
+    tokens = [token for token in re.split(r"[ .-]+", value) if token]
+    if not tokens or len(tokens) > 4:
+        return "jurisdiction does not resemble a city, county, or governing-agency name"
+    if _contains_camelcase_artifact(value):
+        return "jurisdiction includes concatenated OCR text"
+    if any(any(character.isdigit() for character in token) for token in tokens):
+        return "jurisdiction includes numeric noise"
+    lowered_tokens = {token.lower() for token in tokens}
+    if "and" in lowered_tokens or lowered_tokens & _UTILITY_PROVIDER_TERMS:
+        return "jurisdiction reads like a utility/provider string rather than an official place name"
+    if lowered_tokens & _LEGAL_PROSE_REJECT_TERMS:
+        return "jurisdiction reads like legal prose rather than an official place name"
+    if not any(term in context for term in _JURISDICTION_CONTEXT_TERMS):
+        return "jurisdiction is not anchored to an official city, county, or governing-agency context"
+    return None
+
+
+def _validate_zoning_candidate(_fact_type: str, candidate: _FactCandidate) -> str | None:
+    value = candidate.value.strip()
+    lowered = value.lower()
+    context = _candidate_context(candidate)
+    if _contains_camelcase_artifact(value):
+        return "zoning value includes concatenated OCR text"
+    if any(term in lowered for term in _ZONING_REJECT_TERMS):
+        return "zoning value reads like narrative or conditions language rather than a district label"
+    if candidate.subtype == "land_use":
+        if not any(term in lowered for term in _LAND_USE_ONLY_TERMS):
+            return "land-use candidate does not resemble a recognized designation"
+        if not any(term in context for term in _ZONING_CONTEXT_TERMS):
+            return "land-use candidate is not anchored to a planning or entitlement context"
+        return None
+    if len(re.findall(r"[A-Za-z0-9]+", value)) > 4:
+        return "zoning value is too long and reads like a sentence fragment"
+    if not _REAL_ZONING_CODE_RE.fullmatch(value) and not _looks_like_zoning_phrase(value):
+        return "zoning value does not resemble a real district designation"
+    if not any(term in context for term in _ZONING_CONTEXT_TERMS):
+        return "zoning value is not anchored to a zoning, land-use, or entitlement context"
+    return None
+
+
+def _validate_owner_candidate(_fact_type: str, candidate: _FactCandidate) -> str | None:
+    value = candidate.value
+    lowered = value.lower()
+    context = _candidate_context(candidate)
+    if any(term in lowered for term in _OWNER_REJECT_TERMS):
+        return "ownership candidate reads like a plan label or drawing note rather than a real entity"
+    if any(term in lowered for term in _LEGAL_PROSE_REJECT_TERMS):
+        return "ownership candidate reads like legal boilerplate rather than a real entity"
+    if not _looks_like_entity_name(value):
+        return "ownership candidate does not resemble a real person or entity name"
+    if not any(term in context for term in _OWNER_SOURCE_TERMS):
+        return "ownership candidate is not anchored to title, vesting, ESA ownership, or seller context"
+    return None
+
+
+def _validate_apn_candidate(_fact_type: str, candidate: _FactCandidate) -> str | None:
+    if not _APN_VALUE_RE.fullmatch(candidate.value):
+        return "APN does not match a realistic parcel-number pattern"
+    context = _candidate_context(candidate)
+    if not any(term in context for term in ("apn", "assessor", "parcel number", "title", "legal description", "vesting")):
+        return "APN is not anchored to parcel, title, or legal-description context"
+    return None
+
+
+def _candidate_context(candidate: _FactCandidate) -> str:
+    return f"{candidate.excerpt.lower()} {candidate.relative_path.lower()}"
+
+
+def _looks_like_zoning_phrase(value: str) -> bool:
+    tokens = [token for token in re.split(r"[ /-]+", value.lower()) if token]
+    allowed_words = {
+        "agricultural",
+        "agriculture",
+        "commercial",
+        "development",
+        "industrial",
+        "mixed",
+        "planned",
+        "residential",
+        "specific",
+        "use",
+    }
+    if not 1 <= len(tokens) <= 4:
+        return False
+    return all(token in allowed_words or bool(re.fullmatch(r"[a-z]{1,4}\d{0,2}[a-z]?", token)) for token in tokens)
+
+
+def _candidate_set_is_unresolved(
+    fact_type: str,
+    candidates: list[_FactCandidate],
+    support_counts: dict[str, int],
+) -> bool:
+    unique_values = unique_preserve_order(candidate.normalized_value for candidate in candidates)
+    if len(unique_values) < 2:
+        return False
+
+    top = candidates[0]
+    runner_up = next((candidate for candidate in candidates if candidate.normalized_value != top.normalized_value), None)
+    if runner_up is None:
+        return False
+
+    top_support = support_counts.get(top.normalized_value, 1)
+    runner_support = support_counts.get(runner_up.normalized_value, 1)
+    top_authority = _authority_score(fact_type, top)
+    runner_authority = _authority_score(fact_type, runner_up)
+    top_confidence = _CONFIDENCE_RANK.get(top.confidence, 1)
+    runner_confidence = _CONFIDENCE_RANK.get(runner_up.confidence, 1)
+
+    if top_support == runner_support and top_confidence == runner_confidence and abs(top_authority - runner_authority) <= 1:
+        return True
+    if fact_type in {"gross_acreage", "net_acreage", "site_acreage", "lot_count", "unit_count", "apn"} and top_support == runner_support == 1 and abs(top_authority - runner_authority) <= 2:
+        return True
+    return False
+
+
+def _fallback_controlling_fact(
+    fact_type: str,
+    candidates: list[_FactCandidate],
+    *,
+    why_it_controls: str,
+    controlling_document: str = "No controlling source isolated",
+) -> AcquisitionControllingFact:
+    support_counts = _support_counts(candidates)
+    ordered = sorted(candidates, key=lambda item: _fact_sort_key(fact_type, item, support_counts))
+    credible = ordered[:_MAX_CREDIBLE_CANDIDATES]
+    return AcquisitionControllingFact(
+        fact_type=fact_type,
+        label=_FACT_LABELS[fact_type],
+        controlling_value=_NO_RELIABLE_CONTROLLING_VALUE,
+        controlling_document=controlling_document,
+        why_it_controls=why_it_controls,
+        rejected_alternatives=_candidate_alt_labels(credible),
+        citations=_candidate_citations(credible),
+    )
+
+
+def _join_quality_notes(existing: str, new_note: str) -> str:
+    if not existing:
+        return new_note
+    if not new_note:
+        return existing
+    return f"{existing} {new_note}"
+
+
+def _fact_has_reliable_value(fact: AcquisitionControllingFact) -> bool:
+    return fact.controlling_value != _NO_RELIABLE_CONTROLLING_VALUE
 
 
 def _dedupe_citations(citations: list[Citation]) -> list[Citation]:
