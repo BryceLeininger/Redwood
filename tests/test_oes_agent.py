@@ -11,6 +11,7 @@ from unittest.mock import patch
 
 from oes_agent.agent import OESAgent
 from oes_agent.config import DEFAULT_GRAPH_SCOPES, OESConfig
+from oes_agent.models import ApprovalStatus, DraftAttachment
 from oes_agent.scheduler import OESBackgroundScheduler
 from oes_agent.storage import LocalStore
 
@@ -84,6 +85,86 @@ def _write_low_risk_live_inbox(path: Path) -> None:
                 "bodyPreview": "Thank you for confirming the presentation is ready. I appreciate the quick turnaround.",
                 "sourceProvider": "outlook_desktop",
                 "storeId": "store-123",
+            }
+        ],
+    }
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def _write_personalized_history_inbox(path: Path) -> None:
+    payload = {
+        "source": "personalized-history-sample",
+        "messages": [
+            {
+                "id": "history-message-1",
+                "subject": "Harvest Glen update",
+                "from": {
+                    "emailAddress": {
+                        "name": "Holly Cordova",
+                        "address": "holly@example.com",
+                    }
+                },
+                "receivedDateTime": "2026-05-01T16:00:00+00:00",
+                "isRead": False,
+                "categories": [],
+                "bodyPreview": "Sharing the latest Harvest Glen status update for your review.",
+                "sourceProvider": "outlook_desktop",
+                "storeId": "store-456",
+            }
+        ],
+        "sentMessages": [
+            {
+                "id": "sent-1",
+                "subject": "RE: Harvest Glen phase 2",
+                "sentDateTime": "2026-04-28T17:00:00+00:00",
+                "bodyPreview": "Good afternoon Holly,\n\nThank you for the update.\n\nI will review this and follow up shortly.\n\nBest regards,\nBryce",
+                "toRecipients": [
+                    {
+                        "emailAddress": {
+                            "name": "Holly Cordova",
+                            "address": "holly@example.com",
+                        }
+                    }
+                ],
+            },
+            {
+                "id": "sent-2",
+                "subject": "RE: Harvest Glen settlement notes",
+                "sentDateTime": "2026-04-26T17:00:00+00:00",
+                "bodyPreview": "Good afternoon Holly,\n\nThank you for the update.\n\nI will review this and follow up shortly.\n\nBest regards,\nBryce",
+                "toRecipients": [
+                    {
+                        "emailAddress": {
+                            "name": "Holly Cordova",
+                            "address": "holly@example.com",
+                        }
+                    }
+                ],
+            }
+        ],
+    }
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def _write_attachment_ready_inbox(path: Path) -> None:
+    payload = {
+        "source": "attachment-ready-sample",
+        "messages": [
+            {
+                "id": "draft-message-1",
+                "subject": "Budget follow-up",
+                "from": {
+                    "emailAddress": {
+                        "name": "Dean Mills",
+                        "address": "dean@example.com",
+                    }
+                },
+                "receivedDateTime": "2026-05-01T18:00:00+00:00",
+                "isRead": False,
+                "categories": [],
+                "bodyPreview": "Please review the updated budget and let me know what needs to change.",
+                "sourceProvider": "outlook_desktop",
+                "storeId": "store-789",
             }
         ],
     }
@@ -218,6 +299,62 @@ class OESAgentTests(unittest.TestCase):
             self.assertEqual(result["auto_drafted_replies"], 1)
             self.assertEqual(len(dashboard["approvals"]), 0)
             self.assertTrue(dashboard["messages"][0].raw_payload.get("autoDrafted"))
+
+    def test_sent_history_personalizes_priority_and_draft_tone(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            sample_path = root / "history_inbox.json"
+            _write_personalized_history_inbox(sample_path)
+
+            config = _build_test_config(root)
+            store = LocalStore(config.db_path)
+            agent = OESAgent(config=config, store=store)
+
+            result = agent.sync(sample_json_path=sample_path)
+            dashboard = agent.dashboard()
+            message = dashboard["messages"][0]
+
+            self.assertEqual(result["sent_messages_analyzed"], 2)
+            self.assertEqual(message.priority.value, "high")
+            self.assertTrue(message.draft_reply.startswith("Good afternoon Holly,"))
+            self.assertIn("Best regards,\nBryce", message.draft_reply)
+            self.assertEqual(dashboard["response_profile"].get("signature_name"), "Bryce")
+
+    def test_attach_files_to_pending_draft_creates_draft_and_bundles_folder(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            sample_path = root / "attachment_inbox.json"
+            _write_attachment_ready_inbox(sample_path)
+
+            config = _build_test_config(root)
+            store = LocalStore(config.db_path)
+            agent = OESAgent(config=config, store=store)
+            agent.sync(sample_json_path=sample_path)
+            approval = agent.dashboard()["approvals"][0]
+
+            attachments = [
+                DraftAttachment(file_name="budget-notes.txt", content=b"updated notes"),
+                DraftAttachment(file_name="photo.png", content=b"binary", relative_path="site-photos/photo.png"),
+            ]
+
+            with patch("oes_agent.agent.LocalOutlookProvider") as provider_class:
+                provider = provider_class.return_value
+                provider.create_reply_draft.return_value = {
+                    "draft_item_id": "draft-123",
+                    "draft_store_id": "draft-store-123",
+                }
+
+                result = agent.attach_files_to_draft(int(approval.approval_id), attachments)
+
+            updated = store.get_approval(int(approval.approval_id))
+            provider.create_reply_draft.assert_called_once()
+            provider.attach_files_to_draft.assert_called_once()
+            self.assertEqual(result["status"], "executed")
+            self.assertIn("budget-notes.txt", result["attachments_added"])
+            self.assertIn("site-photos.zip", result["attachments_added"])
+            self.assertEqual(updated.status, ApprovalStatus.EXECUTED)
+            self.assertEqual(updated.details.get("draft_item_id"), "draft-123")
+            self.assertEqual(updated.details.get("attachment_count"), 2)
 
 
 if __name__ == "__main__":

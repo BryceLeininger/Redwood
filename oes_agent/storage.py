@@ -276,15 +276,32 @@ class LocalStore:
         return approval
 
     def update_approval_status(self, approval_id: int, status: ApprovalStatus) -> None:
+        self.update_approval(approval_id, status=status)
+
+    def update_approval(
+        self,
+        approval_id: int,
+        status: ApprovalStatus | None = None,
+        details: dict[str, Any] | None = None,
+    ) -> None:
         timestamp = _utc_now()
         with self._connect() as connection:
+            row = connection.execute(
+                "SELECT status, details_json FROM approval_items WHERE approval_id = ?",
+                (approval_id,),
+            ).fetchone()
+            if row is None:
+                return
+
+            next_status = status.value if status is not None else str(row["status"])
+            next_details = details if details is not None else dict(json.loads(str(row["details_json"])))
             connection.execute(
                 """
                 UPDATE approval_items
-                SET status = ?, updated_at = ?
+                SET status = ?, details_json = ?, updated_at = ?
                 WHERE approval_id = ?
                 """,
-                (status.value, timestamp, approval_id),
+                (next_status, json.dumps(next_details), timestamp, approval_id),
             )
 
     def list_approvals(self, status: ApprovalStatus = ApprovalStatus.PENDING) -> list[ApprovalItem]:

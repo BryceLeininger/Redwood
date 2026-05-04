@@ -63,6 +63,14 @@ class MessageSummary:
 
 
 @dataclass(slots=True)
+class DraftAttachment:
+    file_name: str
+    content: bytes
+    content_type: str | None = None
+    relative_path: str | None = None
+
+
+@dataclass(slots=True)
 class CalendarEventSummary:
     event_id: str
     subject: str

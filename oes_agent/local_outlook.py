@@ -5,6 +5,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any, Iterator
 
 try:
@@ -16,6 +17,7 @@ except ImportError:  # pragma: no cover - optional dependency at runtime
 
 
 OL_FOLDER_INBOX = 6
+OL_FOLDER_SENT_MAIL = 5
 OL_FOLDER_CALENDAR = 9
 OL_MAIL_ITEM = 43
 OL_APPOINTMENT_ITEM = 26
@@ -91,6 +93,46 @@ class LocalOutlookProvider:
                 )
             return messages
 
+    def list_sent_messages(self, limit: int = 200) -> list[dict[str, Any]]:
+        with self._session() as namespace:
+            sent_folder = namespace.GetDefaultFolder(OL_FOLDER_SENT_MAIL)
+            items = sent_folder.Items
+            items.Sort("[SentOn]", True)
+
+            messages: list[dict[str, Any]] = []
+            total_items = int(items.Count)
+            index = 1
+            while len(messages) < limit and index <= total_items:
+                item = items.Item(index)
+                index += 1
+                if getattr(item, "Class", None) != OL_MAIL_ITEM:
+                    continue
+
+                recipients = []
+                for recipient in getattr(item, "Recipients", []):
+                    address = str(getattr(recipient, "Address", "") or "")
+                    name = str(getattr(recipient, "Name", "") or address or "Unknown recipient")
+                    recipients.append(
+                        {
+                            "emailAddress": {
+                                "name": name,
+                                "address": address,
+                            }
+                        }
+                    )
+
+                messages.append(
+                    {
+                        "id": str(getattr(item, "EntryID", "")),
+                        "subject": str(getattr(item, "Subject", "") or "(no subject)"),
+                        "sentDateTime": self._to_iso(getattr(item, "SentOn", None)),
+                        "bodyPreview": str(getattr(item, "Body", "") or "")[:1600],
+                        "toRecipients": recipients,
+                        "sourceProvider": "outlook_desktop",
+                    }
+                )
+            return messages
+
     def list_calendar_events(self, days: int = 14, limit: int = 25) -> list[dict[str, Any]]:
         end_window = datetime.now().astimezone() + timedelta(days=days)
         with self._session() as namespace:
@@ -134,7 +176,7 @@ class LocalOutlookProvider:
                 )
             return events
 
-    def create_reply_draft(self, message_id: str, comment: str = "", store_id: str | None = None) -> None:
+    def create_reply_draft(self, message_id: str, comment: str = "", store_id: str | None = None) -> dict[str, str | None]:
         with self._session() as namespace:
             item = namespace.GetItemFromID(message_id, store_id) if store_id else namespace.GetItemFromID(message_id)
             reply = item.Reply()
@@ -142,6 +184,22 @@ class LocalOutlookProvider:
                 original_body = str(getattr(reply, "Body", "") or "")
                 reply.Body = f"{comment}\n\n{original_body}"
             reply.Save()
+            parent = getattr(reply, "Parent", None)
+            draft_store_id = getattr(parent, "StoreID", None)
+            return {
+                "draft_item_id": str(getattr(reply, "EntryID", "") or ""),
+                "draft_store_id": None if draft_store_id is None else str(draft_store_id),
+            }
+
+    def attach_files_to_draft(self, draft_id: str, attachment_paths: list[Path], store_id: str | None = None) -> None:
+        with self._session() as namespace:
+            item = namespace.GetItemFromID(draft_id, store_id) if store_id else namespace.GetItemFromID(draft_id)
+            attachments = getattr(item, "Attachments", None)
+            if attachments is None:
+                raise RuntimeError("The Outlook draft item does not support attachments.")
+            for attachment_path in attachment_paths:
+                attachments.Add(str(attachment_path))
+            item.Save()
 
     def create_task(self, title: str, due_at: str | None = None, body: str = "") -> None:
         with self._session() as namespace:

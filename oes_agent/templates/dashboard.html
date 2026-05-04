@@ -9,13 +9,15 @@
 <body>
     <main class="shell">
         <section class="hero">
-            <div class="hero-copy">
+            <div class="hero-copy hero-copy-compact">
                 <p class="eyebrow">Outlook Email Secretary</p>
-                <h1>Autonomous inbox triage with approval-gated execution.</h1>
-                <p class="lede">OES reads mail, reviews calendar load, drafts responses, and turns action items into reminders without sending or deleting anything unless you approve it.</p>
                 <div class="policy-note">
-                    <p class="policy-title">Approval policy</p>
-                    <p class="policy-copy">Low-risk acknowledgements now auto-create drafts in Outlook. Higher-risk replies, sends, deletes, and task creation stay approval-gated.</p>
+                    <p class="policy-title">Writing profile</p>
+                    {% if response_profile.get('sample_size') %}
+                        <p class="policy-copy">Learned from {{ response_profile.get('sample_size') }} sent emails. Frequent contacts now influence priority, and new drafts follow your usual greeting and sign-off.</p>
+                    {% else %}
+                        <p class="policy-copy">Run a live sync to learn from sent mail and tune draft tone from your own email history.</p>
+                    {% endif %}
                 </div>
             </div>
             <div class="hero-card">
@@ -25,6 +27,7 @@
                     <span class="chip {{ 'chip-live' if ai_configured else 'chip-muted' }}">AI {{ 'ready' if ai_configured else 'heuristic mode' }}</span>
                 </div>
                 <p class="meta">Last sync source: {{ last_sync_source or 'none yet' }}</p>
+                <p class="meta">Priority habits tracked: {{ response_profile.get('priority_contacts', [])|length }} frequent contacts · {{ response_profile.get('priority_subject_keywords', [])|length }} recurring topics.</p>
                 <p class="meta">Auto-sync: {{ 'on' if scheduler_status.enabled else 'off' }} every {{ scheduler_status.interval_minutes }} minutes. Morning summary: {{ 'on' if scheduler_status.morning_summary_enabled else 'off' }} at {{ scheduler_status.morning_summary_time }}.</p>
                 <div class="button-row">
                     <form method="post" action="/actions/sync-sample">
@@ -68,14 +71,77 @@
                 <h2>Morning summary</h2>
                 <span class="count">{{ morning_summary_generated_at or 'not generated' }}</span>
             </div>
-            {% if morning_summary_text %}
-                <pre class="draft-preview summary-preview">{{ morning_summary_text }}</pre>
+            {% if morning_summary_sections %}
+                <div class="summary-stack">
+                    {% for section in morning_summary_sections %}
+                        <article class="summary-block">
+                            {% if section.title %}
+                                <h3>{{ section.title }}</h3>
+                            {% endif %}
+                            {% if section.kind == 'list' %}
+                                <div class="summary-list">{% for item in section['items'] %}<p class="summary-item">{{ item }}</p>{% endfor %}</div>
+                            {% else %}
+                                {% for item in section['items'] %}
+                                    <p class="body-copy">{{ item }}</p>
+                                {% endfor %}
+                            {% endif %}
+                        </article>
+                    {% endfor %}
+                </div>
             {% else %}
                 <p class="empty">No morning summary has been generated yet.</p>
             {% endif %}
         </section>
 
         <section class="grid two-up">
+            <article class="panel">
+                <div class="panel-head">
+                    <h2>Draft workspace</h2>
+                    <span class="count">{{ draft_items|length }}</span>
+                </div>
+                <p class="meta panel-intro">Drop files or folders onto a draft reply. Folder drops are attached as zip bundles so the full tree stays together.</p>
+                {% if draft_items %}
+                    {% for draft in draft_items %}
+                        <div class="list-item draft-item">
+                            <div class="message-head">
+                                <div class="title-stack">
+                                    <p class="list-title">{{ draft.title }}</p>
+                                    <p class="meta">{{ 'Draft ready in Outlook' if draft.status.value == 'executed' else 'Pending draft approval' }}{% if draft.details.get('priority') %} · {{ draft.details.get('priority') }} priority{% endif %}</p>
+                                </div>
+                                <div class="badge-stack">
+                                    <span class="chip {{ 'chip-live' if draft.status.value == 'executed' else 'chip-muted' }}">{{ 'ready' if draft.status.value == 'executed' else 'pending' }}</span>
+                                    {% if draft.details.get('auto_drafted') %}
+                                        <span class="chip chip-live">auto-drafted</span>
+                                    {% endif %}
+                                </div>
+                            </div>
+                            {% if draft.details.get('draft_reply') %}
+                                <pre class="draft-preview">{{ draft.details.get('draft_reply') }}</pre>
+                            {% endif %}
+                            {% if draft.details.get('attachment_names') %}
+                                <p class="meta">Attached: {{ ', '.join(draft.details.get('attachment_names')) }}</p>
+                            {% endif %}
+                            <form class="attachment-form" data-attachment-form method="post" action="/actions/drafts/{{ draft.approval_id }}/attachments" enctype="multipart/form-data">
+                                <div class="dropzone" data-dropzone tabindex="0">
+                                    <p class="dropzone-title">Drop files or folders here</p>
+                                    <p class="meta">Use the buttons below if you prefer browsing. Folder drops are zipped before attachment.</p>
+                                </div>
+                                <div class="attachment-toolbar">
+                                    <input class="attachment-input" type="file" name="attachments" multiple data-file-input title="Choose files for this draft">
+                                    <input class="attachment-input" type="file" name="attachments" multiple webkitdirectory directory data-folder-input title="Choose a folder for this draft">
+                                    <button class="button button-secondary attachment-button" type="button" data-pick-files>Choose files</button>
+                                    <button class="button button-secondary attachment-button" type="button" data-pick-folder>Choose folder</button>
+                                    <button class="button attachment-button" type="submit">Attach to draft</button>
+                                </div>
+                                <ul class="attachment-list" data-attachment-list></ul>
+                            </form>
+                        </div>
+                    {% endfor %}
+                {% else %}
+                    <p class="empty">No draft replies are available yet.</p>
+                {% endif %}
+            </article>
+
             <article class="panel">
                 <div class="panel-head">
                     <h2>Pending approvals</h2>
@@ -190,5 +256,174 @@
             </article>
         </section>
     </main>
+
+    <script>
+        const readAllEntries = (reader) => new Promise((resolve, reject) => {
+            const entries = [];
+            const pump = () => {
+                reader.readEntries((batch) => {
+                    if (!batch.length) {
+                        resolve(entries);
+                        return;
+                    }
+                    entries.push(...batch);
+                    pump();
+                }, reject);
+            };
+            pump();
+        });
+
+        document.querySelectorAll("[data-attachment-form]").forEach((form) => {
+            const dropzone = form.querySelector("[data-dropzone]");
+            const fileInput = form.querySelector("[data-file-input]");
+            const folderInput = form.querySelector("[data-folder-input]");
+            const attachmentList = form.querySelector("[data-attachment-list]");
+            const entries = [];
+
+            const renderEntries = () => {
+                attachmentList.innerHTML = "";
+                if (!entries.length) {
+                    const empty = document.createElement("li");
+                    empty.className = "empty attachment-empty";
+                    empty.textContent = "No files selected yet.";
+                    attachmentList.appendChild(empty);
+                    return;
+                }
+
+                entries.forEach(({ relativePath }) => {
+                    const item = document.createElement("li");
+                    item.textContent = relativePath;
+                    attachmentList.appendChild(item);
+                });
+            };
+
+            const hasEntry = (relativePath, file) => entries.some((entry) => {
+                return entry.relativePath === relativePath && entry.file.name === file.name && entry.file.size === file.size;
+            });
+
+            const addFile = (file, relativePath) => {
+                if (!file) {
+                    return;
+                }
+                const normalized = (relativePath || file.webkitRelativePath || file.name || "attachment").replace(/\\/g, "/");
+                if (hasEntry(normalized, file)) {
+                    return;
+                }
+                entries.push({ file, relativePath: normalized });
+            };
+
+            const addFromFileList = (files) => {
+                Array.from(files || []).forEach((file) => addFile(file, file.webkitRelativePath || file.name));
+                renderEntries();
+            };
+
+            const walkEntry = async (entry, prefix = "") => {
+                if (entry.isFile) {
+                    const file = await new Promise((resolve, reject) => entry.file(resolve, reject));
+                    addFile(file, prefix ? `${prefix}/${file.name}` : file.name);
+                    return;
+                }
+
+                if (entry.isDirectory) {
+                    const reader = entry.createReader();
+                    const children = await readAllEntries(reader);
+                    for (const child of children) {
+                        const nextPrefix = prefix ? `${prefix}/${entry.name}` : entry.name;
+                        await walkEntry(child, nextPrefix);
+                    }
+                }
+            };
+
+            fileInput.addEventListener("change", () => {
+                addFromFileList(fileInput.files);
+                fileInput.value = "";
+            });
+
+            folderInput.addEventListener("change", () => {
+                addFromFileList(folderInput.files);
+                folderInput.value = "";
+            });
+
+            form.querySelector("[data-pick-files]").addEventListener("click", () => fileInput.click());
+            form.querySelector("[data-pick-folder]").addEventListener("click", () => folderInput.click());
+
+            ["dragenter", "dragover"].forEach((eventName) => {
+                dropzone.addEventListener(eventName, (event) => {
+                    event.preventDefault();
+                    dropzone.classList.add("is-active");
+                });
+            });
+
+            ["dragleave", "dragend", "drop"].forEach((eventName) => {
+                dropzone.addEventListener(eventName, (event) => {
+                    event.preventDefault();
+                    dropzone.classList.remove("is-active");
+                });
+            });
+
+            dropzone.addEventListener("drop", async (event) => {
+                const items = Array.from(event.dataTransfer?.items || []);
+                if (!items.length) {
+                    addFromFileList(event.dataTransfer?.files || []);
+                    return;
+                }
+
+                for (const item of items) {
+                    if (typeof item.webkitGetAsEntry === "function") {
+                        const entry = item.webkitGetAsEntry();
+                        if (entry) {
+                            await walkEntry(entry);
+                            continue;
+                        }
+                    }
+
+                    const file = item.getAsFile();
+                    if (file) {
+                        addFile(file, file.name);
+                    }
+                }
+                renderEntries();
+            });
+
+            dropzone.addEventListener("keydown", (event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    fileInput.click();
+                }
+            });
+
+            form.addEventListener("submit", async (event) => {
+                if (!entries.length) {
+                    return;
+                }
+
+                event.preventDefault();
+                const formData = new FormData();
+                entries.forEach(({ file, relativePath }) => {
+                    formData.append("attachments", file, file.name);
+                    formData.append("relative_paths", relativePath);
+                });
+
+                const response = await fetch(form.action, {
+                    method: "POST",
+                    body: formData,
+                });
+
+                if (response.redirected) {
+                    window.location.href = response.url;
+                    return;
+                }
+
+                if (response.ok) {
+                    window.location.reload();
+                    return;
+                }
+
+                alert("OES could not attach those files to the draft.");
+            });
+
+            renderEntries();
+        });
+    </script>
 </body>
 </html>

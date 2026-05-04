@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -96,6 +97,15 @@ class MicrosoftGraphClient:
         response = self._request("GET", "/me/mailFolders/inbox/messages", params=params)
         return list(response.get("value", []))
 
+    def list_sent_messages(self, limit: int = 200) -> list[dict[str, Any]]:
+        params = {
+            "$top": str(limit),
+            "$orderby": "sentDateTime DESC",
+            "$select": "id,subject,sentDateTime,bodyPreview,toRecipients",
+        }
+        response = self._request("GET", "/me/mailFolders/sentitems/messages", params=params)
+        return list(response.get("value", []))
+
     def list_calendar_events(self, days: int = 14, limit: int = 25) -> list[dict[str, Any]]:
         start = datetime.now(timezone.utc)
         end = start + timedelta(days=days)
@@ -115,6 +125,21 @@ class MicrosoftGraphClient:
             f"/me/messages/{message_id}/createReply",
             json_body={"comment": comment},
         )
+
+    def add_attachment_to_message(
+        self,
+        message_id: str,
+        file_name: str,
+        content: bytes,
+        content_type: str | None = None,
+    ) -> dict[str, Any]:
+        payload = {
+            "@odata.type": "#microsoft.graph.fileAttachment",
+            "name": file_name,
+            "contentType": content_type or "application/octet-stream",
+            "contentBytes": base64.b64encode(content).decode("ascii"),
+        }
+        return self._request("POST", f"/me/messages/{message_id}/attachments", json_body=payload)
 
     def send_message(self, message_id: str) -> None:
         self._request("POST", f"/me/messages/{message_id}/send", json_body={})
