@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Outlook Email Secretary</title>
+    <link rel="stylesheet" href="/static/oes.css">
+</head>
+<body>
+    <main class="shell">
+        <section class="hero">
+            <div>
+                <p class="eyebrow">Outlook Email Secretary</p>
+                <h1>Autonomous inbox triage with approval-gated execution.</h1>
+                <p class="lede">OES reads mail, reviews calendar load, drafts responses, and turns action items into reminders without sending or deleting anything unless you approve it.</p>
+            </div>
+            <div class="hero-card">
+                <div class="status-row">
+                    <span class="chip {{ 'chip-live' if graph_configured else 'chip-muted' }}">Graph {{ 'ready' if graph_configured else 'needs setup' }}</span>
+                    <span class="chip {{ 'chip-live' if local_outlook_available else 'chip-muted' }}">Desktop Outlook {{ 'ready' if local_outlook_available else 'unavailable' }}</span>
+                    <span class="chip {{ 'chip-live' if ai_configured else 'chip-muted' }}">AI {{ 'ready' if ai_configured else 'heuristic mode' }}</span>
+                </div>
+                <p class="meta">Last sync source: {{ last_sync_source or 'none yet' }}</p>
+                <div class="button-row">
+                    <form method="post" action="/actions/sync-sample">
+                        <button class="button button-secondary" type="submit">Load sample inbox</button>
+                    </form>
+                    <form method="post" action="/actions/sync-live">
+                        <button class="button" type="submit">Sync live Outlook</button>
+                    </form>
+                </div>
+            </div>
+        </section>
+
+        <section class="grid two-up">
+            <article class="panel">
+                <div class="panel-head">
+                    <h2>Pending approvals</h2>
+                    <span class="count">{{ approvals|length }}</span>
+                </div>
+                {% if approvals %}
+                    {% for approval in approvals %}
+                        <div class="list-item approval-item">
+                            <div>
+                                <p class="list-title">{{ approval.title }}</p>
+                                <p class="meta">{{ approval.action_type.value }} on {{ approval.target_type }} {{ approval.target_id }}</p>
+                                {% if approval.details.get('draft_reply') %}
+                                    <pre class="draft-preview">{{ approval.details.get('draft_reply') }}</pre>
+                                {% elif approval.details.get('notes') %}
+                                    <p class="meta">{{ approval.details.get('notes') }}</p>
+                                {% endif %}
+                            </div>
+                            <div class="button-row compact">
+                                <form method="post" action="/actions/approve/{{ approval.approval_id }}">
+                                    <button class="button" type="submit">Approve</button>
+                                </form>
+                                <form method="post" action="/actions/reject/{{ approval.approval_id }}">
+                                    <button class="button button-secondary" type="submit">Reject</button>
+                                </form>
+                            </div>
+                        </div>
+                    {% endfor %}
+                {% else %}
+                    <p class="empty">No approvals are waiting.</p>
+                {% endif %}
+            </article>
+
+            <article class="panel">
+                <div class="panel-head">
+                    <h2>Reminders</h2>
+                    <span class="count">{{ reminders|length }}</span>
+                </div>
+                <form class="reminder-form" method="post" action="/actions/reminders">
+                    <input name="title" type="text" placeholder="Reminder title" required>
+                    <input name="due_at" type="text" placeholder="Due date/time (optional)">
+                    <textarea name="notes" placeholder="Notes"></textarea>
+                    <button class="button" type="submit">Add reminder</button>
+                </form>
+                {% if reminders %}
+                    {% for reminder in reminders %}
+                        <div class="list-item">
+                            <p class="list-title">{{ reminder.title }}</p>
+                            <p class="meta">{{ reminder.due_at or 'No due date' }} · {{ reminder.source_type }}</p>
+                            {% if reminder.notes %}
+                                <p class="meta">{{ reminder.notes }}</p>
+                            {% endif %}
+                        </div>
+                    {% endfor %}
+                {% else %}
+                    <p class="empty">No reminders are open.</p>
+                {% endif %}
+            </article>
+        </section>
+
+        <section class="grid two-up">
+            <article class="panel">
+                <div class="panel-head">
+                    <h2>Inbox triage</h2>
+                    <span class="count">{{ messages|length }}</span>
+                </div>
+                {% if messages %}
+                    {% for message in messages %}
+                        <div class="list-item message-item">
+                            <div class="message-head">
+                                <p class="list-title">{{ message.subject }}</p>
+                                <span class="priority priority-{{ message.priority.value }}">{{ message.priority.value }}</span>
+                            </div>
+                            <p class="meta">{{ message.sender_name }} · {{ message.sender_email }} · {{ message.received_at }}</p>
+                            <p>{{ message.summary }}</p>
+                            {% if message.action_items %}
+                                <p class="meta">Action items: {{ '; '.join(message.action_items) }}</p>
+                            {% endif %}
+                            {% if message.suggested_actions %}
+                                <p class="meta">Suggested actions: {{ ', '.join(message.suggested_actions) }}</p>
+                            {% endif %}
+                        </div>
+                    {% endfor %}
+                {% else %}
+                    <p class="empty">No messages have been synced yet.</p>
+                {% endif %}
+            </article>
+
+            <article class="panel">
+                <div class="panel-head">
+                    <h2>Upcoming calendar</h2>
+                    <span class="count">{{ events|length }}</span>
+                </div>
+                {% if events %}
+                    {% for event in events %}
+                        <div class="list-item">
+                            <p class="list-title">{{ event.subject }}</p>
+                            <p class="meta">{{ event.start_at }} to {{ event.end_at }}</p>
+                            <p class="meta">{{ event.organizer_name }} · {{ event.location or 'No location' }}</p>
+                            <p>{{ event.summary }}</p>
+                        </div>
+                    {% endfor %}
+                {% else %}
+                    <p class="empty">No calendar events have been synced yet.</p>
+                {% endif %}
+            </article>
+        </section>
+    </main>
+</body>
+</html>

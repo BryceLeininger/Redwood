@@ -1,0 +1,247 @@
+:root {
+    --bg: #f5efe2;
+    --panel: rgba(255, 252, 246, 0.88);
+    --ink: #18222f;
+    --muted: #5c6772;
+    --accent: #0d6b6f;
+    --accent-strong: #084b55;
+    --sand: #d9c4a5;
+    --critical: #8b2f2f;
+    --high: #b16821;
+    --normal: #24627d;
+    --low: #5d7a38;
+    --shadow: 0 18px 40px rgba(24, 34, 47, 0.12);
+}
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    min-height: 100vh;
+    font-family: "Aptos", "Segoe UI", "Trebuchet MS", sans-serif;
+    color: var(--ink);
+    background:
+        radial-gradient(circle at top left, rgba(13, 107, 111, 0.18), transparent 30%),
+        radial-gradient(circle at bottom right, rgba(217, 196, 165, 0.42), transparent 35%),
+        linear-gradient(135deg, #f7f2e8 0%, #eef3f4 100%);
+}
+
+.shell {
+    width: min(1180px, calc(100% - 32px));
+    margin: 0 auto;
+    padding: 24px 0 48px;
+}
+
+.hero,
+.panel {
+    background: var(--panel);
+    -webkit-backdrop-filter: blur(8px);
+    backdrop-filter: blur(8px);
+    border: 1px solid rgba(24, 34, 47, 0.08);
+    box-shadow: var(--shadow);
+}
+
+.hero {
+    display: grid;
+    grid-template-columns: 2fr 1fr;
+    gap: 24px;
+    border-radius: 28px;
+    padding: 28px;
+    margin-bottom: 24px;
+}
+
+.eyebrow {
+    margin: 0 0 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    font-size: 0.78rem;
+    color: var(--accent-strong);
+}
+
+h1,
+h2,
+.list-title {
+    font-family: "Georgia", "Palatino Linotype", serif;
+}
+
+h1 {
+    margin: 0 0 12px;
+    font-size: clamp(2rem, 5vw, 3.3rem);
+    line-height: 1.04;
+}
+
+.lede {
+    max-width: 62ch;
+    color: var(--muted);
+    margin: 0;
+}
+
+.hero-card,
+.panel {
+    border-radius: 24px;
+}
+
+.hero-card {
+    background: linear-gradient(180deg, rgba(13, 107, 111, 0.08), rgba(13, 107, 111, 0.02));
+    padding: 18px;
+}
+
+.status-row,
+.button-row,
+.panel-head,
+.message-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.button-row {
+    flex-wrap: wrap;
+}
+
+.button-row.compact {
+    justify-content: flex-end;
+}
+
+.chip,
+.priority,
+.count {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 999px;
+    padding: 6px 10px;
+    font-size: 0.8rem;
+    font-weight: 700;
+}
+
+.chip-live {
+    background: rgba(13, 107, 111, 0.12);
+    color: var(--accent-strong);
+}
+
+.chip-muted {
+    background: rgba(92, 103, 114, 0.14);
+    color: var(--muted);
+}
+
+.count {
+    background: rgba(24, 34, 47, 0.08);
+}
+
+.button {
+    border: 0;
+    border-radius: 999px;
+    padding: 11px 16px;
+    background: var(--accent);
+    color: white;
+    cursor: pointer;
+    font: inherit;
+}
+
+.button-secondary {
+    background: rgba(24, 34, 47, 0.08);
+    color: var(--ink);
+}
+
+.grid.two-up {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 24px;
+    margin-bottom: 24px;
+}
+
+.panel {
+    padding: 20px;
+}
+
+.panel-head {
+    margin-bottom: 16px;
+}
+
+.panel-head h2 {
+    margin: 0;
+    font-size: 1.35rem;
+}
+
+.list-item {
+    padding: 14px 0;
+    border-top: 1px solid rgba(24, 34, 47, 0.08);
+}
+
+.list-item:first-of-type {
+    border-top: 0;
+    padding-top: 0;
+}
+
+.list-title {
+    margin: 0 0 4px;
+    font-size: 1.05rem;
+}
+
+.meta,
+.empty {
+    color: var(--muted);
+}
+
+.draft-preview {
+    white-space: pre-wrap;
+    background: rgba(24, 34, 47, 0.05);
+    border-radius: 16px;
+    padding: 12px;
+    font-family: "Aptos", "Segoe UI", sans-serif;
+}
+
+.reminder-form {
+    display: grid;
+    gap: 10px;
+    margin-bottom: 16px;
+}
+
+input,
+textarea {
+    width: 100%;
+    border: 1px solid rgba(24, 34, 47, 0.14);
+    border-radius: 16px;
+    padding: 12px 14px;
+    font: inherit;
+    background: rgba(255, 255, 255, 0.72);
+}
+
+textarea {
+    min-height: 88px;
+    resize: vertical;
+}
+
+.priority-critical {
+    background: rgba(139, 47, 47, 0.14);
+    color: var(--critical);
+}
+
+.priority-high {
+    background: rgba(177, 104, 33, 0.16);
+    color: var(--high);
+}
+
+.priority-normal {
+    background: rgba(36, 98, 125, 0.14);
+    color: var(--normal);
+}
+
+.priority-low {
+    background: rgba(93, 122, 56, 0.14);
+    color: var(--low);
+}
+
+@media (max-width: 900px) {
+    .hero,
+    .grid.two-up {
+        grid-template-columns: 1fr;
+    }
+
+    .shell {
+        width: min(100% - 20px, 1180px);
+    }
+}
