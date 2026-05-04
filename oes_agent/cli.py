@@ -108,6 +108,12 @@ def main() -> None:
                 "configured": config.has_ai_config,
                 "model": config.openai_model,
             },
+            "scheduler": {
+                "enabled": config.background_sync_enabled,
+                "interval_minutes": config.background_sync_minutes,
+                "morning_summary_enabled": config.morning_summary_enabled,
+                "morning_summary_time": f"{config.morning_summary_hour:02d}:{config.morning_summary_minute:02d}",
+            },
             "local_outlook": LocalOutlookProvider.detect().to_dict(),
             "pending_approvals": len(store.list_approvals()),
             "open_reminders": len(store.list_reminders()),

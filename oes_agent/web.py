@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Form, Request
@@ -11,6 +12,7 @@ from fastapi.templating import Jinja2Templates
 
 from .agent import OESAgent
 from .config import load_config
+from .scheduler import OESBackgroundScheduler
 from .storage import LocalStore
 
 
@@ -19,9 +21,19 @@ def create_app() -> FastAPI:
     store = LocalStore(config.db_path)
     store.ensure_ready()
     agent = OESAgent(config=config, store=store)
+    scheduler = OESBackgroundScheduler(agent=agent, config=config)
 
-    app = FastAPI(title="Outlook Email Secretary")
-    app.state.agent = agent
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        app.state.agent = agent
+        app.state.scheduler = scheduler
+        scheduler.start()
+        try:
+            yield
+        finally:
+            scheduler.stop()
+
+    app = FastAPI(title="Outlook Email Secretary", lifespan=lifespan)
 
     base_dir = Path(__file__).resolve().parent
     templates = Jinja2Templates(directory=str(base_dir / "templates"))
@@ -42,6 +54,9 @@ def create_app() -> FastAPI:
                 "local_outlook_available": data["local_outlook_available"],
                 "ai_configured": data["ai_configured"],
                 "last_sync_source": data["last_sync_source"],
+                "morning_summary_text": data["morning_summary_text"],
+                "morning_summary_generated_at": data["morning_summary_generated_at"],
+                "scheduler_status": scheduler.status(),
             },
         )
 
@@ -53,6 +68,11 @@ def create_app() -> FastAPI:
     @app.post("/actions/sync-live")
     async def sync_live() -> RedirectResponse:
         agent.sync(sample_json_path=None)
+        return RedirectResponse(url="/", status_code=303)
+
+    @app.post("/actions/generate-summary")
+    async def generate_summary() -> RedirectResponse:
+        agent.generate_morning_summary(force=True)
         return RedirectResponse(url="/", status_code=303)
 
     @app.post("/actions/approve/{approval_id}")

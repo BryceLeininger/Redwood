@@ -26,6 +26,12 @@ def _parse_scopes(raw_value: str | None) -> tuple[str, ...]:
     return tuple(item for item in parts if item)
 
 
+def _parse_bool(raw_value: str | None, default: bool) -> bool:
+    if raw_value is None:
+        return default
+    return raw_value.strip().lower() in {"1", "true", "yes", "on"}
+
+
 @dataclass(frozen=True)
 class OESConfig:
     data_dir: Path
@@ -38,6 +44,11 @@ class OESConfig:
     graph_scopes: tuple[str, ...]
     openai_api_key: str | None
     openai_model: str | None
+    background_sync_enabled: bool
+    background_sync_minutes: int
+    morning_summary_enabled: bool
+    morning_summary_hour: int
+    morning_summary_minute: int
 
     @property
     def has_graph_config(self) -> bool:
@@ -68,4 +79,9 @@ def load_config(env_path: Path | None = None) -> OESConfig:
         graph_scopes=_parse_scopes(os.getenv("OES_GRAPH_SCOPES")),
         openai_api_key=os.getenv("OPENAI_API_KEY"),
         openai_model=os.getenv("OES_OPENAI_MODEL") or "gpt-4.1-mini",
+        background_sync_enabled=_parse_bool(os.getenv("OES_BACKGROUND_SYNC_ENABLED"), True),
+        background_sync_minutes=int(os.getenv("OES_BACKGROUND_SYNC_MINUTES", "15")),
+        morning_summary_enabled=_parse_bool(os.getenv("OES_MORNING_SUMMARY_ENABLED"), True),
+        morning_summary_hour=int(os.getenv("OES_MORNING_SUMMARY_HOUR", "7")),
+        morning_summary_minute=int(os.getenv("OES_MORNING_SUMMARY_MINUTE", "0")),
     )

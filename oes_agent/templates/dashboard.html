@@ -9,10 +9,14 @@
 <body>
     <main class="shell">
         <section class="hero">
-            <div>
+            <div class="hero-copy">
                 <p class="eyebrow">Outlook Email Secretary</p>
                 <h1>Autonomous inbox triage with approval-gated execution.</h1>
                 <p class="lede">OES reads mail, reviews calendar load, drafts responses, and turns action items into reminders without sending or deleting anything unless you approve it.</p>
+                <div class="policy-note">
+                    <p class="policy-title">Approval policy</p>
+                    <p class="policy-copy">Low-risk acknowledgements now auto-create drafts in Outlook. Higher-risk replies, sends, deletes, and task creation stay approval-gated.</p>
+                </div>
             </div>
             <div class="hero-card">
                 <div class="status-row">
@@ -21,6 +25,7 @@
                     <span class="chip {{ 'chip-live' if ai_configured else 'chip-muted' }}">AI {{ 'ready' if ai_configured else 'heuristic mode' }}</span>
                 </div>
                 <p class="meta">Last sync source: {{ last_sync_source or 'none yet' }}</p>
+                <p class="meta">Auto-sync: {{ 'on' if scheduler_status.enabled else 'off' }} every {{ scheduler_status.interval_minutes }} minutes. Morning summary: {{ 'on' if scheduler_status.morning_summary_enabled else 'off' }} at {{ scheduler_status.morning_summary_time }}.</p>
                 <div class="button-row">
                     <form method="post" action="/actions/sync-sample">
                         <button class="button button-secondary" type="submit">Load sample inbox</button>
@@ -28,8 +33,46 @@
                     <form method="post" action="/actions/sync-live">
                         <button class="button" type="submit">Sync live Outlook</button>
                     </form>
+                    <form method="post" action="/actions/generate-summary">
+                        <button class="button button-secondary" type="submit">Generate morning summary</button>
+                    </form>
                 </div>
             </div>
+        </section>
+
+        <section class="metric-strip">
+            <article class="metric-card">
+                <p class="metric-label">Pending approvals</p>
+                <p class="metric-value">{{ approvals|length }}</p>
+            </article>
+            <article class="metric-card">
+                <p class="metric-label">Open reminders</p>
+                <p class="metric-value">{{ reminders|length }}</p>
+            </article>
+            <article class="metric-card">
+                <p class="metric-label">Inbox items</p>
+                <p class="metric-value">{{ messages|length }}</p>
+            </article>
+            <article class="metric-card">
+                <p class="metric-label">Upcoming events</p>
+                <p class="metric-value">{{ events|length }}</p>
+            </article>
+            <article class="metric-card">
+                <p class="metric-label">Auto-drafted</p>
+                <p class="metric-value">{{ auto_drafted_count or 0 }}</p>
+            </article>
+        </section>
+
+        <section class="panel summary-panel">
+            <div class="panel-head">
+                <h2>Morning summary</h2>
+                <span class="count">{{ morning_summary_generated_at or 'not generated' }}</span>
+            </div>
+            {% if morning_summary_text %}
+                <pre class="draft-preview summary-preview">{{ morning_summary_text }}</pre>
+            {% else %}
+                <p class="empty">No morning summary has been generated yet.</p>
+            {% endif %}
         </section>
 
         <section class="grid two-up">
@@ -41,9 +84,9 @@
                 {% if approvals %}
                     {% for approval in approvals %}
                         <div class="list-item approval-item">
-                            <div>
+                            <div class="content-stack">
                                 <p class="list-title">{{ approval.title }}</p>
-                                <p class="meta">{{ approval.action_type.value }} on {{ approval.target_type }} {{ approval.target_id }}</p>
+                                <p class="meta">{{ approval.action_type.value|replace('_', ' ') }}{% if approval.details.get('priority') %} · {{ approval.details.get('priority') }} priority{% endif %}</p>
                                 {% if approval.details.get('draft_reply') %}
                                     <pre class="draft-preview">{{ approval.details.get('draft_reply') }}</pre>
                                 {% elif approval.details.get('notes') %}
@@ -102,11 +145,18 @@
                     {% for message in messages %}
                         <div class="list-item message-item">
                             <div class="message-head">
-                                <p class="list-title">{{ message.subject }}</p>
-                                <span class="priority priority-{{ message.priority.value }}">{{ message.priority.value }}</span>
+                                <div class="title-stack">
+                                    <p class="list-title">{{ message.subject }}</p>
+                                    <p class="meta">{{ message.sender_name }}{% if '@' in message.sender_email %} · {{ message.sender_email }}{% endif %} · {{ message.received_at }}</p>
+                                </div>
+                                <div class="badge-stack">
+                                    <span class="priority priority-{{ message.priority.value }}">{{ message.priority.value }}</span>
+                                    {% if message.raw_payload.get('autoDrafted') %}
+                                        <span class="chip chip-live">auto-drafted</span>
+                                    {% endif %}
+                                </div>
                             </div>
-                            <p class="meta">{{ message.sender_name }} · {{ message.sender_email }} · {{ message.received_at }}</p>
-                            <p>{{ message.summary }}</p>
+                            <p class="body-copy">{{ message.summary }}</p>
                             {% if message.action_items %}
                                 <p class="meta">Action items: {{ '; '.join(message.action_items) }}</p>
                             {% endif %}
@@ -130,8 +180,8 @@
                         <div class="list-item">
                             <p class="list-title">{{ event.subject }}</p>
                             <p class="meta">{{ event.start_at }} to {{ event.end_at }}</p>
-                            <p class="meta">{{ event.organizer_name }} · {{ event.location or 'No location' }}</p>
-                            <p>{{ event.summary }}</p>
+                            <p class="meta">{{ event.organizer_name }}{% if '@' in event.organizer_email %} · {{ event.organizer_email }}{% endif %} · {{ event.location or 'No location' }}</p>
+                            <p class="body-copy">{{ event.summary }}</p>
                         </div>
                     {% endfor %}
                 {% else %}

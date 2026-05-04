@@ -1,16 +1,19 @@
 :root {
-    --bg: #f5efe2;
-    --panel: rgba(255, 252, 246, 0.88);
-    --ink: #18222f;
-    --muted: #5c6772;
-    --accent: #0d6b6f;
-    --accent-strong: #084b55;
-    --sand: #d9c4a5;
-    --critical: #8b2f2f;
-    --high: #b16821;
-    --normal: #24627d;
-    --low: #5d7a38;
-    --shadow: 0 18px 40px rgba(24, 34, 47, 0.12);
+    --bg: #eef3f8;
+    --bg-accent: #dfe8f1;
+    --surface: rgba(255, 255, 255, 0.94);
+    --surface-soft: #f6f8fb;
+    --line: #d7e0ea;
+    --ink: #182330;
+    --muted: #5d6979;
+    --accent: #204d78;
+    --accent-strong: #173a59;
+    --accent-soft: #e8f0f8;
+    --critical: #922f38;
+    --high: #9a611f;
+    --normal: #285a87;
+    --low: #517640;
+    --shadow: 0 18px 45px rgba(23, 58, 89, 0.08);
 }
 
 * {
@@ -20,35 +23,48 @@
 body {
     margin: 0;
     min-height: 100vh;
-    font-family: "Aptos", "Segoe UI", "Trebuchet MS", sans-serif;
+    font-family: "Aptos", "Segoe UI Variable Text", "Segoe UI", sans-serif;
+    font-size: 16px;
+    line-height: 1.5;
     color: var(--ink);
     background:
-        radial-gradient(circle at top left, rgba(13, 107, 111, 0.18), transparent 30%),
-        radial-gradient(circle at bottom right, rgba(217, 196, 165, 0.42), transparent 35%),
-        linear-gradient(135deg, #f7f2e8 0%, #eef3f4 100%);
+        radial-gradient(circle at top left, rgba(32, 77, 120, 0.12), transparent 28%),
+        radial-gradient(circle at bottom right, rgba(223, 232, 241, 0.9), transparent 36%),
+        linear-gradient(145deg, #f7f9fc 0%, var(--bg) 100%);
 }
 
 .shell {
-    width: min(1180px, calc(100% - 32px));
+    width: min(1320px, calc(100% - 32px));
     margin: 0 auto;
-    padding: 24px 0 48px;
+    padding: 32px 0 48px;
 }
 
 .hero,
 .panel {
-    background: var(--panel);
+    background: var(--surface);
     -webkit-backdrop-filter: blur(8px);
     backdrop-filter: blur(8px);
-    border: 1px solid rgba(24, 34, 47, 0.08);
+    border: 1px solid var(--line);
     box-shadow: var(--shadow);
 }
 
 .hero {
     display: grid;
-    grid-template-columns: 2fr 1fr;
+    grid-template-columns: minmax(0, 1.55fr) minmax(320px, 0.95fr);
     gap: 24px;
-    border-radius: 28px;
-    padding: 28px;
+    border-radius: 24px;
+    padding: 30px;
+    margin-bottom: 24px;
+}
+
+.hero-copy,
+.hero-card,
+.content-stack,
+.title-stack {
+    min-width: 0;
+}
+
+.summary-panel {
     margin-bottom: 24px;
 }
 
@@ -56,20 +72,22 @@ body {
     margin: 0 0 8px;
     text-transform: uppercase;
     letter-spacing: 0.14em;
-    font-size: 0.78rem;
+    font-size: 0.75rem;
     color: var(--accent-strong);
 }
 
 h1,
 h2,
 .list-title {
-    font-family: "Georgia", "Palatino Linotype", serif;
+    font-family: "Aptos Display", "Aptos", "Segoe UI Variable Display", "Segoe UI", sans-serif;
 }
 
 h1 {
     margin: 0 0 12px;
-    font-size: clamp(2rem, 5vw, 3.3rem);
-    line-height: 1.04;
+    font-size: clamp(1.9rem, 4vw, 3rem);
+    line-height: 1.1;
+    letter-spacing: -0.02em;
+    max-width: 16ch;
 }
 
 .lede {
@@ -78,14 +96,39 @@ h1 {
     margin: 0;
 }
 
+.policy-note {
+    margin-top: 18px;
+    padding: 16px 18px;
+    border-radius: 18px;
+    background: var(--surface-soft);
+    border: 1px solid var(--line);
+}
+
+.policy-title,
+.metric-label {
+    margin: 0 0 4px;
+    font-size: 0.78rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--accent-strong);
+}
+
+.policy-copy,
+.body-copy {
+    margin: 0;
+    overflow-wrap: anywhere;
+}
+
 .hero-card,
 .panel {
-    border-radius: 24px;
+    border-radius: 20px;
 }
 
 .hero-card {
-    background: linear-gradient(180deg, rgba(13, 107, 111, 0.08), rgba(13, 107, 111, 0.02));
-    padding: 18px;
+    background: linear-gradient(180deg, rgba(32, 77, 120, 0.08), rgba(32, 77, 120, 0.03));
+    padding: 20px;
+    display: grid;
+    gap: 14px;
 }
 
 .status-row,
@@ -93,17 +136,34 @@ h1 {
 .panel-head,
 .message-head {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     justify-content: space-between;
     gap: 12px;
+}
+
+.status-row,
+.panel-head,
+.message-head {
+    flex-wrap: wrap;
 }
 
 .button-row {
     flex-wrap: wrap;
 }
 
+.button-row form {
+    flex: 1 1 180px;
+}
+
 .button-row.compact {
     justify-content: flex-end;
+}
+
+.badge-stack {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 8px;
 }
 
 .chip,
@@ -113,37 +173,69 @@ h1 {
     align-items: center;
     border-radius: 999px;
     padding: 6px 10px;
-    font-size: 0.8rem;
+    font-size: 0.78rem;
     font-weight: 700;
+    border: 1px solid transparent;
+    white-space: nowrap;
 }
 
 .chip-live {
-    background: rgba(13, 107, 111, 0.12);
+    background: var(--accent-soft);
     color: var(--accent-strong);
+    border-color: rgba(32, 77, 120, 0.12);
 }
 
 .chip-muted {
-    background: rgba(92, 103, 114, 0.14);
+    background: rgba(93, 105, 121, 0.12);
     color: var(--muted);
+    border-color: rgba(93, 105, 121, 0.08);
 }
 
 .count {
-    background: rgba(24, 34, 47, 0.08);
+    background: var(--surface-soft);
+    color: var(--accent-strong);
+    border-color: var(--line);
 }
 
 .button {
-    border: 0;
+    width: 100%;
+    border: 1px solid transparent;
     border-radius: 999px;
-    padding: 11px 16px;
+    padding: 12px 16px;
     background: var(--accent);
     color: white;
     cursor: pointer;
     font: inherit;
+    font-weight: 600;
 }
 
 .button-secondary {
-    background: rgba(24, 34, 47, 0.08);
+    background: var(--surface-soft);
     color: var(--ink);
+    border-color: var(--line);
+}
+
+.metric-strip {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 16px;
+    margin-bottom: 24px;
+}
+
+.metric-card {
+    padding: 16px 18px;
+    border-radius: 18px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    box-shadow: var(--shadow);
+}
+
+.metric-value {
+    margin: 0;
+    font-family: "Aptos Display", "Aptos", "Segoe UI Variable Display", "Segoe UI", sans-serif;
+    font-size: clamp(1.4rem, 2.4vw, 2rem);
+    font-weight: 700;
+    color: var(--accent-strong);
 }
 
 .grid.two-up {
@@ -154,7 +246,7 @@ h1 {
 }
 
 .panel {
-    padding: 20px;
+    padding: 22px;
 }
 
 .panel-head {
@@ -163,12 +255,14 @@ h1 {
 
 .panel-head h2 {
     margin: 0;
-    font-size: 1.35rem;
+    font-size: 1.2rem;
+    letter-spacing: -0.01em;
 }
 
 .list-item {
-    padding: 14px 0;
-    border-top: 1px solid rgba(24, 34, 47, 0.08);
+    padding: 16px 0;
+    border-top: 1px solid var(--line);
+    min-width: 0;
 }
 
 .list-item:first-of-type {
@@ -176,38 +270,69 @@ h1 {
     padding-top: 0;
 }
 
+.approval-item {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 16px;
+}
+
 .list-title {
-    margin: 0 0 4px;
-    font-size: 1.05rem;
+    margin: 0;
+    font-size: clamp(1rem, 0.3vw + 0.95rem, 1.14rem);
+    font-weight: 700;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
 }
 
 .meta,
 .empty {
     color: var(--muted);
+    margin: 0;
+    font-size: 0.92rem;
+    line-height: 1.55;
+    overflow-wrap: anywhere;
 }
 
 .draft-preview {
+    margin: 0;
     white-space: pre-wrap;
-    background: rgba(24, 34, 47, 0.05);
+    background: var(--surface-soft);
+    border: 1px solid var(--line);
     border-radius: 16px;
     padding: 12px;
-    font-family: "Aptos", "Segoe UI", sans-serif;
+    font-family: "Aptos", "Segoe UI Variable Text", "Segoe UI", sans-serif;
+    font-size: 0.92rem;
+    line-height: 1.6;
+    overflow-wrap: anywhere;
+    max-height: 11rem;
+    overflow: auto;
+}
+
+.summary-preview {
+    max-height: 16rem;
 }
 
 .reminder-form {
     display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 10px;
     margin-bottom: 16px;
+}
+
+.reminder-form textarea,
+.reminder-form button {
+    grid-column: 1 / -1;
 }
 
 input,
 textarea {
     width: 100%;
-    border: 1px solid rgba(24, 34, 47, 0.14);
+    border: 1px solid var(--line);
     border-radius: 16px;
     padding: 12px 14px;
     font: inherit;
-    background: rgba(255, 255, 255, 0.72);
+    background: var(--surface-soft);
+    color: var(--ink);
 }
 
 textarea {
@@ -216,32 +341,75 @@ textarea {
 }
 
 .priority-critical {
-    background: rgba(139, 47, 47, 0.14);
+    background: rgba(146, 47, 56, 0.12);
     color: var(--critical);
+    border-color: rgba(146, 47, 56, 0.14);
 }
 
 .priority-high {
-    background: rgba(177, 104, 33, 0.16);
+    background: rgba(154, 97, 31, 0.12);
     color: var(--high);
+    border-color: rgba(154, 97, 31, 0.14);
 }
 
 .priority-normal {
-    background: rgba(36, 98, 125, 0.14);
+    background: rgba(40, 90, 135, 0.12);
     color: var(--normal);
+    border-color: rgba(40, 90, 135, 0.14);
 }
 
 .priority-low {
-    background: rgba(93, 122, 56, 0.14);
+    background: rgba(81, 118, 64, 0.12);
     color: var(--low);
+    border-color: rgba(81, 118, 64, 0.14);
 }
 
-@media (max-width: 900px) {
+@media (max-width: 1080px) {
     .hero,
+    .metric-strip,
     .grid.two-up {
         grid-template-columns: 1fr;
     }
 
+    .metric-strip {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .approval-item {
+        grid-template-columns: 1fr;
+    }
+
+    .button-row.compact {
+        justify-content: stretch;
+    }
+
     .shell {
         width: min(100% - 20px, 1180px);
+    }
+}
+
+@media (max-width: 680px) {
+    .shell {
+        width: min(100% - 16px, 1180px);
+        padding-top: 18px;
+    }
+
+    .hero,
+    .panel,
+    .metric-card {
+        padding: 18px;
+    }
+
+    .metric-strip,
+    .reminder-form {
+        grid-template-columns: 1fr;
+    }
+
+    .button-row form {
+        flex-basis: 100%;
+    }
+
+    h1 {
+        max-width: none;
     }
 }

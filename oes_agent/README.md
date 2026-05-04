@@ -12,6 +12,9 @@
 - Turn email action items into reminders
 - Queue Microsoft To Do task creation behind approval
 - Serve a mobile-friendly local dashboard for laptop or phone browser access
+- Background live sync while the dashboard is running
+- Automatic morning summary generation on a schedule
+- No-admin Windows startup automation through the current user's Startup folder
 
 ## Safety Model
 
@@ -41,6 +44,22 @@ If you do not have an app registration, OES can still run against the Outlook de
 - `pywin32` available in the virtual environment
 
 That local-outlook mode is what OES will use automatically for `sync --live` when `OES_GRAPH_CLIENT_ID` is not set.
+
+## Background Automation
+
+OES can keep itself current while the local dashboard is running.
+
+- `OES_BACKGROUND_SYNC_ENABLED=true`
+- `OES_BACKGROUND_SYNC_MINUTES=15`
+- `OES_MORNING_SUMMARY_ENABLED=true`
+- `OES_MORNING_SUMMARY_HOUR=7`
+- `OES_MORNING_SUMMARY_MINUTE=0`
+
+The dashboard process starts a background scheduler that:
+
+- runs live sync on the configured interval
+- generates one morning summary per day after the configured time
+- stores the latest summary in the local OES state database for review from laptop or phone
 
 ## Required Microsoft Graph Setup
 
@@ -114,6 +133,8 @@ Run the dashboard locally:
 python -m oes_agent serve --host 127.0.0.1 --port 8787
 ```
 
+The dashboard starts the background scheduler automatically.
+
 Windows launcher:
 
 ```powershell
@@ -130,6 +151,22 @@ python -m oes_agent serve --host 0.0.0.0 --port 8787
 
 Then open `http://<your-laptop-ip>:8787` on the phone. If Windows Firewall prompts you, allow access on your private network.
 
+## Windows Startup Automation
+
+To launch OES automatically when you sign in, use the included no-admin installer:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install_oes_startup.ps1
+```
+
+This creates a shortcut in your user Startup folder that launches [run_oes_service.bat](c:/Users/Bryce.Leininger/Desktop/Redwood/run_oes_service.bat) through [start_oes_hidden.vbs](c:/Users/Bryce.Leininger/Desktop/Redwood/start_oes_hidden.vbs).
+
+To remove the startup entry:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\remove_oes_startup.ps1
+```
+
 ## Credentials I Still Need From You For Live Mailbox Access
 
 - `OES_GRAPH_CLIENT_ID`
@@ -145,5 +182,6 @@ If you do not have an app registration today, the fastest path is:
 1. Run `python -m oes_agent doctor` to confirm desktop Outlook is available.
 2. Run `python -m oes_agent sync --live` to pull mail and calendar from the local Outlook app.
 3. Run `python -m oes_agent serve --host 0.0.0.0 --port 8787` to use OES from the laptop and phone browser.
+4. Run `powershell -ExecutionPolicy Bypass -File .\install_oes_startup.ps1` to bring OES up automatically when you sign in.
 
 This mode depends on the laptop staying on and Outlook staying signed in, but it avoids the Microsoft Graph app-registration blocker.

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -10,11 +11,44 @@ from .config import OESConfig, load_config
 from .graph_client import GraphConfigurationError, MicrosoftGraphClient
 from .intelligence import OESIntelligence
 from .local_outlook import LocalOutlookProvider
-from .models import ApprovalActionType, ApprovalItem, ApprovalStatus, ReminderItem
+from .models import ApprovalActionType, ApprovalItem, ApprovalStatus, Priority, ReminderItem
 from .storage import LocalStore
 
 
 class OESAgent:
+    AUTO_DRAFT_STATE_KEY_PREFIX = "message_auto_draft:"
+    AUTO_DRAFT_RESTRICTED_TERMS = (
+        "closing",
+        "escrow",
+        "wire",
+        "deposit",
+        "settlement",
+        "invoice",
+        "budget",
+        "contract",
+        "approval",
+        "signature",
+        "urgent",
+        "asap",
+        "lawsuit",
+        "legal",
+    )
+    AUTO_DRAFT_ACKNOWLEDGEMENT_TERMS = (
+        "thank you",
+        "thanks",
+        "appreciate the update",
+        "for your awareness",
+        "for awareness",
+        "announcement",
+        "announcing",
+        "confirmed",
+        "confirmation",
+        "is open",
+        "now open",
+        "good news",
+        "fyi",
+    )
+
     def __init__(self, config: OESConfig | None = None, store: LocalStore | None = None) -> None:
         self.config = config or load_config()
         self.store = store or LocalStore(self.config.db_path)
@@ -48,12 +82,15 @@ class OESAgent:
             raw_messages, raw_events, source = self._load_live_mailbox(mail_limit=mail_limit, calendar_days=calendar_days)
 
         approvals_created = 0
+        auto_drafted_replies = 0
         reminders_created = 0
 
         for raw_message in raw_messages:
             message = self.intelligence.analyze_message(raw_message)
+            queued_approvals, auto_drafts = self._queue_message_actions(message)
+            approvals_created += queued_approvals
+            auto_drafted_replies += auto_drafts
             self.store.upsert_message(message)
-            approvals_created += self._queue_message_actions(message)
             reminders_created += self._queue_message_reminders(message)
 
         for raw_event in raw_events:
@@ -69,6 +106,7 @@ class OESAgent:
             "pending_approvals": len(self.store.list_approvals()),
             "open_reminders": len(self.store.list_reminders()),
             "approvals_created": approvals_created,
+            "auto_drafted_replies": auto_drafted_replies,
             "reminders_created": reminders_created,
         }
 
@@ -159,16 +197,66 @@ class OESAgent:
         self.store.add_reminder(reminder)
         return {"reminder_id": reminder.reminder_id, "status": reminder.status.value}
 
-    def dashboard(self) -> dict[str, Any]:
+    def generate_morning_summary(self, force: bool = False, target_date: date | None = None) -> dict[str, Any]:
+        summary_date = (target_date or datetime.now().astimezone().date()).isoformat()
+        if not force and self.store.get_sync_state("morning_summary_for_date") == summary_date:
+            return {
+                "generated": False,
+                "summary_date": summary_date,
+                "summary_text": self.store.get_sync_state("morning_summary_text") or "",
+            }
+
+        messages = self.store.list_messages(limit=5)
+        events = self.store.list_events(limit=5)
+        approvals = self.store.list_approvals()
+        reminders = self.store.list_reminders()
+
+        message_lines = [
+            f"- {message.priority.value.upper()}: {message.subject} ({message.sender_name})"
+            for message in messages[:3]
+        ]
+        event_lines = [
+            f"- {event.start_at}: {event.subject}"
+            for event in events[:3]
+        ]
+        reminder_lines = [
+            f"- {reminder.title}"
+            for reminder in reminders[:3]
+        ]
+
+        summary_parts = [f"Morning summary for {summary_date}."]
+        summary_parts.append(f"Pending approvals: {len(approvals)}. Open reminders: {len(reminders)}.")
+        if message_lines:
+            summary_parts.append("Top inbox items:\n" + "\n".join(message_lines))
+        if event_lines:
+            summary_parts.append("Upcoming calendar:\n" + "\n".join(event_lines))
+        if reminder_lines:
+            summary_parts.append("Priority reminders:\n" + "\n".join(reminder_lines))
+
+        summary_text = "\n\n".join(summary_parts)
+        self.store.set_sync_state("morning_summary_for_date", summary_date)
+        self.store.set_sync_state("morning_summary_text", summary_text)
+        self.store.set_sync_state("morning_summary_generated_at", datetime.now().astimezone().isoformat())
         return {
-            "messages": self.store.list_messages(),
+            "generated": True,
+            "summary_date": summary_date,
+            "summary_text": summary_text,
+        }
+
+    def dashboard(self) -> dict[str, Any]:
+        messages = self.store.list_messages()
+        return {
+            "messages": messages,
             "events": self.store.list_events(),
             "approvals": self.store.list_approvals(),
             "reminders": self.store.list_reminders(),
+            "auto_drafted_count": sum(1 for message in messages if message.raw_payload.get("autoDrafted")),
             "graph_configured": self.config.has_graph_config,
             "local_outlook_available": self._local_outlook_status()["available"],
             "ai_configured": self.config.has_ai_config,
             "last_sync_source": self.store.get_sync_state("last_sync_source"),
+            "morning_summary_text": self.store.get_sync_state("morning_summary_text"),
+            "morning_summary_generated_at": self.store.get_sync_state("morning_summary_generated_at"),
         }
 
     def _graph_client(self) -> MicrosoftGraphClient:
@@ -188,6 +276,10 @@ class OESAgent:
                 raw_events = client.list_calendar_events(days=calendar_days)
             finally:
                 client.close()
+            for raw_message in raw_messages:
+                raw_message.setdefault("sourceProvider", "graph")
+            for raw_event in raw_events:
+                raw_event.setdefault("sourceProvider", "graph")
             return raw_messages, raw_events, "graph"
 
         outlook_status = LocalOutlookProvider.detect()
@@ -208,9 +300,23 @@ class OESAgent:
         payload = json.loads(sample_json_path.read_text(encoding="utf-8"))
         return list(payload.get("messages", []))
 
-    def _queue_message_actions(self, message) -> int:
+    def _queue_message_actions(self, message) -> tuple[int, int]:
         created = 0
-        if message.draft_reply and not self.store.has_pending_approval(ApprovalActionType.DRAFT_REPLY, message.message_id):
+        auto_drafted = 0
+        auto_draft_state_key = f"{self.AUTO_DRAFT_STATE_KEY_PREFIX}{message.message_id}"
+        if self.store.get_sync_state(auto_draft_state_key):
+            message.raw_payload["autoDrafted"] = True
+            message.raw_payload["oesActionMode"] = "auto_drafted"
+
+        if message.draft_reply and not message.raw_payload.get("autoDrafted") and self._should_auto_draft(message):
+            if self._auto_draft_message(message):
+                self.store.set_sync_state(auto_draft_state_key, datetime.now().astimezone().isoformat())
+                message.raw_payload["autoDrafted"] = True
+                message.raw_payload["oesActionMode"] = "auto_drafted"
+                auto_drafted += 1
+
+        if message.draft_reply and not message.raw_payload.get("autoDrafted") and not self.store.has_pending_approval(ApprovalActionType.DRAFT_REPLY, message.message_id):
+            message.raw_payload["oesActionMode"] = "approval_required"
             approval = ApprovalItem(
                 action_type=ApprovalActionType.DRAFT_REPLY,
                 target_type="message",
@@ -228,6 +334,7 @@ class OESAgent:
             created += 1
 
         if message.action_items and not self.store.has_pending_approval(ApprovalActionType.CREATE_TASK, message.message_id):
+            message.raw_payload["oesActionMode"] = "approval_required"
             task_title = f"Task from email: {message.subject}"
             approval = ApprovalItem(
                 action_type=ApprovalActionType.CREATE_TASK,
@@ -244,7 +351,68 @@ class OESAgent:
             )
             self.store.add_approval(approval)
             created += 1
-        return created
+        return created, auto_drafted
+
+    def _should_auto_draft(self, message) -> bool:
+        if not message.draft_reply:
+            return False
+        if message.raw_payload.get("sourceProvider") not in {"graph", "outlook_desktop"}:
+            return False
+        if message.action_items:
+            return False
+
+        text = f"{message.subject}\n{message.body_preview}".lower()
+        if any(term in text for term in self.AUTO_DRAFT_RESTRICTED_TERMS):
+            return False
+
+        if message.priority in {Priority.NORMAL, Priority.LOW} and message.triage_label == "review":
+            return True
+
+        if any(term in text for term in self.AUTO_DRAFT_ACKNOWLEDGEMENT_TERMS):
+            return True
+
+        subject = message.subject.lower().strip()
+        return subject.startswith(("fw:", "fwd:")) and any(term in text for term in ("announcement", "open", "confirmed", "fyi"))
+
+    def _auto_draft_message(self, message) -> bool:
+        source_provider = message.raw_payload.get("sourceProvider")
+        store_id = message.raw_payload.get("storeId")
+
+        if source_provider == "graph":
+            if not self.config.has_graph_config:
+                return False
+            client = self._graph_client()
+            try:
+                client.create_reply_draft(message.message_id, comment=message.draft_reply)
+            finally:
+                client.close()
+        elif source_provider == "outlook_desktop":
+            provider = self._local_outlook_provider()
+            provider.create_reply_draft(
+                message.message_id,
+                comment=message.draft_reply,
+                store_id=None if store_id is None else str(store_id),
+            )
+        else:
+            return False
+
+        approval = ApprovalItem(
+            action_type=ApprovalActionType.DRAFT_REPLY,
+            target_type="message",
+            target_id=message.message_id,
+            title=f"Auto-drafted reply: {message.subject}",
+            details={
+                "subject": message.subject,
+                "draft_reply": message.draft_reply,
+                "priority": message.priority.value,
+                "store_id": store_id,
+                "source_provider": source_provider,
+                "auto_drafted": True,
+            },
+            status=ApprovalStatus.EXECUTED,
+        )
+        self.store.add_approval(approval)
+        return True
 
     def _queue_message_reminders(self, message) -> int:
         created = 0
